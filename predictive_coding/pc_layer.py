@@ -22,8 +22,12 @@ class PCLayer(nn.Module):
         self._S = S
         self._M = M
         self._is_sample_x = False
+        self._energy = None     
+        self._energy_per_datapoint = None    
         self.is_holding_error = is_holding_error
         self.is_keep_energy_per_datapoint = is_keep_energy_per_datapoint
+
+        self.clear_energy() 
 
     @property
     def x(self) -> nn.Parameter:
@@ -62,3 +66,17 @@ class PCLayer(nn.Module):
         self._is_sample_x = value
         if value:
             self._x = None
+    
+    @property
+    def energy(self)-> torch.Tensor:             
+        """ Get energy held by PCLayer"""     
+        return self._energy
+    
+    @property
+    def energy_per_datapoint(self)-> torch.Tensor:             
+        return self._energy_per_datapoint if self.is_keep_energy_per_datapoint else None
+    
+    def clear_energy(self):            
+        """Resets the stored energy values."""
+        self._energy = None
+        self._energy_per_datapoint = None
