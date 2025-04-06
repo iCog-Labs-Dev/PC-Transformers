@@ -19,6 +19,9 @@ class PCLayer(nn.Module):
         assert callable(self.sample_x_fn)
 
         self._x = None
+        self._S = S
+        self._M = M
+        self._is_sample_x = False
         self.is_holding_error = is_holding_error
         self.is_keep_energy_per_datapoint = is_keep_energy_per_datapoint
 
@@ -47,3 +50,15 @@ class PCLayer(nn.Module):
             assert isinstance(value, torch.Tensor)
         self._M = value
 
+    @property
+    def is_sample_x(self)-> bool:          
+        """ Returns if x should be sampled. """
+        return self._is_sample_x
+
+    @is_sample_x.setter
+    def is_sample_x(self, value: bool)-> None:         
+        """ Sets if x should be sampled. """
+        assert isinstance(value, bool)
+        self._is_sample_x = value
+        if value:
+            self._x = None
