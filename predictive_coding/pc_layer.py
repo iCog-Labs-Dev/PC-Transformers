@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import warnings
 from typing import Callable
 
 class PCLayer(nn.Module):
@@ -74,9 +75,44 @@ class PCLayer(nn.Module):
     
     @property
     def energy_per_datapoint(self)-> torch.Tensor:             
-        return self._energy_per_datapoint if self.is_keep_energy_per_datapoint else None
+        assert self.is_keep_energy_per_datapoint, "Enable is_keep_energy_per_datapoint."
+        return self._energy_per_datapoint
     
     def clear_energy(self):            
         """Resets the stored energy values."""
         self._energy = None
         self._energy_per_datapoint = None
+    
+    def forward(self, mu: torch.Tensor, energy_fn_additional_inputs: dict = None) -> torch.Tensor:
+        energy_fn_additional_inputs = energy_fn_additional_inputs or {}
+
+        if not self.training:
+            return mu
+
+        if not self.is_sample_x and (self._x is None or mu.device != self._x.device or mu.size() != self._x.size()):
+            warnings.warn(f"Auto-setting is_sample_x=True (mu.shape={mu.shape}, x.shape={getattr(self._x, 'shape', None)})", RuntimeWarning)
+            self.is_sample_x = True
+
+        if self.is_sample_x:
+            self._x = nn.Parameter(self.sample_x_fn({"mu": mu, "x": self._x}).to(mu.device), requires_grad=True)
+            self.is_sample_x = False
+
+        x = self._x
+        if self.S is not None:
+            assert mu.dim() == x.dim() == 2
+            mu = mu.unsqueeze(2).expand(-1, -1, x.size(1))
+            x = x.unsqueeze(1).expand(-1, mu.size(1), -1)
+
+        energy = self.energy_fn({"mu": mu, "x": x, **energy_fn_additional_inputs})
+        scale = self.S if self.S is not None else self.M
+        if scale is not None:
+            energy *= scale.unsqueeze(0)
+
+        self._energy = energy.sum()
+        if self.is_keep_energy_per_datapoint:
+            self._energy_per_datapoint = energy.sum(dim=tuple(range(1, energy.dim())))
+                
+        if self.is_holding_error:
+            self.error = (self._x.detach() - mu).clone()
+
+        return self._x
