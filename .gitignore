@@ -1,4 +1,4 @@
 pc_transformer_venv/
 
-/tokenizer/*.pkl
-/tokenizer/*.json
+/tokenizer/tokenizer/*.pkl
+/tokenizer/tokenizer.json
