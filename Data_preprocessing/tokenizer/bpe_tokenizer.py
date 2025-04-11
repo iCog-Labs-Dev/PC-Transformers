@@ -1,7 +1,7 @@
 import os
 import pickle
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers
-from config import Config
+from Data_preprocessing.config import Config
 
 
 class BPE:

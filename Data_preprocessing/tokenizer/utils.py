@@ -1,7 +1,7 @@
 import os 
 import torch
 import numpy as np
-from config import Config
+from Data_preprocessing.config import Config
 import pickle
 from torch.utils.data import Dataset, DataLoader
 
