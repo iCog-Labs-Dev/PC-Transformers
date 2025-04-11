@@ -55,12 +55,12 @@ class TransformerUtils:
             torch.Tensor: Combined mask of shape [batch_size, 1, seq_len, seq_len].
         """
         batch_size, seq_len = padded.size()
-        # Padding mask
-        padding_mask = (padded != Config.PAD_ID).unsqueeze(1).unsqueeze(2)  # [B, 1, 1, L]
-        # Causal mask
-        causal_mask = torch.tril(torch.ones(1, seq_len, seq_len)).unsqueeze(0)  # [1, 1, L, L]
-        # Combine masks
-        combined_mask = padding_mask * causal_mask  # [B, 1, L, L]
+        
+        padding_mask = (padded != Config.PAD_ID).unsqueeze(1).unsqueeze(2)  
+        
+        causal_mask = torch.tril(torch.ones(1, seq_len, seq_len)).unsqueeze(0)  
+        
+        combined_mask = padding_mask * causal_mask 
         return combined_mask
 
     @staticmethod
@@ -81,9 +81,9 @@ class TransformerUtils:
         mask = TransformerUtils.create_masks(padded)
         
         return {
-            'input_ids': padded[:, :-1],  # Exclude last token
-            'attention_mask': mask[:, :, :-1, :-1],  # Adjust for shifted labels
-            'labels': padded[:, 1:]  # Exclude first token
+            'input_ids': padded[:, :-1],  
+            'attention_mask': mask[:, :, :-1, :-1], 
+            'labels': padded[:, 1:]  
         }
 
     @staticmethod
@@ -112,7 +112,7 @@ class TransformerUtils:
             collate_fn=TransformerUtils.prepare_batch,
             shuffle=(split == "train")
         )
-# Inspect a batch
+
 train_loader = TransformerUtils.get_dataloader("train")
 
 batch = next(iter(train_loader))

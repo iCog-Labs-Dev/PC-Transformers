@@ -9,7 +9,7 @@ class BPE:
         
         os.makedirs(Config.TOKENIZER_DIR, exist_ok=True)
         
-        # Initialize the tokenizer
+        
         self.tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
         self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
 
@@ -23,7 +23,7 @@ class BPE:
         with open(train_path, "r", encoding="utf-8") as f:
             sentences = [line.strip() for line in f if line.strip()]
         
-        # Train the tokenizer
+    
         trainer = trainers.BpeTrainer(
             special_tokens=["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"],
             vocab_size=Config.VOCAB_SIZE,
@@ -31,7 +31,7 @@ class BPE:
         )
         self.tokenizer.train_from_iterator(sentences, trainer=trainer)
         
-        # Save the trained tokenizer
+        
         tokenizer_path = f"{Config.TOKENIZER_DIR}/tokenizer.json"
         self.tokenizer.save(tokenizer_path)
         print(f"Tokenizer trained and saved to {tokenizer_path}.")
@@ -42,10 +42,10 @@ class BPE:
         if not os.path.exists(tokenizer_path):
             raise FileNotFoundError(f"Tokenizer not found at {tokenizer_path}. Please train the tokenizer first.")
         
-        # Load the trained tokenizer
+       
         self.tokenizer = Tokenizer.from_file(tokenizer_path)
         
-        # Read the subset file
+      
         subset_path = f"{Config.DATA_DIR}/{subset}.txt"
         if not os.path.exists(subset_path):
             raise FileNotFoundError(f"Subset file not found at {subset_path}.")
@@ -54,10 +54,10 @@ class BPE:
         with open(subset_path, "r", encoding="utf-8") as f:
             sentences = [line.strip() for line in f if line.strip()]
         
-        # Tokenize the sentences
+        
         tokenized = [self.tokenizer.encode(s).ids for s in sentences]
         
-        # Save the tokenized IDs as .pkl
+        
         tokenized_path = f"{Config.TOKENIZER_DIR}/{subset}_ids.pkl"
         with open(tokenized_path, "wb") as f:
             pickle.dump(tokenized, f)
@@ -73,11 +73,9 @@ def process_data():
     processor = BPE()
     tokenizer_path = f"{Config.TOKENIZER_DIR}/tokenizer.json"
     
-    # Step 1: Train the tokenizer if it doesn't exist
     if not os.path.exists(tokenizer_path):
         processor.train_tokenizer()
     
-    # Step 2: Tokenize all subsets
     for subset in ["train", "valid", "test"]:
         subset_pkl_path = f"{Config.TOKENIZER_DIR}/{subset}_ids.pkl"
         if not os.path.exists(subset_pkl_path):
