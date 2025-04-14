@@ -3,27 +3,20 @@ import pickle
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers
 from Data_preprocessing.config import Config
 
-
-class BPE:
+class BPETokenizer:
     def __init__(self):
-        
+        """Initialize BPE tokenizer with paths from config"""
         os.makedirs(Config.TOKENIZER_DIR, exist_ok=True)
-        
-        
         self.tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
         self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
 
-    def train_tokenizer(self):
-        """Train the BPE tokenizer on the training subset."""
-        train_path = f"{Config.DATA_DIR}/train.txt"
-        if not os.path.exists(train_path):
-            raise FileNotFoundError(f"Training data not found at {train_path}.")
+    def train_and_save(self):
+        """Train BPE tokenizer and save the model"""
         
-        print("Training tokenizer...")
-        with open(train_path, "r", encoding="utf-8") as f:
+        with open(f"{Config.DATA_DIR}/train.txt", "r", encoding="utf-8") as f:
             sentences = [line.strip() for line in f if line.strip()]
+
         
-    
         trainer = trainers.BpeTrainer(
             special_tokens=["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"],
             vocab_size=Config.VOCAB_SIZE,
@@ -31,56 +24,25 @@ class BPE:
         )
         self.tokenizer.train_from_iterator(sentences, trainer=trainer)
         
-        
-        tokenizer_path = f"{Config.TOKENIZER_DIR}/tokenizer.json"
-        self.tokenizer.save(tokenizer_path)
-        print(f"Tokenizer trained and saved to {tokenizer_path}.")
+      
+        self.tokenizer.save(f"{Config.TOKENIZER_DIR}/tokenizer.json")
 
-    def tokenize_subset(self, subset: str):
-        """Tokenize one subset and save the tokenized IDs as .pkl."""
-        tokenizer_path = f"{Config.TOKENIZER_DIR}/tokenizer.json"
-        if not os.path.exists(tokenizer_path):
-            raise FileNotFoundError(f"Tokenizer not found at {tokenizer_path}. Please train the tokenizer first.")
+    def tokenize_and_save(self, subset_name):
+        """Tokenize a dataset split and save the IDs"""
+        
+        self.tokenizer = Tokenizer.from_file(f"{Config.TOKENIZER_DIR}/tokenizer.json")
         
        
-        self.tokenizer = Tokenizer.from_file(tokenizer_path)
+        with open(f"{Config.DATA_DIR}/{subset_name}.txt", "r", encoding="utf-8") as f:
+            tokenized = [self.tokenizer.encode(line.strip()).ids for line in f if line.strip()]
         
-      
-        subset_path = f"{Config.DATA_DIR}/{subset}.txt"
-        if not os.path.exists(subset_path):
-            raise FileNotFoundError(f"Subset file not found at {subset_path}.")
-        
-        print(f"Tokenizing {subset} subset...")
-        with open(subset_path, "r", encoding="utf-8") as f:
-            sentences = [line.strip() for line in f if line.strip()]
-        
-        
-        tokenized = [self.tokenizer.encode(s).ids for s in sentences]
-        
-        
-        tokenized_path = f"{Config.TOKENIZER_DIR}/{subset}_ids.pkl"
-        with open(tokenized_path, "wb") as f:
+       
+        with open(f"{Config.TOKENIZER_DIR}/{subset_name}_ids.pkl", "wb") as f:
             pickle.dump(tokenized, f)
-        print(f"{subset.capitalize()} subset tokenized and saved to {tokenized_path}.")
 
 
-def process_data():
-    """
-    Modular function to handle the entire pipeline:
-    1. Train the tokenizer (if not already trained).
-    2. Tokenize all subsets (train, valid, test).
-    """
-    processor = BPE()
-    tokenizer_path = f"{Config.TOKENIZER_DIR}/tokenizer.json"
-    
-    if not os.path.exists(tokenizer_path):
-        processor.train_tokenizer()
-    
-    for subset in ["train", "valid", "test"]:
-        subset_pkl_path = f"{Config.TOKENIZER_DIR}/{subset}_ids.pkl"
-        if not os.path.exists(subset_pkl_path):
-            processor.tokenize_subset(subset)
-
-
-
-process_data()
+bpe = BPETokenizer()
+bpe.train_and_save()  
+bpe.tokenize_and_save("train")  
+bpe.tokenize_and_save("valid")  
+bpe.tokenize_and_save("test")   
