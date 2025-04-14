@@ -6,8 +6,8 @@ class Config:
     MAX_LENGTH = 128
     
     # Data
-    DATA_DIR = "..../PC-Transformers/Data_preprocessing/Data/ptb"
+    DATA_DIR = ".../PC-Transformers/Data_preprocessing/Data/ptb"
     BATCH_SIZE = 32
-    TOKENIZER_DIR= ".../PC-Transformers/tokenizer/tokenizer"
+    TOKENIZER_DIR= "..../PC-Transformers/tokenizer and tokenized data "
     # Training
     DEVICE = "cpu"  
