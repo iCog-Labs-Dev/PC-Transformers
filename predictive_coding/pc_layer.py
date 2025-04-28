@@ -1,118 +1,84 @@
 import torch
 import torch.nn as nn
-import warnings
-from typing import Callable
+from typing import Callable, Dict
 
 class PCLayer(nn.Module):
     def __init__(self,
                 energy_fn: Callable = None,
                 sample_x_fn: Callable = None,
-                S: torch.Tensor = None,
-                M: torch.Tensor = None,
                 is_holding_error: bool = False,
-                is_keep_energy_per_datapoint: bool = False): 
+                local_weight_shapes: Dict[str, tuple] = None,
+                local_learning_rate: float = 1e-7): 
         
         super().__init__()
-        self.energy_fn = energy_fn if energy_fn else (lambda inputs: (inputs['mu'] - inputs['x'])**2 - 0.5)
-        assert callable(self.energy_fn)
-        
-        self.sample_x_fn = sample_x_fn if sample_x_fn else (lambda inputs: inputs['mu'].detach().clone())
-        assert callable(self.sample_x_fn)
+        self.energy_fn = energy_fn 
+        self.sample_x_fn = sample_x_fn
 
         self._x = None
-        self._S = S
-        self._M = M
-        self._is_sample_x = False
-        self._energy = None     
-        self._energy_per_datapoint = None    
+        self.local_lr = local_learning_rate
         self.is_holding_error = is_holding_error
-        self.is_keep_energy_per_datapoint = is_keep_energy_per_datapoint
+        self.clamp_value = 1.0
 
+        self.local_weights = nn.ParameterDict()
+        for name, shape in local_weight_shapes.items():
+            self.local_weights[name] = nn.Parameter(
+                torch.randn(*shape) * 0.01,
+                requires_grad=False
+            )
         self.clear_energy() 
+    
+    def _hebbian_update(self, pre: torch.Tensor, post: torch.Tensor):
+        with torch.no_grad():
+            pre_flat = pre.reshape(-1, pre.size(-1))
+            post_flat = post.reshape(-1, post.size(-1))
 
-    @property
-    def x(self) -> nn.Parameter:
-        return self._x
+            for name, weight in self.local_weights.items():
+                if 'weight' in name:
+                    delta = self.local_lr * torch.matmul(pre_flat.T, post_flat)- 0.0001 * weight
+                    weight.add_(delta.clamp_(-0.01, 0.01))
+                    del delta
+                elif 'bias' in name:
+                    delta = self.local_lr * post_flat.mean(dim=0)
+                    weight.add_(delta.clamp(-0.005, 0.005))
     
-    @property
-    def S(self)->torch.Tensor:
-        return self._S
-    
-    @S.setter
-    def S(self, value: torch.Tensor)-> None:
-        if value is not None:
-            assert isinstance(value, torch.Tensor)
-            assert value.dim() == 2
-        self._S = value
-
-    @property
-    def M(self)-> torch.Tensor:
-        return self._M
-    
-    @M.setter
-    def M(self, value: torch.Tensor)->None:
-        if value is not None:
-            assert isinstance(value, torch.Tensor)
-        self._M = value
-
-    @property
-    def is_sample_x(self)-> bool:          
-        """ Returns if x should be sampled. """
-        return self._is_sample_x
-
-    @is_sample_x.setter
-    def is_sample_x(self, value: bool)-> None:         
-        """ Sets if x should be sampled. """
-        assert isinstance(value, bool)
-        self._is_sample_x = value
-        if value:
-            self._x = None
-    
-    @property
-    def energy(self)-> torch.Tensor:             
-        """ Get energy held by PCLayer"""     
-        return self._energy
-    
-    @property
-    def energy_per_datapoint(self)-> torch.Tensor:             
-        assert self.is_keep_energy_per_datapoint, "Enable is_keep_energy_per_datapoint."
-        return self._energy_per_datapoint
+    def _apply_local_weights(self, x: torch.Tensor) -> torch.Tensor:
+        for name, weight in self.local_weights.items():
+            if 'weight' in name:
+                x = torch.matmul(x, weight)
+            elif 'bias' in name:
+                x = x + weight
+        return x
     
     def clear_energy(self):            
         """Resets the stored energy values."""
         self._energy = None
         self._energy_per_datapoint = None
     
-    def forward(self, mu: torch.Tensor, energy_fn_additional_inputs: dict = None) -> torch.Tensor:
-        energy_fn_additional_inputs = energy_fn_additional_inputs or {}
+    def forward(self, mu: torch.Tensor) -> torch.Tensor:
 
         if not self.training:
             return mu
-
-        if not self.is_sample_x and (self._x is None or mu.device != self._x.device or mu.size() != self._x.size()):
-            warnings.warn(f"Auto-setting is_sample_x=True (mu.shape={mu.shape}, x.shape={getattr(self._x, 'shape', None)})", RuntimeWarning)
-            self.is_sample_x = True
-
-        if self.is_sample_x:
-            self._x = nn.Parameter(self.sample_x_fn({"mu": mu, "x": self._x}).to(mu.device), requires_grad=True)
-            self.is_sample_x = False
+        
+        if self._x is None or mu.size() != self._x.size():
+            self._x = self.sample_x_fn({"mu": mu, "x": self._x})
+        
+        with torch.no_grad():
+            for _ in range(10):
+                grad = self._x - mu
+                grad = torch.clamp(grad, -self.clamp_value, self.clamp_value)
+                self._x = self._x - self.local_lr * grad
+                self._x = torch.clamp(self._x, -3.0, 3.0)
 
         x = self._x
-        if self.S is not None:
-            assert mu.dim() == x.dim() == 2
-            mu = mu.unsqueeze(2).expand(-1, -1, x.size(1))
-            x = x.unsqueeze(1).expand(-1, mu.size(1), -1)
+        if len(self.local_weights) > 0:
+            x = self._apply_local_weights(x)
 
-        energy = self.energy_fn({"mu": mu, "x": x, **energy_fn_additional_inputs})
-        scale = self.S if self.S is not None else self.M
-        if scale is not None:
-            energy *= scale.unsqueeze(0)
+        energy = self.energy_fn({"mu": mu, "x": x})
+        self._energy = energy.mean()
 
-        self._energy = energy.sum()
-        if self.is_keep_energy_per_datapoint:
-            self._energy_per_datapoint = energy.sum(dim=tuple(range(1, energy.dim())))
-                
         if self.is_holding_error:
             self.error = (self._x.detach() - mu).clone()
+        
+        self._hebbian_update(mu, self._x)
 
-        return self._x
+        return x
