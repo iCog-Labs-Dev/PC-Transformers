@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 def step_embed(self, t, target, x_word, x_pos, layer):
         word_layer = layer["word"]
@@ -24,3 +25,23 @@ def step_embed(self, t, target, x_word, x_pos, layer):
             self._finalize_step(mu, target, error, t, "embed")
 
         return x_word, x_pos
+    
+def step_linear(self, t, target, x, layer, layer_type):
+        mu = layer(x)
+        if layer_type == "fc1":
+            mu = F.gelu(mu)
+
+        error = target - mu
+        x_update = error @ layer.weight
+        delta_W = self.local_lr * torch.einsum("bsh,bsv->hv", error, x)
+
+        x = torch.clamp(x + self.local_lr * x_update, -self.clamp_value, self.clamp_value)
+        layer.weight.data.add_(delta_W)
+
+        if layer.bias is not None and self.update_bias:
+            layer.bias.data.add_(self.local_lr * error.mean(dim=(0, 1)))
+
+        if t == self.T - 1:
+            self._finalize_step(mu, target, error, t, layer_type)
+
+        return x
