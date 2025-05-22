@@ -1,28 +1,22 @@
 import torch
 import torch.nn as nn
-from typing import Callable, Optional
+from typing import Optional
+from .pc_utils import (x_init, step_embed, step_linear, step_attn)
 
 class PCLayer(nn.Module):
     def __init__(
         self,
         T: int = 10,
         local_learning_rate: float = 1e-3,
-        energy_fn: Optional[Callable] = None,
-        x_init: Optional[Callable] = None,
         is_holding_error: bool = False,
         update_bias: bool = True
     ):
         super().__init__()
         self.T = T
         self.local_lr = local_learning_rate
-        self.energy_fn = energy_fn
-        self.x_init = x_init
         self.is_holding_error = is_holding_error
         self.update_bias = update_bias
         self.clamp_value = 1.0
-
-        self._energy = None
-        self._errors = []
         self._x_cache = {}
         self._W_cache = {}
 
@@ -38,21 +32,21 @@ class PCLayer(nn.Module):
 
         if layer_type == "embed":
             W_word, W_pos = layer["word"].weight.shape[0], layer["pos"].weight.shape[0]
-            x_word = self.x_init(B, S, W_word)
-            x_pos = self.x_init(1, S, W_pos)
+            x_word = x_init(B, S, W_word)
+            x_pos = x_init(1, S, W_pos)
 
         elif layer_type == "attn":
-            x = self.x_init(B, S, H_out)
+            x = x_init(B, S, H_out)
         else:
-            x = self.x_init((B, S, layer.weight.shape[1]))
+            x = x_init((B, S, layer.weight.shape[1]))
         
         for t in range(self.T):
             if layer_type == "embed":
-                x_word, x_pos = self._step_embed(t, target_activity, x_word, x_pos, layer)
+                x_word, x_pos = step_embed(t, target_activity, x_word, x_pos, layer, self.local_lr, self.clamp_value, self.T, self.is_holding_error)
             elif layer_type == "attn":
-                x = self._step_attn(t, target_activity, x, proj_layers, layer_type)
+                x = step_attn(t, target_activity, x, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
             else:
-                x = self._step_linear(t, target_activity, x, layer, layer_type)
+                x = step_linear(t, target_activity, x, layer, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
 
         if layer_type == "embed":
             self._cache("embed", (x_word, x_pos), None)
@@ -60,3 +54,16 @@ class PCLayer(nn.Module):
         else:
             self._cache(layer_type, x, layer.weight if hasattr(layer, "weight") else None)
             return x
+        
+    def _cache(self, layer_type, x, layer_weight):
+        if layer_type == "embed":
+            x_word, x_pos = x
+            self._x_cache["word"] = x_word.detach()
+            self._x_cache["pos"] = x_pos.detach()
+            if layer_weight is not None:
+                self._W_cache["word"] = layer_weight["word"].data.clone()
+                self._W_cache["pos"] = layer_weight["pos"].data.clone()
+        else:
+            self._x_cache[layer_type] = x.detach()
+            if layer_weight is not None:
+                self._W_cache[layer_type] = layer_weight.data.clone()
