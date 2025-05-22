@@ -67,3 +67,23 @@ class PCLayer(nn.Module):
             self._x_cache[layer_type] = x.detach()
             if layer_weight is not None:
                 self._W_cache[layer_type] = layer_weight.data.clone()
+    
+    def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
+        return self._x_cache.get(layer_type, None)
+
+    def get_weights(self, layer_type: str) -> Optional[torch.Tensor]:
+        return self._W_cache.get(layer_type, None)
+
+    def get_energy(self) -> Optional[float]:
+        return self._energy
+
+    def clear_energy(self):
+        self._energy = None
+        self._x_cache.clear()
+        self._W_cache.clear()
+
+    def get_errors(self) -> list:
+        return self._errors
+
+    def clear_errors(self):
+        self._errors = []
