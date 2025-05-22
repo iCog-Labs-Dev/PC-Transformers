@@ -1,80 +1,26 @@
 import torch
-import warnings
-from typing import Generator, Tuple, List, Union
-import torch.nn as nn
 
-from .pc_layer import PCLayer
+def step_embed(self, t, target, x_word, x_pos, layer):
+        word_layer = layer["word"]
+        pos_layer = layer["pos"]
 
-def get_model_pc_layers(model: nn.Module) -> Generator[nn.Module, None, None]:         
-    for module in model.modules():
-        if isinstance(module, PCLayer):
-            yield module
+        mu_word = word_layer(x_word)
+        mu_pos = pos_layer(x_pos)
 
-def get_named_model_pc_layers(model: nn.Module) -> Generator[Tuple[str, nn.Module], None, None]:
-    for name, module in model.named_modules():
-        if isinstance(module, PCLayer):
-            yield name, module
+        mu = mu_word + mu_pos
+        error = target - mu
 
-def get_model_xs(model: nn.Module, warn_if_uninitialized: bool = True) -> Generator[torch.Tensor, None, None]:
-    for pc_layer in get_model_pc_layers(model):
-        x = getattr(pc_layer, 'x', None)
-        if x is None and warn_if_uninitialized:
-            warnings.warn("Uninitialized x detected in PCLayer", RuntimeWarning)
-        if x is not None:
-            yield x
+        word_update = error @ word_layer.weight.T
+        delta_word_W = self.local_lr * torch.einsum("bsh,bsv->vh", error, x_word)
+        word_layer.weight.data.add_(delta_word_W)
+        x_word = torch.clamp(x_word + self.local_lr * word_update, -self.clamp_value, self.clamp_value)
 
-def compute_energies(model: nn.Module, named: bool = False, per_datapoint: bool = False, warn_batch_size: bool = True):
-    energies = {}
-    batch_sizes = []
+        pos_update = error @ pos_layer.weight.T
+        delta_pos_W = self.local_lr * torch.einsum("bsh,bsv->vh", error, x_pos)
+        pos_layer.weight.data.add_(delta_pos_W)
+        x_pos = torch.clamp(x_pos + self.local_lr * pos_update, -self.clamp_value, self.clamp_value)
 
-    for name, pc_layer in get_named_model_pc_layers(model):
-        energy = pc_layer.energy_per_datapoint if per_datapoint else pc_layer.energy
-        if energy is not None:
-            energies[name] = energy
-            bs = energy.size(0) if per_datapoint else energy.size()
-            batch_sizes.append(bs)
+        if t == self.T - 1:
+            self._finalize_step(mu, target, error, t, "embed")
 
-    if not energies:
-        raise ValueError("No energies found in PCLayers.")
-
-    if warn_batch_size and len(set(batch_sizes)) > 1:
-        warnings.warn(f"Inconsistent energy batch sizes: {batch_sizes}", RuntimeWarning)
-
-    return energies if named else list(energies.values())
-
-def check_model_training_state(model: nn.Module) -> Union[bool, None]:
-    states = model_pc_layer_training_states(model)
-    if not states:
-        return model.training
-    if all(states) and model.training:
-        return True
-    if not model.training and all(not s for s in states):
-        return False
-    return None
-
-def model_has_pc_layers(model: nn.Module) -> bool:                                  
-    return any(True for _ in get_model_pc_layers(model))
-
-def model_pc_layer_training_states(model: nn.Module) -> List[bool]:
-    return [layer.training for layer in get_model_pc_layers(model)]
-
-def preprocess_step_index_list(indices: Union[str, List[int]], T: int) -> List[int]:   
-    if isinstance(indices, str):
-        indices = indices.lower()
-        if indices == "all":
-            return list(range(2, T))
-        elif indices == "last":
-            return [T - 1]
-        elif indices == "last_half":
-            return list(range(T // 2, T))
-        elif indices == "never":
-            return []
-        else:
-            raise NotImplementedError(f"Unknown step index preset: {indices}")
-    elif isinstance(indices, list):
-        for i in indices:
-            if not isinstance(i, int) or not (0 <= i < T):
-                raise ValueError(f"Invalid timestep index: {i}")
-        return indices
-    else:
-        raise TypeError("Invalid type for indices")
+        return x_word, x_pos
