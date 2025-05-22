@@ -17,7 +17,7 @@ class TransformerUtils:
         Returns:
             list: List of tokenized sequences.
         """
-        file_path = f"{Config.TOKENIZER_DIR}/{split}_ids.pkl"
+        file_path = f"{Config.DATA_DIR}/{split}_ids.pkl"
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Tokenized data not found at {file_path}.")
         with open(file_path, "rb") as f:

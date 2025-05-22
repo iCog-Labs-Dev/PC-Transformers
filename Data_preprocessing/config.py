@@ -1,4 +1,5 @@
-# Model/training hyperparameters
+import os
+# tokenization hyperparameters
 class Config:
     # Tokenizer
     VOCAB_SIZE = 10000
@@ -6,8 +7,10 @@ class Config:
     MAX_LENGTH = 128
     
     # Data
-    DATA_DIR = ".../PC-Transformers/Data_preprocessing/Data/ptb"
-    BATCH_SIZE = 32
-    TOKENIZER_DIR= "..../PC-Transformers/tokenizer and tokenized data "
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
+    DATA_DIR = os.path.join(BASE_DIR, "Data", "ptb") 
+    TOKENIZER_DIR = os.path.join(BASE_DIR, "tokenizer", "outputs")  
+   
     # Training
+    BATCH_SIZE = 32
     DEVICE = "cpu"  
