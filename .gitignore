@@ -1,3 +1,4 @@
 pc_transformer_venv/
 __pycache__
-Data_preprocessing/tokenizer/outputs
+data_preprocessing/
+
