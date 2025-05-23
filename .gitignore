@@ -1,4 +1,7 @@
+__pycache__/
+*.pyc
+*.pkl
+*.json
 pc_transformer_venv/
-__pycache__
 data_preprocessing/
 
