@@ -16,7 +16,11 @@ class PennTreebankDataset(Dataset):
 
         tokenized_file_path = os.path.join(self.tokenizer_dir, tokenized_file)
         if not os.path.exists(tokenized_file_path):
-            raise FileNotFoundError(f"Tokenized file not found: {tokenized_file_path}")
+            raise FileNotFoundError(
+                f"Tokenized file not found: {tokenized_file_path}\n"
+                "Please tokenize the dataset first by running:\n\n"
+                " python3 -m Data_preprocessing.tokenizer.bpe_tokenizer\n"
+            )
 
         with open(tokenized_file_path, 'rb') as f:
             self.tokens = pickle.load(f)

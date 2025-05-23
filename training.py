@@ -1,3 +1,4 @@
+import torch
 import os
 import torch.nn.functional as F
 from tokenizers import Tokenizer
@@ -65,7 +66,7 @@ config = GPTConfig(
     is_holding_error = True,
     num_heads=2,
     n_blocks=2,
-    num_epochs=3,
+    num_epochs=1,
     update_bias=True,
 )
 
@@ -76,3 +77,9 @@ for epoch in range(config.num_epochs):
     avg_energy = train(model, train_loader)
 
     print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f}", flush=True)
+
+# Save trained model
+save_path = "checkpoints/pc_transformer.pt"
+os.makedirs(os.path.dirname(save_path), exist_ok=True)
+torch.save(model.state_dict(), save_path)
+print(f"Model saved to {save_path}")
