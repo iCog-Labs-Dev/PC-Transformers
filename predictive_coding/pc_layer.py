@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Optional
-from .pc_utils import (x_init, step_embed, step_linear, step_attn)
+from .pc_utils import (x_init, step_embed, step_linear, step_attn, finalize_step)
 
 class PCLayer(nn.Module):
     def __init__(
@@ -9,7 +9,7 @@ class PCLayer(nn.Module):
         T: int = 10,
         local_learning_rate: float = 1e-3,
         is_holding_error: bool = False,
-        update_bias: bool = True
+        update_bias: bool = True,
     ):
         super().__init__()
         self.T = T
@@ -20,34 +20,47 @@ class PCLayer(nn.Module):
         self._x_cache = {}
         self._W_cache = {}
 
+        self._energy = None
+        self._errors = []
+
     def forward(
         self,
         target_activity: torch.Tensor,
         layer: Optional[nn.Module] = None,
         proj_layers: Optional[dict] = None,
-        layer_type: str = "fc1"
+        layer_type: str = "fc1",
+        input_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
     ):
         B, S, H_out = target_activity.shape
-        x, W, bias = None, None, None
+        x = None
+        self._energy = 0.0
+        self._errors = []
 
         if layer_type == "embed":
-            W_word, W_pos = layer["word"].weight.shape[0], layer["pos"].weight.shape[0]
-            x_word = x_init(B, S, W_word)
-            x_pos = x_init(1, S, W_pos)
+            assert input_ids is not None and position_ids is not None, "input_ids and position_ids are required for embedding"
+            x_word = layer["word"].weight[input_ids]  
+            x_pos = layer["pos"].weight[position_ids] 
 
         elif layer_type == "attn":
             x = x_init(B, S, H_out)
         else:
-            x = x_init((B, S, layer.weight.shape[1]))
+            x = x_init(B, S, layer.weight.shape[1])
         
         for t in range(self.T):
             if layer_type == "embed":
-                x_word, x_pos = step_embed(t, target_activity, x_word, x_pos, layer, self.local_lr, self.clamp_value, self.T, self.is_holding_error)
+                mu = step_embed(t, target_activity, layer, layer_type, input_ids, position_ids, self.T, self.local_lr, self.clamp_value, self.is_holding_error)
             elif layer_type == "attn":
-                x = step_attn(t, target_activity, x, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
+                x, mu = step_attn(t, target_activity, x, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
             else:
-                x = step_linear(t, target_activity, x, layer, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
+                x, mu = step_linear(t, target_activity, x, layer, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
 
+            if self.is_holding_error:
+                error = target_activity - mu
+                energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.is_holding_error)
+                self._energy += energy
+                self._errors.extend(step_errors)
+                
         if layer_type == "embed":
             self._cache("embed", (x_word, x_pos), None)
             return x_word, x_pos

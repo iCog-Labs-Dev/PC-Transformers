@@ -1,10 +1,9 @@
 import os
-# tokenization hyperparameters
+
 class Config:
-    # Tokenizer
-    VOCAB_SIZE = 10000
+    VOCAB_SIZE = 4000
     PAD_ID = 0
-    MAX_LENGTH = 128
+    MAX_LENGTH = 64
     
     # Data
     BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
@@ -12,5 +11,4 @@ class Config:
     TOKENIZER_DIR = os.path.join(BASE_DIR, "tokenizer", "outputs")  
    
     # Training
-    BATCH_SIZE = 32
-    DEVICE = "cpu"  
+    BATCH_SIZE = 8

@@ -1,8 +1,6 @@
 import torch
-import torch.nn  as nn
+import torch.nn as nn
 from predictive_coding.pc_layer import PCLayer
-
-
 
 class OutputLayer(nn.Module):
     def __init__(self, config):
@@ -12,16 +10,12 @@ class OutputLayer(nn.Module):
         self.pc_layer = PCLayer(
             T=config.T,
             local_learning_rate=config.local_learning_rate,
-            energy_fn=config.energy_fn,
-            x_init=config.x_init,
             is_holding_error=config.is_holding_error,
+            update_bias = config.update_bias
         )
 
     def forward(self, target_ids) -> torch.Tensor:
-        self.pc_layer.clear_energy()
-        self.pc_layer.clear_errors()
-
-        output=self.pc_layer(target_activity = target_ids, layer=self.output, kind="final_output")
+        self.pc_layer(target_activity = target_ids, layer=self.output, layer_type ="final_output")
         output_x = self.pc_layer.get_x("final_output")
 
         return output_x

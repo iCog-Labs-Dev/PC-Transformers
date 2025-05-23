@@ -5,29 +5,28 @@ import math
 def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
     return torch.randn(batch_size, seq_len, embedding_size)
 
-def step_embed(t, target, x_word, x_pos, layer, local_lr, clamp_value, T, is_holding_error):
+def step_embed(t, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, T, is_holding_error):
         word_layer = layer["word"]
         pos_layer = layer["pos"]
 
-        mu_word = word_layer(x_word)
-        mu_pos = pos_layer(x_pos)
+        mu_word = word_layer(input_ids)
+        mu_pos = pos_layer(position_ids)
         mu = mu_word + mu_pos
         error = target - mu
 
-        word_update = error @ word_layer.weight.T
-        delta_word_W = local_lr * torch.einsum("bsh,bsv->vh", error, x_word)
-        word_layer.weight.data.add_(delta_word_W)
-        x_word = torch.clamp(x_word + local_lr * word_update, -clamp_value, clamp_value)
-
-        pos_update = error @ pos_layer.weight.T
-        delta_pos_W = local_lr * torch.einsum("bsh,bsv->vh", error, x_pos)
-        pos_layer.weight.data.add_(delta_pos_W)
-        x_pos = torch.clamp(x_pos + local_lr * pos_update, -clamp_value, clamp_value)
+        update = torch.clamp(error, -clamp_value, clamp_value)
+        with torch.no_grad():
+            for b in range(error.size(0)):
+                for s in range(error.size(1)):
+                    idx_w = input_ids[b, s]
+                    idx_p = position_ids[b, s]
+                    word_layer.weight.data[idx_w] += local_lr * update[b, s]
+                    pos_layer.weight.data[idx_p] += local_lr * update[b, s]
 
         if t == T - 1:
-            finalize_step(mu, target, error, t, "embed", is_holding_error)
+            finalize_step(mu, target, error, t, layer_type, is_holding_error)
 
-        return x_word, x_pos
+        return mu
     
 def step_linear(t, target, x, layer, layer_type, local_lr, clamp_value, T, is_holding_error,update_bias = True):
         mu = layer(x)
@@ -47,18 +46,17 @@ def step_linear(t, target, x, layer, layer_type, local_lr, clamp_value, T, is_ho
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type, is_holding_error)
 
-        return x
+        return x, mu
 
 def step_attn(t, target, x, proj_layers, layer_type, local_lr, clamp_value, T, is_holding_error, update_bias = True):
-        assert proj_layers is not None, "proj_layers dict is required for attention"
-        q_proj = proj_layers.get("q_proj", None)
-        k_proj = proj_layers.get("k_proj", None)
-        v_proj = proj_layers.get("v_proj", None)
-
-        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"
+        q_proj = proj_layers["q_proj"]
+        k_proj = proj_layers["k_proj"]
+        v_proj = proj_layers["v_proj"]
 
         Q, K, V = q_proj(x), k_proj(x), v_proj(x)
         scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))
+        mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
+        scores = scores.masked_fill(~mask, float("-inf"))
         attn_weights = scores.softmax(dim=-1)
         mu = attn_weights @ V
 
@@ -74,7 +72,7 @@ def step_attn(t, target, x, proj_layers, layer_type, local_lr, clamp_value, T, i
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type, is_holding_error)
 
-        return x
+        return x, mu
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     return ((mu - x) ** 2).mean(dim=-1) * 0.05
