@@ -29,3 +29,9 @@ class MLP(nn.Module):
         fc1_x = self.pc_layer1.get_x("fc1")
 
         return fc1_x
+    
+    def evaluate(self, x):
+         fc_1 = self.fc1(x)
+         fc_2 = self.fc2(fc_1)
+
+         return fc_2
