@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 from tokenizers import Tokenizer
 from model_architecture.pc_t_model import PCTransformer
@@ -6,14 +7,16 @@ from model_architecture.transformer_utils import ids_to_one_hot, energy_fn
 from predictive_coding.config import GPTConfig
 from Data_preprocessing.dataloader import train_loader
 from Data_preprocessing.config import Config
+from predictive_coding.pc_utils import energy_fn
 
-def load_model(model_path, config, device):
+def load_model(model_path, config):
     model = PCTransformer(config)
     model.load_state_dict(torch.load(model_path))
-    model.to(device)
     return model
 
 def evaluate(model, dataloader, config):
+    start_time = time.time()
+    
     model.eval()
     total_energy = 0.0
     batch_count = 0
@@ -39,15 +42,17 @@ def evaluate(model, dataloader, config):
 
     avg_energy = total_energy / batch_count
     accuracy = (correct_preds / total_preds) * 100
+    elapsed_time = time.time() - start_time
 
 
     print(f"\n========= Evaluation Results =========")
     print(f"Average Predictive Coding Energy: {avg_energy:.4f}")
     print(f"Accuracy: {accuracy:.2f}%")
+    print(f"Time taken: {elapsed_time:.2f} seconds")
+    
     return avg_energy
 
 
-# === Setup same as training ===
 tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
 tokenizer = Tokenizer.from_file(tokenizer_path)
 vocab_size = tokenizer.get_vocab_size()
