@@ -18,3 +18,11 @@ class TransformerBlock(nn.Module):
         x_qkv = self.attn(fc1_x)
 
         return x_qkv
+    
+    def evaluate(self, x):
+        x = self.ln1(x)
+        x = self.attn.evaluate(x)
+        x = self.ln2(x)
+        x = self.mlp.evaluate(x)
+
+        return x

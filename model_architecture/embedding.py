@@ -28,3 +28,12 @@ class Embedding_Layer(nn.Module):
         }, layer_type="embed", input_ids = input_ids, position_ids = position_ids)
         
         return embeddings
+    
+    def evaluate(self, input_ids):
+        word_embed=self.word_embeddings(input_ids)
+        position_ids = torch.arange(word_embed.size(1), device=input_ids.device).unsqueeze(0)
+        pos_embed=self.position_embeddings(position_ids)
+        embeddings = word_embed + pos_embed
+        embeddings = self.LayerNorm(embeddings)
+
+        return embeddings

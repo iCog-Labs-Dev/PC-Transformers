@@ -1,4 +1,6 @@
 import torch.nn as nn
+import torch
+import math
 from predictive_coding.pc_layer import PCLayer
 
 class Attention(nn.Module):
@@ -42,3 +44,30 @@ class Attention(nn.Module):
         x_qkv = self.pc_qkv.get_x("attn")
 
         return x_qkv
+    
+    def evaluate(self, x):
+        batch_size, seq_len, _ = x.size()
+        
+        Q = self.q(x)
+        K = self.k(x)
+        V = self.v(x)
+
+        # Reshape for multi-head: [B, T, H, D/H] → [B, H, T, D/H]
+        Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Attention score: [B, H, T, T]
+        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        attention_probs = self.dropout(attention_probs)
+
+        # Context vector: [B, H, T, D/H]
+        context = torch.matmul(attention_probs, V)
+
+        #Concatenate heads: [B, T, H, D/H] → [B, T, D]
+        context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.n_embed)
+
+        output = self.output(context)
+
+        return output

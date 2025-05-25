@@ -23,3 +23,11 @@ class PCTransformer(nn.Module):
 
         logits = output_x @ self.output.output.weight.T + self.output.output.bias
         return logits
+    
+    def evaluate(self, input_ids):
+        x = self.embedding.evaluate(input_ids)
+
+        for block in self.blocks:
+            x = block.evaluate(x)
+
+        return self.output.evaluate(x)
