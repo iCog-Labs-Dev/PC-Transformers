@@ -19,3 +19,6 @@ class OutputLayer(nn.Module):
         output_x = self.pc_layer.get_x("final_output")
 
         return output_x
+    def evaluate(self, x):
+        output = self.output(x)
+        return output
