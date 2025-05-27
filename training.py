@@ -6,7 +6,6 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader
-from torch.utils.data import DataLoader
 from Data_preprocessing.config import Config
 
 """Usage: python training.py"""
@@ -66,20 +65,26 @@ config = GPTConfig(
     is_holding_error = True,
     num_heads=2,
     n_blocks=2,
-    num_epochs=1,
+    num_epochs=5,
     update_bias=True,
 )
 
 model = PCTransformer(config)
+train_energies = []
+
 print("========== Training started ==========", flush=True) 
 for epoch in range(config.num_epochs):
     print(f"Epoch {epoch+1} started", flush=True)
     avg_energy = train(model, train_loader)
-
+    train_energies.append(avg_energy)
     print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f}", flush=True)
 
 # Save trained model
 save_path = "checkpoints/pc_transformer.pt"
 os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+if os.path.exists(save_path):
+    os.remove(save_path)
+    
 torch.save(model.state_dict(), save_path)
 print(f"Model saved to {save_path}")
