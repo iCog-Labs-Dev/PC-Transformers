@@ -36,10 +36,13 @@ def evaluate(model, dataloader, device):
             batch_count += 1
 
     average_loss = total_loss / batch_count
+    perplexity = torch.exp(torch.tensor(average_loss)) 
 
     elapsed_time = time.time() - start_time
     print(f"Evaluation completed in {elapsed_time:.2f}s")
     print(f"Cross-Entropy Loss: {average_loss:.4f}")
+    print(f"Perplexity: {perplexity:.2f}")
+  
 
     return average_loss
 
