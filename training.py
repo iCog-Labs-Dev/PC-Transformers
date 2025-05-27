@@ -73,12 +73,16 @@ model = PCTransformer(config)
 train_energies = []
 
 print("========== Training started ==========", flush=True) 
+# Measure total training time
+start_training_time = time.time()
 for epoch in range(config.num_epochs):
     print(f"Epoch {epoch+1} started", flush=True)
     avg_energy = train(model, train_loader)
     train_energies.append(avg_energy)
     print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f}", flush=True)
-
+total_training_time = time.time() - start_training_time
+print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
+print("========== Training completed ==========", flush=True)
 # Save trained model
 save_path = "checkpoints/pc_transformer.pt"
 os.makedirs(os.path.dirname(save_path), exist_ok=True)
