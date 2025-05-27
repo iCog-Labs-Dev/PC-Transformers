@@ -59,7 +59,11 @@ class Attention(nn.Module):
 
         # Attention score: [B, H, T, T]
         attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device)).bool()
+        mask = mask.unsqueeze(0).unsqueeze(0)  
+        scores = attention_scores.masked_fill(~mask, float("-inf"))
+
+        attention_probs = nn.Softmax(dim=-1)(scores)
         attention_probs = self.dropout(attention_probs)
 
         # Context vector: [B, H, T, D/H]
@@ -67,7 +71,6 @@ class Attention(nn.Module):
 
         #Concatenate heads: [B, T, H, D/H] → [B, T, D]
         context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.n_embed)
-
         output = self.output(context)
 
         return output
