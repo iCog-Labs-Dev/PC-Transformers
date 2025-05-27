@@ -6,7 +6,8 @@ The PC-Transformers model combines the Transformer architecture with Predictive 
 ) for training and inference.
 
 ## **Model Architecture**
-![Model Diagram](assets/Model_diagram.png)
+<img src="assets/Model_diagram.png" alt="Model Diagram" height="500" width = "400"/>
+
 ### 1. PC Layer
 The PCLayer implements the predictive coding (PC) mechanism at each layer of the transformer. It serves as a local learning and inference engine that:
 - Infers latent activities (x) that minimize the error between predicted output (μ) and target activity.
