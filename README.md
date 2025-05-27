@@ -1,73 +1,48 @@
 # PC-Transformers
 
-A Transformer model implementation integrated with Predictive Coding (PC) principles, where each layer predicts the next layer's activity, computes errors, and updates weights locally. This project leverages the Penn Treebank dataset for training and inference.
-
----
-
 ## **Overview**
 
-The **PC-Transformers** model combines the Transformer architecture with Predictive Coding to enable layer-wise prediction and local weight updates. Each layer predicts the next layer's activity, computes the prediction error, infers latent states, and updates weights before passing the prediction forward. This approach aims to mimic biologically plausible learning mechanisms while maintaining the performance benefits of Transformers.
-
-### **Key Features**
-- **Predictive Coding (PC) Layer**: Implements iterative inference and local Hebbian-style weight updates.
-- **Top-Down Prediction Chain**: 
-  - Embedding → Attention → MLP → Output.
-  - Each layer predicts the next layer's activity.
-- **Local Learning**: Layers update their weights autonomously using prediction errors.
-- **Modular Design**: Components include embeddings, multi-head attention, MLP blocks, and transformer blocks.
-
----
+The PC-Transformers model combines the Transformer architecture with Predictive Coding to enable layer-wise prediction and local weight updates. Each layer predicts the next layer's activity, computes the prediction error, infers latent states, and updates weights before passing the prediction forward. This approach aims to mimic biologically plausible learning mechanisms while maintaining the performance benefits of Transformers. The project leverages the [Penn Treebank dataset](https://www.kaggle.com/datasets/aliakay8/penn-treebank-dataset/data
+) for training and inference.
 
 ## **Model Architecture**
+![Model Diagram](assets/Model_diagram.png)
+### 1. PC Layer
+The PCLayer implements the predictive coding (PC) mechanism at each layer of the transformer. It serves as a local learning and inference engine that:
+- Infers latent activities (x) that minimize the error between predicted output (μ) and target activity.
+- Locally updates weights using Hebbian learning, based on prediction errors.
 
-### **Core Components**
+### 2. Transformer Components
+The PCTransformer model is composed of the following components, all integrated with the PCLayer for predictive coding-based inference:
+- **Embedding Layer**
+  - Predicts initial transformer block input (x_attn1) from word and position embeddings.
 
-#### 1. **`PCLayer` (Predictive Coding Layer)**
-- Implements predictive coding logic with iterative latent state updates.
-- Handles error computation, weight updates, and activity clamping.
-- Supports embeddings, attention, MLP, and output layers.
-- Key features:
-  - **Iterative Inference**: Performs `T` steps of latent state refinement.
-  - **Local Weight Updates**: Uses Hebbian-style updates with a configurable learning rate.
-  - **Error Clamping**: Prevents exploding activations via `clamp_value`.
+- **Transformer Blocks** 
+  - Each TransformerBlock includes:
+      - Attention: Uses predictive coding for both attention output and internal score projection via Q, K, V projections.
+      - MLP: feed forward layer 1 (fc1) predicts the input to feed forward layer (fc2), fc2 predicts next layer activity.
 
-#### 2. **Embedding Layer**
-- Combines token and positional embeddings.
-- Uses `PCLayer` to predict downstream attention layer activities.
-- Subcomponents:
-  - **Token Embeddings**: `nn.Embedding` layer for token IDs.
-  - **Positional Embeddings**: `nn.Embedding` layer for positional IDs.
-  - **LayerNorm**: Normalizes combined embeddings.
+- **Output Layer**
+  - Final Linear layer that predicts token logits.
+  - Uses PCLayer to perform local updates and iterative inference.
 
-#### 3. **Attention Layer**
-- Multi-head self-attention mechanism.
-- Predicts MLP layer activities via `PCLayer`.
-- Subcomponents:
-  - **Query/Key/Value Projections**: Linear layers (`nn.Linear`) for attention computations.
-  - **Attention Output**: Linear projection layer (`nn.Linear`).
-  - **Softmax + Dropout**: For attention weight stabilization.
+## Installation
 
-#### 4. **MLP Layer**
-- Two-layer feed-forward network with GELU activation.
-- Predicts output layer activities.
-- Structure:
-  - **FC1**: Expands dimension to `4 * n_embed` (GELU-activated).
-  - **FC2**: Contracts back to `n_embed` dimension.
-  - **Dropout**: Applied after FC2.
-
-#### 5. **Transformer Block**
-- Sequential stack of attention and MLP layers.
-- Workflow:
-  1. **Attention Block**:
-     - LayerNorm → Multi-head Attention → Residual connection.
-  2. **MLP Block**:
-     - LayerNorm → MLP → Residual connection.
-- Uses `PCLayer` for inter-layer prediction and error propagation.
-
-#### 6. **Output Layer**
-- Final linear projection to vocabulary size.
-- Predicts token logits using `PCLayer`.
-- Structure:
-  - **Linear Layer**: Maps hidden states to logits (`nn.Linear`).
-  - **Error Propagation**: Connects to the final loss computation.
-
+Clone the repository and install dependencies:
+```bash
+git clone https://github.com/iCog-Labs-Dev/PC-Transformers.git
+cd PC-Transformers
+pip install -r requirements.txt
+```
+## Usage:
+- Tokenize the data:
+```bash
+python -m Data_preprocessing.tokenizer.bpe_tokenizer
+```
+- Train the model:
+```bash
+python training.py
+```
+- Evaluate the model:
+```bash
+python eval.py
