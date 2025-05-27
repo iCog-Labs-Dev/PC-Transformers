@@ -8,19 +8,16 @@ from Data_preprocessing.dataloader import test_loader
 from Data_preprocessing.config import Config
 import torch.nn.functional as F
 
-
 def load_model(model_path, config):
     model = PCTransformer(config)
     model.load_state_dict(torch.load(model_path))
     return model
 
-
 def evaluate(model, dataloader, device):
     start_time = time.time()
     model.eval()
     total_loss = 0.0
-    total_preds = 0
-    correct_preds = 0
+    batch_count = 0
 
     with torch.no_grad():
         for batch in dataloader:
@@ -29,34 +26,37 @@ def evaluate(model, dataloader, device):
 
             logits = model.evaluate(input_ids)
 
-            # Flatten logits and targets for loss computation
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 targets.view(-1),
                 ignore_index=0,
-                reduction='sum'  # Sum total loss for all tokens
             )
 
             total_loss += loss.item()
+            batch_count += 1
 
-            # Compute accuracy
-            preds = torch.argmax(logits, dim=-1)
-            mask = targets != 0  # Ignore padding tokens
-            correct = (preds == targets) & mask
-            correct_preds += correct.sum().item()
-            total_preds += mask.sum().item()
-
-    average_loss = total_loss / total_preds
-    average_accuracy = correct_preds / total_preds
+    average_loss = total_loss / batch_count
 
     elapsed_time = time.time() - start_time
     print(f"Evaluation completed in {elapsed_time:.2f}s")
-    print(f"Correct Predictions: {correct_preds}")
-    print(f"Total Predictions: {total_preds}")
     print(f"Cross-Entropy Loss: {average_loss:.4f}")
-    print(f"Accuracy: {average_accuracy * 100:.2f}%")
 
     return average_loss
+
+def generate_text(input_ids, max_new_tokens=50, temperature=1.0):
+    input_tensor = input_ids.unsqueeze(0)
+
+    for _ in range(max_new_tokens):
+        if input_tensor.size(1) > config.block_size:
+            input_tensor = input_tensor[:, -config.block_size:]
+
+        logits = model.evaluate(input_tensor)
+        logits = logits[:, -1, :] / temperature
+        probs = F.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
+        input_tensor = torch.cat((input_tensor, next_token), dim=1)
+
+    return input_tensor[0]
 
 tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
 tokenizer = Tokenizer.from_file(tokenizer_path)
@@ -82,3 +82,22 @@ model_path = "checkpoints/pc_transformer.pt"
 model = load_model(model_path, config)
 model.to(device)
 evaluate(model, test_loader, device)
+
+# Generate text using the trained model
+for batch in test_loader:
+    input_ids = batch["input_ids"][0]
+    target_ids = batch["target_ids"][0]
+    break
+
+prompt_length = 10
+prompt_ids = input_ids[:prompt_length]
+generated_ids = generate_text(prompt_ids, max_new_tokens=50, temperature=0.7)
+
+print("\n Prompt:")
+print(tokenizer.decode(prompt_ids.tolist()))
+
+print("\n Target")
+print(tokenizer.decode(input_ids.tolist()))
+
+print("\n Generated Text:")
+print(tokenizer.decode(generated_ids.tolist()))
