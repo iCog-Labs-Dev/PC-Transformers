@@ -1,80 +1,83 @@
 import torch
-import warnings
-from typing import Generator, Tuple, List, Union
-import torch.nn as nn
+import torch.nn.functional as F
+import math
 
-from .pc_layer import PCLayer
+def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
+    return torch.randn(batch_size, seq_len, embedding_size)
 
-def get_model_pc_layers(model: nn.Module) -> Generator[nn.Module, None, None]:         
-    for module in model.modules():
-        if isinstance(module, PCLayer):
-            yield module
+def step_embed(t, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, T, is_holding_error):
+        word_layer = layer["word"]
+        pos_layer = layer["pos"]
 
-def get_named_model_pc_layers(model: nn.Module) -> Generator[Tuple[str, nn.Module], None, None]:
-    for name, module in model.named_modules():
-        if isinstance(module, PCLayer):
-            yield name, module
+        mu_word = word_layer(input_ids)
+        mu_pos = pos_layer(position_ids)
+        mu = mu_word + mu_pos
+        error = target - mu
 
-def get_model_xs(model: nn.Module, warn_if_uninitialized: bool = True) -> Generator[torch.Tensor, None, None]:
-    for pc_layer in get_model_pc_layers(model):
-        x = getattr(pc_layer, 'x', None)
-        if x is None and warn_if_uninitialized:
-            warnings.warn("Uninitialized x detected in PCLayer", RuntimeWarning)
-        if x is not None:
-            yield x
+        update = torch.clamp(error, -clamp_value, clamp_value)
+        with torch.no_grad():
+            for b in range(error.size(0)):
+                for s in range(error.size(1)):
+                    idx_w = input_ids[b, s]
+                    idx_p = position_ids[b, s]
+                    word_layer.weight.data[idx_w] += local_lr * update[b, s]
+                    pos_layer.weight.data[idx_p] += local_lr * update[b, s]
 
-def compute_energies(model: nn.Module, named: bool = False, per_datapoint: bool = False, warn_batch_size: bool = True):
-    energies = {}
-    batch_sizes = []
+        if t == T - 1:
+            finalize_step(mu, target, error, t, layer_type, is_holding_error)
 
-    for name, pc_layer in get_named_model_pc_layers(model):
-        energy = pc_layer.energy_per_datapoint if per_datapoint else pc_layer.energy
-        if energy is not None:
-            energies[name] = energy
-            bs = energy.size(0) if per_datapoint else energy.size()
-            batch_sizes.append(bs)
+        return mu
+    
+def step_linear(t, target, x, layer, layer_type, local_lr, clamp_value, T, is_holding_error,update_bias = True):
+        mu = layer(x)
+        if layer_type == "fc1":
+            mu = F.gelu(mu)
 
-    if not energies:
-        raise ValueError("No energies found in PCLayers.")
+        error = target - mu
+        x_update = error @ layer.weight
+        delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x)
 
-    if warn_batch_size and len(set(batch_sizes)) > 1:
-        warnings.warn(f"Inconsistent energy batch sizes: {batch_sizes}", RuntimeWarning)
+        x = torch.clamp(x + local_lr * x_update, -clamp_value, clamp_value)
+        layer.weight.data.add_(delta_W)
 
-    return energies if named else list(energies.values())
+        if layer.bias is not None and update_bias:
+            layer.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
 
-def check_model_training_state(model: nn.Module) -> Union[bool, None]:
-    states = model_pc_layer_training_states(model)
-    if not states:
-        return model.training
-    if all(states) and model.training:
-        return True
-    if not model.training and all(not s for s in states):
-        return False
-    return None
+        if t == T - 1:
+            finalize_step(mu, target, error, t, layer_type, is_holding_error)
 
-def model_has_pc_layers(model: nn.Module) -> bool:                                  
-    return any(True for _ in get_model_pc_layers(model))
+        return x, mu
 
-def model_pc_layer_training_states(model: nn.Module) -> List[bool]:
-    return [layer.training for layer in get_model_pc_layers(model)]
+def step_attn(t, target, x, proj_layers, layer_type, local_lr, clamp_value, T, is_holding_error, update_bias = True):
+        q_proj = proj_layers["q_proj"]
+        k_proj = proj_layers["k_proj"]
+        v_proj = proj_layers["v_proj"]
 
-def preprocess_step_index_list(indices: Union[str, List[int]], T: int) -> List[int]:   
-    if isinstance(indices, str):
-        indices = indices.lower()
-        if indices == "all":
-            return list(range(2, T))
-        elif indices == "last":
-            return [T - 1]
-        elif indices == "last_half":
-            return list(range(T // 2, T))
-        elif indices == "never":
-            return []
-        else:
-            raise NotImplementedError(f"Unknown step index preset: {indices}")
-    elif isinstance(indices, list):
-        for i in indices:
-            if not isinstance(i, int) or not (0 <= i < T):
-                raise ValueError(f"Invalid timestep index: {i}")
-        return indices
-    else:
-        raise TypeError("Invalid type for indices")
+        Q, K, V = q_proj(x), k_proj(x), v_proj(x)
+        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))
+        mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
+        scores = scores.masked_fill(~mask, float("-inf"))
+        attn_weights = scores.softmax(dim=-1)
+        mu = attn_weights @ V
+
+        error = target - mu
+        x = torch.clamp(x - local_lr * error, -clamp_value, clamp_value)
+
+        for proj in (q_proj, k_proj, v_proj):
+            delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+            proj.weight.data.add_(delta_W)
+            if proj.bias is not None and update_bias:
+                proj.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
+
+        if t == T - 1:
+            finalize_step(mu, target, error, t, layer_type, is_holding_error)
+
+        return x, mu
+
+def energy_fn(mu: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    return ((mu - x) ** 2).mean(dim=-1) * 0.05
+
+def finalize_step(mu, target, error, t, layer_type, is_holding_error = False):
+    energy = energy_fn(mu, target).mean().item() if is_holding_error else None
+    errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
+    return energy, errors

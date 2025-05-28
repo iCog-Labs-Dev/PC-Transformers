@@ -1,118 +1,102 @@
 import torch
 import torch.nn as nn
-import warnings
-from typing import Callable
+from typing import Optional
+from .pc_utils import (x_init, step_embed, step_linear, step_attn, finalize_step)
 
 class PCLayer(nn.Module):
-    def __init__(self,
-                energy_fn: Callable = None,
-                sample_x_fn: Callable = None,
-                S: torch.Tensor = None,
-                M: torch.Tensor = None,
-                is_holding_error: bool = False,
-                is_keep_energy_per_datapoint: bool = False): 
-        
+    def __init__(
+        self,
+        T: int = 10,
+        local_learning_rate: float = 1e-3,
+        is_holding_error: bool = False,
+        update_bias: bool = True,
+    ):
         super().__init__()
-        self.energy_fn = energy_fn if energy_fn else (lambda inputs: (inputs['mu'] - inputs['x'])**2 - 0.5)
-        assert callable(self.energy_fn)
-        
-        self.sample_x_fn = sample_x_fn if sample_x_fn else (lambda inputs: inputs['mu'].detach().clone())
-        assert callable(self.sample_x_fn)
-
-        self._x = None
-        self._S = S
-        self._M = M
-        self._is_sample_x = False
-        self._energy = None     
-        self._energy_per_datapoint = None    
+        self.T = T
+        self.local_lr = local_learning_rate
         self.is_holding_error = is_holding_error
-        self.is_keep_energy_per_datapoint = is_keep_energy_per_datapoint
+        self.update_bias = update_bias
+        self.clamp_value = 1.0
+        self._x_cache = {}
+        self._W_cache = {}
 
-        self.clear_energy() 
-
-    @property
-    def x(self) -> nn.Parameter:
-        return self._x
-    
-    @property
-    def S(self)->torch.Tensor:
-        return self._S
-    
-    @S.setter
-    def S(self, value: torch.Tensor)-> None:
-        if value is not None:
-            assert isinstance(value, torch.Tensor)
-            assert value.dim() == 2
-        self._S = value
-
-    @property
-    def M(self)-> torch.Tensor:
-        return self._M
-    
-    @M.setter
-    def M(self, value: torch.Tensor)->None:
-        if value is not None:
-            assert isinstance(value, torch.Tensor)
-        self._M = value
-
-    @property
-    def is_sample_x(self)-> bool:          
-        """ Returns if x should be sampled. """
-        return self._is_sample_x
-
-    @is_sample_x.setter
-    def is_sample_x(self, value: bool)-> None:         
-        """ Sets if x should be sampled. """
-        assert isinstance(value, bool)
-        self._is_sample_x = value
-        if value:
-            self._x = None
-    
-    @property
-    def energy(self)-> torch.Tensor:             
-        """ Get energy held by PCLayer"""     
-        return self._energy
-    
-    @property
-    def energy_per_datapoint(self)-> torch.Tensor:             
-        assert self.is_keep_energy_per_datapoint, "Enable is_keep_energy_per_datapoint."
-        return self._energy_per_datapoint
-    
-    def clear_energy(self):            
-        """Resets the stored energy values."""
         self._energy = None
-        self._energy_per_datapoint = None
-    
-    def forward(self, mu: torch.Tensor, energy_fn_additional_inputs: dict = None) -> torch.Tensor:
-        energy_fn_additional_inputs = energy_fn_additional_inputs or {}
+        self._errors = []
 
-        if not self.training:
-            return mu
+    def forward(
+        self,
+        target_activity: torch.Tensor,
+        layer: Optional[nn.Module] = None,
+        proj_layers: Optional[dict] = None,
+        layer_type: str = "fc1",
+        input_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+    ):
+        B, S, H_out = target_activity.shape
+        x = None
+        self._energy = 0.0
+        self._errors = []
 
-        if not self.is_sample_x and (self._x is None or mu.device != self._x.device or mu.size() != self._x.size()):
-            warnings.warn(f"Auto-setting is_sample_x=True (mu.shape={mu.shape}, x.shape={getattr(self._x, 'shape', None)})", RuntimeWarning)
-            self.is_sample_x = True
+        if layer_type == "embed":
+            assert input_ids is not None and position_ids is not None, "input_ids and position_ids are required for embedding"
+            x_word = layer["word"].weight[input_ids]  
+            x_pos = layer["pos"].weight[position_ids] 
 
-        if self.is_sample_x:
-            self._x = nn.Parameter(self.sample_x_fn({"mu": mu, "x": self._x}).to(mu.device), requires_grad=True)
-            self.is_sample_x = False
+        elif layer_type == "attn":
+            x = x_init(B, S, H_out)
+        else:
+            x = x_init(B, S, layer.weight.shape[1])
+        
+        for t in range(self.T):
+            if layer_type == "embed":
+                mu = step_embed(t, target_activity, layer, layer_type, input_ids, position_ids, self.T, self.local_lr, self.clamp_value, self.is_holding_error)
+            elif layer_type == "attn":
+                x, mu = step_attn(t, target_activity, x, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
+            else:
+                x, mu = step_linear(t, target_activity, x, layer, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
 
-        x = self._x
-        if self.S is not None:
-            assert mu.dim() == x.dim() == 2
-            mu = mu.unsqueeze(2).expand(-1, -1, x.size(1))
-            x = x.unsqueeze(1).expand(-1, mu.size(1), -1)
-
-        energy = self.energy_fn({"mu": mu, "x": x, **energy_fn_additional_inputs})
-        scale = self.S if self.S is not None else self.M
-        if scale is not None:
-            energy *= scale.unsqueeze(0)
-
-        self._energy = energy.sum()
-        if self.is_keep_energy_per_datapoint:
-            self._energy_per_datapoint = energy.sum(dim=tuple(range(1, energy.dim())))
+            if self.is_holding_error:
+                error = target_activity - mu
+                energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.is_holding_error)
+                self._energy += energy
+                self._errors.extend(step_errors)
                 
-        if self.is_holding_error:
-            self.error = (self._x.detach() - mu).clone()
+        if layer_type == "embed":
+            self._cache("embed", (x_word, x_pos), None)
+            return x_word, x_pos
+        else:
+            self._cache(layer_type, x, layer.weight if hasattr(layer, "weight") else None)
+            return x
+        
+    def _cache(self, layer_type, x, layer_weight):
+        if layer_type == "embed":
+            x_word, x_pos = x
+            self._x_cache["word"] = x_word.detach()
+            self._x_cache["pos"] = x_pos.detach()
+            if layer_weight is not None:
+                self._W_cache["word"] = layer_weight["word"].data.clone()
+                self._W_cache["pos"] = layer_weight["pos"].data.clone()
+        else:
+            self._x_cache[layer_type] = x.detach()
+            if layer_weight is not None:
+                self._W_cache[layer_type] = layer_weight.data.clone()
+    
+    def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
+        return self._x_cache.get(layer_type, None)
 
-        return self._x
+    def get_weights(self, layer_type: str) -> Optional[torch.Tensor]:
+        return self._W_cache.get(layer_type, None)
+
+    def get_energy(self) -> Optional[float]:
+        return self._energy
+
+    def clear_energy(self):
+        self._energy = None
+        self._x_cache.clear()
+        self._W_cache.clear()
+
+    def get_errors(self) -> list:
+        return self._errors
+
+    def clear_errors(self):
+        self._errors = []
