@@ -1,5 +1,7 @@
 import torch.nn as nn
 from predictive_coding.pc_layer import PCLayer
+
+
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
