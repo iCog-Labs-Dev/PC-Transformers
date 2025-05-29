@@ -3,8 +3,8 @@ from predictive_coding.pc_layer import PCLayer
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.fc1 = nn.Linear(config.n_embd, 4 * config.n_embd)
-        self.fc2 = nn.Linear(4 * config.n_embd, config.n_embd)
+        self.fc1 = nn.Linear(config.n_embed, 4 * config.n_embed)
+        self.fc2 = nn.Linear(4 * config.n_embed, config.n_embed)
         # self.dropout = nn.Dropout(config.dropout)
 
         self.pc_layer2 = PCLayer(
@@ -29,3 +29,9 @@ class MLP(nn.Module):
         fc1_x = self.pc_layer1.get_x("fc1")
 
         return fc1_x
+    
+    def evaluate(self, x):
+         fc_1 = self.fc1(x)
+         fc_2 = self.fc2(fc_1)
+
+         return fc_2

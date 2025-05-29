@@ -1,62 +1,76 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch
 import math
+from predictive_coding.pc_layer import PCLayer
 
-
-class CausalSelfAttention(nn.Module):
+class Attention(nn.Module):
     def __init__(self, config):
          super().__init__()
 
-         assert config.n_embd % config.n_head == 0, "Embedding dim must be divisible by number of heads"
+         self.config = config
+         self.num_heads = config.num_heads
+         self.n_embed = config.n_embed
+         self.head_dim = config.n_embed // config.num_heads
+         self.dropout = nn.Dropout(config.dropout)
 
-         self.n_head = config.n_head
-         self.n_embd = config.n_embd
-         self.head_dim = config.n_embd // config.n_head
-         self.dropout = config.dropout
-
-         self.q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-         self.k = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-         self.v = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-
-        # Output projection
-         self.o = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+         self.q = nn.Linear(config.n_embed, config.n_embed)
+         self.k = nn.Linear(config.n_embed, config.n_embed)
+         self.v = nn.Linear(config.n_embed, config.n_embed)
+         self.output = nn.Linear(config.n_embed, config.n_embed)
         
-        # Dropout layer
-         self.attn_dropout = nn.Dropout(config.dropout)
-         self.resid_dropout = nn.Dropout(config.dropout)
+         self.pc_qkv=PCLayer(T= config.T,
+            local_learning_rate=config.local_learning_rate,
+            is_holding_error=config.is_holding_error,
+            update_bias = config.update_bias
+        )
 
+         self.pc_output = PCLayer(
+            T=config.T,
+            local_learning_rate=config.local_learning_rate,
+            is_holding_error=config.is_holding_error,
+            update_bias = config.update_bias
+        )
 
-         self.register_buffer(
-            "causal_mask",
-            torch.tril(torch.ones(config.block_size, config.block_size))
-                    .view(1, 1, config.block_size, config.block_size)
-            )
+    def forward(self, fc1_x):
+        self.pc_output(target_activity = fc1_x, layer = self.output, layer_type = "output_attn")
+        att_score = self.pc_output.get_x("output_attn")
 
+        self.pc_qkv(target_activity = att_score, proj_layers={
+            "q_proj": self.q,
+            "k_proj": self.k,
+            "v_proj": self.v
+        }, layer_type = "attn")
 
+        x_qkv = self.pc_qkv.get_x("attn")
 
-    def forward(self, x):
-        B, T, C = x.size()
+        return x_qkv
+    
+    def evaluate(self, x):
+        batch_size, seq_len, _ = x.size()
         
-        q = self.q(x)
-        k = self.k(x)
-        v = self.v(x)
-        
-        # Reshae for multi-head attention
-        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
-        k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
-        v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
-        
-        
-        attn_score = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        attn_score = attn_score.masked_fill(self.causal_mask[:, :, :T, :T] == 0, float('inf'))
-        attn_weights = F.softmax(attn_score, dim=-1)
-        attn_weights = self.attn_dropout(attn_weights)
-        attn_out = attn_weights @ v
+        Q = self.q(x)
+        K = self.k(x)
+        V = self.v(x)
 
-        # Merge heads back: [B, T, C]
-        attn_out = attn_out.transpose(1, 2).contiguous().view(B, T, C)
-        # Final projection
-        out = self.o(attn_out)
-        out = self.resid_dropout(out)
-        return out  
+        # Reshape for multi-head: [B, T, H, D/H] → [B, H, T, D/H]
+        Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Attention score: [B, H, T, T]
+        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device)).bool()
+        mask = mask.unsqueeze(0).unsqueeze(0)  
+        scores = attention_scores.masked_fill(~mask, float("-inf"))
+
+        attention_probs = nn.Softmax(dim=-1)(scores)
+        attention_probs = self.dropout(attention_probs)
+
+        # Context vector: [B, H, T, D/H]
+        context = torch.matmul(attention_probs, V)
+
+        #Concatenate heads: [B, T, H, D/H] → [B, T, D]
+        context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.n_embed)
+        output = self.output(context)
+
+        return output
