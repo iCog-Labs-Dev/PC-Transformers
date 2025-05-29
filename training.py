@@ -1,5 +1,6 @@
 import torch
 import os
+import time
 import torch.nn.functional as F
 from tokenizers import Tokenizer
 from predictive_coding.config import GPTConfig
@@ -61,12 +62,13 @@ config = GPTConfig(
     n_embed=64,
     dropout=0.1,
     local_learning_rate=1e-7,
-    T=1,
+    T=2,
     is_holding_error = True,
     num_heads=2,
     n_blocks=2,
     num_epochs=5,
     update_bias=True,
+    use_lateral = True
 )
 
 model = PCTransformer(config)
