@@ -17,6 +17,8 @@ class PCLayer(nn.Module):
         self.is_holding_error = is_holding_error
         self.update_bias = update_bias
         self.clamp_value = 1.0
+        self.W_latents = nn.ParameterDict()
+        self.use_lateral = True
         self._x_cache = {}
         self._W_cache = {}
 
@@ -27,8 +29,8 @@ class PCLayer(nn.Module):
         proj_layers: Optional[dict] = None,
         layer_type: str = "fc1"
     ):
-        B, S, H_out = target_activity.shape
-        x, W, bias = None, None, None
+        B, S, _ = target_activity.shape
+        x = None
 
         if layer_type == "embed":
             W_word, W_pos = layer["word"].weight.shape[0], layer["pos"].weight.shape[0]
@@ -36,17 +38,31 @@ class PCLayer(nn.Module):
             x_pos = x_init(1, S, W_pos)
 
         elif layer_type == "attn":
-            x = x_init(B, S, H_out)
+            H_in = proj_layers["q_proj"].weight.shape[1]
+            self._x_cache[layer_type] = self.x_init(B, S, H_in)
+
+            # Initialize W_latent for attention
+            if self.use_lateral and layer_type not in self.W_latents:
+                W = torch.empty(H_in, H_in)
+                nn.init.xavier_uniform_(W)
+                self.W_latents[layer_type] = nn.Parameter(W)       
         else:
-            x = x_init((B, S, layer.weight.shape[1]))
+            H_in = layer.weight.shape[1]
+            self._x_cache[layer_type] = self.x_init(B, S, H_in)
+
+            # Initialize W_latent for linear
+            if self.use_lateral and layer_type not in self.W_latents:
+                W = torch.empty(H_in, H_in)
+                nn.init.xavier_uniform_(W)
+                self.W_latents[layer_type] = nn.Parameter(W)
         
         for t in range(self.T):
             if layer_type == "embed":
                 x_word, x_pos = step_embed(t, target_activity, x_word, x_pos, layer, self.local_lr, self.clamp_value, self.T, self.is_holding_error)
             elif layer_type == "attn":
-                x = step_attn(t, target_activity, x, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
+                x = step_attn(t, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
             else:
-                x = step_linear(t, target_activity, x, layer, layer_type, self.local_lr, self.clamp_value, self.T, self.is_holding_error, self.update_bias)
+                x = step_linear(t, target_activity, x, self.W_latents, layer, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
 
         if layer_type == "embed":
             self._cache("embed", (x_word, x_pos), None)
@@ -55,18 +71,29 @@ class PCLayer(nn.Module):
             self._cache(layer_type, x, layer.weight if hasattr(layer, "weight") else None)
             return x
         
-    def _cache(self, layer_type, x, layer_weight):
+    def _cache(self, layer_type, x, layer, proj_layers = None):
         if layer_type == "embed":
             x_word, x_pos = x
             self._x_cache["word"] = x_word.detach()
             self._x_cache["pos"] = x_pos.detach()
-            if layer_weight is not None:
-                self._W_cache["word"] = layer_weight["word"].data.clone()
-                self._W_cache["pos"] = layer_weight["pos"].data.clone()
+            self._W_cache["word"] = layer["word"].weight.data.clone()
+            self._W_cache["pos"] = layer["pos"].weight.data.clone()
+        
+        elif layer_type == "attn":
+            self._x_cache[layer_type] = x.detach()
+            
+            if proj_layers:
+                for name, proj in proj_layers.items():
+                    self._W_cache[f"attn_{name}"] = proj.weight.data.clone()
+            
+            if self.use_lateral and layer_type in self.W_latents:
+                self._W_cache[f"{layer_type}_latent"] = self.W_latents[layer_type].data.clone()
+
         else:
             self._x_cache[layer_type] = x.detach()
-            if layer_weight is not None:
-                self._W_cache[layer_type] = layer_weight.data.clone()
+            self._W_cache[layer_type] = layer.weight.data.clone()
+            if self.use_lateral and layer_type in self.W_latents:
+                self._W_cache[f"{layer_type}_latent"] = self.W_latents[layer_type].data.clone()
     
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         return self._x_cache.get(layer_type, None)
