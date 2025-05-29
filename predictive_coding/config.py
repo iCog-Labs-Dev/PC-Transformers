@@ -14,3 +14,4 @@ class GPTConfig:
     n_blocks: int = 4
     batch_size: int = 8
     num_epochs: int = 5
+    use_lateral: bool = True

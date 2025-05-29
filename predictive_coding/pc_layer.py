@@ -46,7 +46,8 @@ class PCLayer(nn.Module):
 
         elif layer_type == "attn":
             H_in = proj_layers["q_proj"].weight.shape[1]
-            self._x_cache[layer_type] = self.x_init(B, S, H_in)
+            x = x_init(B, S, H_in)
+            self._x_cache[layer_type] = x
 
             # Initialize W_latent for attention
             if self.use_lateral and layer_type not in self.W_latents:
@@ -55,7 +56,8 @@ class PCLayer(nn.Module):
                 self.W_latents[layer_type] = nn.Parameter(W)       
         else:
             H_in = layer.weight.shape[1]
-            self._x_cache[layer_type] = self.x_init(B, S, H_in)
+            x = x_init(B, S, H_in)
+            self._x_cache[layer_type] = x
 
             # Initialize W_latent for linear
             if self.use_lateral and layer_type not in self.W_latents:
@@ -68,9 +70,9 @@ class PCLayer(nn.Module):
             if layer_type == "embed":
                 mu = step_embed(t, target_activity, layer, layer_type, input_ids, position_ids, self.T, self.local_lr, self.clamp_value, self.is_holding_error)
             elif layer_type == "attn":
-                x = step_attn(t, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
+                x, mu = step_attn(t, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
             else:
-                x = step_linear(t, target_activity, x, self.W_latents, layer, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
+                x, mu = step_linear(t, target_activity, x, layer, self.W_latents, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
 
             if self.is_holding_error:
                 error = target_activity - mu
@@ -79,10 +81,10 @@ class PCLayer(nn.Module):
                 self._errors.extend(step_errors)
                 
         if layer_type == "embed":
-            self._cache("embed", (x_word, x_pos), None)
+            self._cache("embed", (x_word, x_pos), layer)
             return x_word, x_pos
         else:
-            self._cache(layer_type, x, layer.weight if hasattr(layer, "weight") else None)
+            self._cache(layer_type, x, layer)
             return x
         
     def _cache(self, layer_type, x, layer, proj_layers = None):
@@ -105,7 +107,10 @@ class PCLayer(nn.Module):
 
         else:
             self._x_cache[layer_type] = x.detach()
-            self._W_cache[layer_type] = layer.weight.data.clone()
+
+            if hasattr(layer, "weight"):
+                self._W_cache[layer_type] = layer.weight.data.clone()
+
             if self.use_lateral and layer_type in self.W_latents:
                 self._W_cache[f"{layer_type}_latent"] = self.W_latents[layer_type].data.clone()
     
