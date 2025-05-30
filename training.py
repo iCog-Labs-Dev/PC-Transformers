@@ -67,11 +67,6 @@ config = GPTConfig(
     n_blocks=2,
     num_epochs=5,
     update_bias=True,
-<<<<<<< HEAD
-    energy_fn_name="kld" 
-    use_lateral = True
-=======
->>>>>>> parent of af66fee (fixed some errors after the addition of latent connections.)
 )
 
 model = PCTransformer(config)
