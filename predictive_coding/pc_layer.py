@@ -10,6 +10,7 @@ class PCLayer(nn.Module):
         local_learning_rate: float = 1e-3,
         is_holding_error: bool = False,
         update_bias: bool = True,
+        energy_fn_name: str = "scaled_mse",
     ):
         super().__init__()
         self.T = T
@@ -19,7 +20,7 @@ class PCLayer(nn.Module):
         self.clamp_value = 1.0
         self._x_cache = {}
         self._W_cache = {}
-
+        self.energy_fn_name = energy_fn_name 
         self._energy = None
         self._errors = []
 
