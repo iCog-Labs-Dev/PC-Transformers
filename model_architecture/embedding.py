@@ -15,6 +15,8 @@ class Embedding_Layer(nn.Module):
                                local_learning_rate=config.local_learning_rate,
                                is_holding_error= config.is_holding_error,
                                update_bias = config.update_bias,
+                               energy_fn_name=config.energy_fn_name,
+                               
                                )
       
     def forward(self, x_qkv, input_ids, position_ids)-> torch.Tensor:
