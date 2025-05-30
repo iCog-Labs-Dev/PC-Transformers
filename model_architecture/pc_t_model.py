@@ -12,20 +12,13 @@ class PCTransformer(nn.Module):
         super().__init__()
         self.config = config
         self.embedding = Embedding_Layer(config)
-        self.blocks = nn.ModuleList(
-            [TransformerBlock(config) for _ in range(config.n_blocks)]
-        )
+        self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
         self.output = OutputLayer(config)
 
     def forward(self, target_ids, input_ids):
         batch_size, seq_len = input_ids.shape
-        device = input_ids.device
         target_logits = ids_to_one_hot(target_ids, self.output.config.vocab_size)
-        position_ids = (
-            torch.arange(seq_len, device=device)
-            .unsqueeze(0)
-            .expand(batch_size, seq_len)
-        )
+        position_ids = (torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, seq_len))
 
         H = self.config.n_embed
         V = self.config.vocab_size
@@ -77,7 +70,7 @@ class PCTransformer(nn.Module):
                 T=1,
             )
         self.output.pc_layer.forward(
-            target_activity=x_init(batch_size, seq_len, V),
+            target_activity=target_logits,
             layer=self.output.output,
             layer_type="linear",
             t=0,
