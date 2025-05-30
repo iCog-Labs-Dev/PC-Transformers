@@ -2,23 +2,10 @@ import torch
 import torch.nn.functional as F
 import math
 
-
 def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
     return torch.randn(batch_size, seq_len, embedding_size)
 
-
-def step_embed(
-    t,
-    T,
-    target,
-    layer,
-    layer_type,
-    input_ids,
-    position_ids,
-    local_lr,
-    clamp_value,
-    is_holding_error,
-):
+def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, is_holding_error):
     word_layer = layer["word"]
     pos_layer = layer["pos"]
 
@@ -42,18 +29,7 @@ def step_embed(
     return mu
 
 
-def step_linear(
-    t,
-    T,
-    target,
-    x,
-    layer,
-    layer_type,
-    local_lr,
-    clamp_value,
-    is_holding_error,
-    update_bias=True,
-):
+def step_linear(t, T, target, x, layer, layer_type, local_lr, clamp_value, is_holding_error, update_bias=True):
     mu = layer(x)
     if layer_type == "fc1":
         mu = F.gelu(mu)
@@ -74,18 +50,7 @@ def step_linear(
     return x, mu
 
 
-def step_attn(
-    t,
-    T,
-    target,
-    x,
-    proj_layers,
-    layer_type,
-    local_lr,
-    clamp_value,
-    is_holding_error,
-    update_bias=True,
-):
+def step_attn(t, T, target, x, proj_layers, layer_type, local_lr, clamp_value, is_holding_error, update_bias = True):
     q_proj = proj_layers["q_proj"]
     k_proj = proj_layers["k_proj"]
     v_proj = proj_layers["v_proj"]
