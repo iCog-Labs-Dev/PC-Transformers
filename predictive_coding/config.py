@@ -14,5 +14,8 @@ class GPTConfig:
     n_blocks: int = 4
     batch_size: int = 8
     num_epochs: int = 5
+<<<<<<< HEAD
     energy_fn_name: str = "scaled_mse" 
     use_lateral: bool = True
+=======
+>>>>>>> parent of af66fee (fixed some errors after the addition of latent connections.)
