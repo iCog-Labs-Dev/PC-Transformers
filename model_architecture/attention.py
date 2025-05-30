@@ -3,7 +3,6 @@ import torch
 import math
 from predictive_coding.pc_layer import PCLayer
 
-
 class Attention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -19,8 +18,7 @@ class Attention(nn.Module):
         self.v = nn.Linear(config.n_embed, config.n_embed)
         self.output = nn.Linear(config.n_embed, config.n_embed)
 
-        self.pc_qkv = PCLayer(
-            T=config.T,
+        self.pc_qkv = PCLayer(T=config.T,
             local_learning_rate=config.local_learning_rate,
             is_holding_error=config.is_holding_error,
             update_bias=config.update_bias,
