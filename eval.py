@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 def load_model(model_path, config):
     model = PCTransformer(config)
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path),strict=False)
     return model
 
 def evaluate(model, dataloader, device):
