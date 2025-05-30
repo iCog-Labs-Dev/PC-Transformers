@@ -69,17 +69,18 @@ class PCLayer(nn.Module):
                 self.W_latents[layer_type] = nn.Parameter(W)
 
         
-        for t in range(self.T):
-            if layer_type == "embed":
-                assert (
-                    input_ids is not None and position_ids is not None
-                ), "input_ids and position_ids required"
-                x_word = layer["word"].weight[input_ids]  # [B, S, D]
-                x_pos = layer["pos"].weight[position_ids]  # [B, S, D]
-            elif layer_type == "attn":
-                x, mu = step_attn(t, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
-            else:
-                x, mu = step_linear(t, target_activity, x, layer, self.W_latents, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
+        if layer_type == "embed":
+                mu = step_embed(t, T, target_activity, layer, layer_type, input_ids, position_ids, self.local_lr, self.clamp_value, self.is_holding_error)
+        elif layer_type == "attn":
+                x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error, self.update_bias)
+        else:
+                x, mu = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type, self.local_lr, self.clamp_value,  self.use_lateral, self.is_holding_error, self.update_bias)
+        
+        if self.is_holding_error:
+            error = target_activity - mu
+            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.is_holding_error)
+            self._energy += energy
+            self._errors.extend(step_errors)
 
         if layer_type == "embed":
             self._cache("embed", (x_word, x_pos), layer)
