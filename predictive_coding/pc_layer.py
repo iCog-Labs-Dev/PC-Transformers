@@ -59,50 +59,15 @@ class PCLayer(nn.Module):
             )
 
         if layer_type == "embed":
-            mu = step_embed(
-                t,
-                T,
-                target_activity,
-                layer,
-                layer_type,
-                input_ids,
-                position_ids,
-                self.local_lr,
-                self.clamp_value,
-                self.is_holding_error,
-            )
+            mu = step_embed(t, T, target_activity, layer, layer_type, input_ids, position_ids, self.local_lr, self.clamp_value, self.is_holding_error)
         elif layer_type == "attn":
-            x, mu = step_attn(
-                t,
-                T,
-                target_activity,
-                x,
-                proj_layers,
-                layer_type,
-                self.local_lr,
-                self.clamp_value,
-                self.is_holding_error,
-                self.update_bias,
-            )
+            x, mu = step_attn(t, T, target_activity, x, proj_layers, layer_type, self.local_lr, self.clamp_value, self.is_holding_error, self.update_bias)
         else:
-            x, mu = step_linear(
-                t,
-                T,
-                target_activity,
-                x,
-                layer,
-                layer_type,
-                self.local_lr,
-                self.clamp_value,
-                self.is_holding_error,
-                self.update_bias,
-            )
+            x, mu = step_linear(t, T, target_activity, x, layer, layer_type, self.local_lr, self.clamp_value, self.is_holding_error, self.update_bias)
 
         if self.is_holding_error:
             error = target_activity - mu
-            energy, step_errors = finalize_step(
-                mu, target_activity, error, t, layer_type, self.is_holding_error
-            )
+            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.is_holding_error)
             self._energy += energy
             self._errors.extend(step_errors)
 
@@ -110,9 +75,7 @@ class PCLayer(nn.Module):
             self._cache("embed", (x_word, x_pos), None)
             return x_word, x_pos
         else:
-            self._cache(
-                layer_type, x, layer.weight if hasattr(layer, "weight") else None
-            )
+            self._cache(layer_type, x, layer.weight if hasattr(layer, "weight") else None)
             return x
 
     def _cache(self, layer_type, x, layer_weight):
