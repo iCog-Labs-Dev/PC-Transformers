@@ -28,16 +28,31 @@ def step_embed(t, target, layer, layer_type, input_ids, position_ids, local_lr, 
 
         return mu
     
-def step_linear(t, target, x, layer, layer_type, local_lr, clamp_value, T, is_holding_error,energy_fn_name,update_bias = True):
+
+def step_linear(t, target, x, layer, W_latents, layer_type, local_lr, clamp_value, T, use_lateral, is_holding_error, energy_fn_name, update_bias = True):
         mu = layer(x)
         if layer_type == "fc1":
             mu = F.gelu(mu)
 
         error = target - mu
-        x_update = error @ layer.weight
-        delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x)
+        # Latent state and W_latent update
+        x_layer = error @ layer.weight
 
-        x = torch.clamp(x + local_lr * x_update, -clamp_value, clamp_value)
+        if use_lateral and layer_type in W_latents:
+            W_latent = W_latents[layer_type]
+            x_latent = x @ W_latent
+            x = x + local_lr * (x_layer - x_latent)
+
+            hebbian_latent = torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+            W_latents[layer_type].data.add_(local_lr * hebbian_latent)
+        
+        else:
+            x = x + local_lr * x_layer
+        
+        x = torch.clamp(x, -clamp_value, clamp_value)
+        
+        # Hebbian Update W_layer
+        delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
         layer.weight.data.add_(delta_W)
 
         if layer.bias is not None and update_bias:
@@ -48,10 +63,11 @@ def step_linear(t, target, x, layer, layer_type, local_lr, clamp_value, T, is_ho
 
         return x, mu
 
-def step_attn(t, target, x, proj_layers, layer_type, local_lr, clamp_value, T, is_holding_error,energy_fn_name, update_bias = True):
+def step_attn(t, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, T, is_holding_error,energy_fn_name, update_bias = True):
         q_proj = proj_layers["q_proj"]
         k_proj = proj_layers["k_proj"]
         v_proj = proj_layers["v_proj"]
+        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"
 
         Q, K, V = q_proj(x), k_proj(x), v_proj(x)
         scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))
@@ -61,8 +77,24 @@ def step_attn(t, target, x, proj_layers, layer_type, local_lr, clamp_value, T, i
         mu = attn_weights @ V
 
         error = target - mu
-        x = torch.clamp(x - local_lr * error, -clamp_value, clamp_value)
+        # Latent state and W_latent update
+        W_layer = (q_proj.weight.T + k_proj.weight.T + v_proj.weight.T) / 3
+        x_layer = error @ W_layer
 
+        if use_lateral and layer_type in W_latents:
+            W_latent = W_latents[layer_type]
+            x_latent = x @ W_latent
+            x = x + local_lr * (x_layer - x_latent)
+
+            hebbian_latent = torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+            W_latents["attn"].data.add_(local_lr * hebbian_latent)
+        
+        else:
+            x = x + local_lr * x_layer
+
+        x = torch.clamp(x, -clamp_value, clamp_value)
+
+        # Hebbian update W_latent
         for proj in (q_proj, k_proj, v_proj):
             delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
             proj.weight.data.add_(delta_W)
