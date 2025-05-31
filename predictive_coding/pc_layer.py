@@ -47,8 +47,7 @@ class PCLayer(nn.Module):
 
         elif layer_type == "attn":
             H_in = proj_layers["q_proj"].weight.shape[1]
-            x = x_init(B, S, H_in)
-            self._x_cache[layer_type] = x
+            self._x_cache[layer_type] = self.x_init(B, S, H_in)
 
             # Initialize W_latent for attention
             if self.use_lateral and layer_type not in self.W_latents:
@@ -57,8 +56,7 @@ class PCLayer(nn.Module):
                 self.W_latents[layer_type] = nn.Parameter(W)       
         else:
             H_in = layer.weight.shape[1]
-            x = x_init(B, S, H_in)
-            self._x_cache[layer_type] = x
+            self._x_cache[layer_type] = self.x_init(B, S, H_in)
 
             # Initialize W_latent for linear
             if self.use_lateral and layer_type not in self.W_latents:
@@ -82,10 +80,10 @@ class PCLayer(nn.Module):
                 self._errors.extend(step_errors)
                 
         if layer_type == "embed":
-            self._cache("embed", (x_word, x_pos), layer)
+            self._cache("embed", (x_word, x_pos), None)
             return x_word, x_pos
         else:
-            self._cache(layer_type, x, layer)
+            self._cache(layer_type, x, layer.weight if hasattr(layer, "weight") else None)
             return x
         
     def _cache(self, layer_type, x, layer, proj_layers = None):
@@ -108,10 +106,7 @@ class PCLayer(nn.Module):
 
         else:
             self._x_cache[layer_type] = x.detach()
-
-            if hasattr(layer, "weight"):
-                self._W_cache[layer_type] = layer.weight.data.clone()
-
+            self._W_cache[layer_type] = layer.weight.data.clone()
             if self.use_lateral and layer_type in self.W_latents:
                 self._W_cache[f"{layer_type}_latent"] = self.W_latents[layer_type].data.clone()
     
