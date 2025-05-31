@@ -69,15 +69,15 @@ class PCLayer(nn.Module):
         
         for t in range(self.T):
             if layer_type == "embed":
-                mu = step_embed(t, target_activity, layer, layer_type, input_ids, position_ids, self.T, self.local_lr, self.clamp_value, self.is_holding_error)
+                mu = step_embed(t, target_activity, layer, layer_type, input_ids, position_ids, self.T, self.local_lr, self.clamp_value,self.energy_fn_name, self.is_holding_error)
             elif layer_type == "attn":
-                x, mu = step_attn(t, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
+                x, mu = step_attn(t, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error,self.energy_fn_name, self.update_bias)
             else:
-                x, mu = step_linear(t, target_activity, x, layer, self.W_latents, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error, self.update_bias)
+                x, mu = step_linear(t, target_activity, x, layer, self.W_latents, layer_type, self.local_lr, self.clamp_value, self.T, self.use_lateral, self.is_holding_error,self.energy_fn_name, self.update_bias)
 
             if self.is_holding_error:
                 error = target_activity - mu
-                energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.is_holding_error)
+                energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type,self.energy_fn_name, self.is_holding_error)
                 self._energy += energy
                 self._errors.extend(step_errors)
                 
