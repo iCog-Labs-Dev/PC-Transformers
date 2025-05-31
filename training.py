@@ -68,7 +68,8 @@ config = GPTConfig(
     n_blocks=2,
     num_epochs=5,
     update_bias=True,
-    use_lateral = True
+    use_lateral = True,
+    energy_fn_name="kld" 
 )
 
 model = PCTransformer(config)

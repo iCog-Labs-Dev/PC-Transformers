@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 def load_model(model_path, config):
     model = PCTransformer(config)
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path), strict = False)
     return model
 
 def evaluate(model, dataloader, device):
@@ -77,6 +77,7 @@ config = GPTConfig(
     n_blocks=2,
     num_epochs=1,
     update_bias=True,
+    energy_fn_name="kld"
 )
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
