@@ -77,6 +77,7 @@ config = GPTConfig(
     n_blocks=2,
     num_epochs=1,
     update_bias=True,
+    energy_fn_name="kld"
 )
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
