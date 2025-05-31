@@ -5,31 +5,30 @@ import math
 def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
     return torch.randn(batch_size, seq_len, embedding_size)
 
-def step_embed(t, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, T,energy_fn_name, is_holding_error):
-        word_layer = layer["word"]
-        pos_layer = layer["pos"]
+def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error):
+    word_layer = layer["word"]
+    pos_layer = layer["pos"]
 
-        mu_word = word_layer(input_ids)
-        mu_pos = pos_layer(position_ids)
-        mu = mu_word + mu_pos
-        error = target - mu
+    mu_word = word_layer(input_ids)
+    mu_pos = pos_layer(position_ids)
+    mu = mu_word + mu_pos
+    error = target - mu
 
-        update = torch.clamp(error, -clamp_value, clamp_value)
-        with torch.no_grad():
-            for b in range(error.size(0)):
-                for s in range(error.size(1)):
-                    idx_w = input_ids[b, s]
-                    idx_p = position_ids[b, s]
-                    word_layer.weight.data[idx_w] += local_lr * update[b, s]
-                    pos_layer.weight.data[idx_p] += local_lr * update[b, s]
+    update = torch.clamp(error, -clamp_value, clamp_value)
+    with torch.no_grad():
+        for b in range(error.size(0)):
+            for s in range(error.size(1)):
+                idx_w = input_ids[b, s]
+                idx_p = position_ids[b, s]
+                word_layer.weight.data[idx_w] += local_lr * update[b, s]
+                pos_layer.weight.data[idx_p] += local_lr * update[b, s]
 
-        if t == T - 1:
-            finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+    if t == T - 1:
+        finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
-        return mu
+    return mu
     
-
-def step_linear(t, target, x, layer, W_latents, layer_type, local_lr, clamp_value, T, use_lateral, is_holding_error, energy_fn_name, update_bias = True):
+def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias = True):
         mu = layer(x)
         if layer_type == "fc1":
             mu = F.gelu(mu)
@@ -57,16 +56,18 @@ def step_linear(t, target, x, layer, W_latents, layer_type, local_lr, clamp_valu
 
         if layer.bias is not None and update_bias:
             layer.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
-
+        
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
         return x, mu
 
-def step_attn(t, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, T, use_lateral, is_holding_error,energy_fn_name, update_bias = True):
-        q_proj = proj_layers["q_proj"]
-        k_proj = proj_layers["k_proj"]
-        v_proj = proj_layers["v_proj"]
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias = True):
+        assert proj_layers is not None, "proj_layers dict is required for attention"
+        q_proj = proj_layers.get("q_proj", None)
+        k_proj = proj_layers.get("k_proj", None)
+        v_proj = proj_layers.get("v_proj", None)
+
         assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"
 
         Q, K, V = q_proj(x), k_proj(x), v_proj(x)
