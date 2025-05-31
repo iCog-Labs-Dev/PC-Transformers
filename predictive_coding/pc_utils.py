@@ -63,7 +63,7 @@ def step_linear(t, target, x, layer, W_latents, layer_type, local_lr, clamp_valu
 
         return x, mu
 
-def step_attn(t, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, T, is_holding_error,energy_fn_name, update_bias = True):
+def step_attn(t, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, T, use_lateral, is_holding_error,energy_fn_name, update_bias = True):
         q_proj = proj_layers["q_proj"]
         k_proj = proj_layers["k_proj"]
         v_proj = proj_layers["v_proj"]
