@@ -49,7 +49,7 @@ class Attention(nn.Module):
         attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(
             self.head_dim
         )
-        mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device)).bool()
+        mask = torch.tril(torch.ones(seq_len, seq_len)).bool()
         mask = mask.unsqueeze(0).unsqueeze(0)
         scores = attention_scores.masked_fill(~mask, float("-inf"))
 

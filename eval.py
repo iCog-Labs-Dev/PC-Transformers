@@ -13,7 +13,7 @@ def load_model(model_path, config):
     model.load_state_dict(torch.load(model_path), strict = False)
     return model
 
-def evaluate(model, dataloader, device):
+def evaluate(model, dataloader):
     start_time = time.time()
     model.eval()
     total_loss = 0.0
@@ -21,8 +21,8 @@ def evaluate(model, dataloader, device):
 
     with torch.no_grad():
         for batch in dataloader:
-            input_ids = batch["input_ids"].to(device)
-            targets = batch["target_ids"].to(device)
+            input_ids = batch["input_ids"]
+            targets = batch["target_ids"]
 
             logits = model.evaluate(input_ids)
 
@@ -80,12 +80,10 @@ config = GPTConfig(
     energy_fn_name="kld"
 )
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 model_path = "checkpoints/pc_transformer.pt"
 model = load_model(model_path, config)
-model.to(device)
-evaluate(model, test_loader, device)
+model
+evaluate(model, test_loader)
 
 # Generate text using the trained model
 for batch in test_loader:

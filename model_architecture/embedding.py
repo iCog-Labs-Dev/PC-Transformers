@@ -23,7 +23,7 @@ class Embedding_Layer(nn.Module):
     def evaluate(self, input_ids, position_ids=None):
         word_embed = self.word_embeddings(input_ids)
         if position_ids is None:
-            position_ids = torch.arange(word_embed.size(1), device=input_ids.device).unsqueeze(0).expand_as(input_ids)
+            position_ids = torch.arange(word_embed.size(1)).unsqueeze(0).expand_as(input_ids)
         pos_embed=self.position_embeddings(position_ids)
         embeddings = word_embed + pos_embed
         embeddings = self.LayerNorm(embeddings)
