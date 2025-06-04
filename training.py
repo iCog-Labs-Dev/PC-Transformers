@@ -8,6 +8,8 @@ from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader
 from Data_preprocessing.config import Config
+from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 """Usage: python training.py"""
 
@@ -95,3 +97,17 @@ if os.path.exists(save_path):
     
 torch.save(model.state_dict(), save_path)
 print(f"Model saved to {save_path}")
+# Plotting average energy vs. epoch
+epochs = list(range(1, len(train_energies) + 1))
+plt.figure(figsize=(10, 6))
+plt.plot(epochs, train_energies, marker='o', linestyle='-', color='b', label='Average Batch Energy')
+plt.xlabel('Epoch')
+plt.ylabel('Average Batch Energy')
+plt.title('Average Batch Energy vs. Epoch')
+plt.grid(True)
+plt.legend()
+# Force x-axis to show only whole numbers
+plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+plt.tight_layout()
+plt.savefig('assets/energy_plot.png')
+plt.show()

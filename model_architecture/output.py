@@ -15,11 +15,7 @@ class OutputLayer(nn.Module):
             energy_fn_name=config.energy_fn_name,
         )
 
-    def forward(self, target_ids) -> torch.Tensor:
-        self.pc_layer(target_activity = target_ids, layer=self.output, layer_type ="final_output")
-        output_x = self.pc_layer.get_x("final_output")
 
-        return output_x
     def evaluate(self, x):
         output = self.output(x)
         return output
