@@ -111,12 +111,12 @@ ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,
     "mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1),
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
-    "cosine": lambda mu, x: 1 - torch.nn.functional.cosine_similarity(mu, x, dim=-1),
-    "kld": lambda mu, x: torch.nn.functional.kl_div(
+    "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
+    "kld": lambda mu, x: F.kl_div(
         mu.log_softmax(dim=-1),
         x.softmax(dim=-1),
-        reduction='mean'
-    ).sum(dim=-1)
+        reduction='batchmean'
+    )
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
