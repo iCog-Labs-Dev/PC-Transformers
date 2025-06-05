@@ -35,18 +35,20 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
         error = target - mu
         # Latent state and W_latent update
-        x_layer = error @ layer.weight
+        # x_layer = error @ layer.weight.T
 
         if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type]
             x_latent = x @ W_latent
-            x = x + local_lr * (x_layer - x_latent)
+            delta_x = error + x_latent
+            x = x + local_lr * delta_x
 
-            hebbian_latent = torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type].data.add_(local_lr * hebbian_latent)
+            anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach().T)
+            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
         
         else:
-            x = x + local_lr * x_layer
+            x= x + local_lr * error 
+           # x = x + local_lr * x_layer
         
         x = torch.clamp(x, -clamp_value, clamp_value)
         
@@ -79,19 +81,21 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
 
         error = target - mu
         # Latent state and W_latent update
-        W_layer = (q_proj.weight.T + k_proj.weight.T + v_proj.weight.T) / 3
-        x_layer = error @ W_layer
+        # W_layer = (q_proj.weight.T + k_proj.weight.T + v_proj.weight.T) / 3
+        # x_layer = error @ W_layer
 
         if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type]
             x_latent = x @ W_latent
-            x = x + local_lr * (x_layer - x_latent)
+            delta_x = error + x_latent
+            x = x + local_lr * delta_x
 
-            hebbian_latent = torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents["attn"].data.add_(local_lr * hebbian_latent)
+            anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach().T)
+            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
         
         else:
-            x = x + local_lr * x_layer
+            x= x+ local_lr * error
+            # x = x + local_lr * x_layer
 
         x = torch.clamp(x, -clamp_value, clamp_value)
 
