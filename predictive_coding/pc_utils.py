@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import math
 
 def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
-    return torch.randn(batch_size, seq_len, embedding_size)
+    return torch.zeros(batch_size, seq_len, embedding_size)
 
 def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error):
     word_layer = layer["word"]
