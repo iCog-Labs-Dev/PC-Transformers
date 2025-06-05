@@ -34,16 +34,23 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
             mu = F.gelu(mu)
 
         error = target - mu
+        if layer.weight.shape[0] != layer.weight.shape[1]:
+            error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  # project error from H_out → H_in
+        else:
+            error_proj = error  # in case of square weights
+
+        
+
         # Latent state and W_latent update
         # x_layer = error @ layer.weight.T
 
         if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type]
-            x_latent = x @ W_latent
-            delta_x = error + x_latent
+            x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
+            delta_x = error_proj + x_latent
             x = x + local_lr * delta_x
 
-            anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach().T)
+            anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
             W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
         
         else:
@@ -90,7 +97,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             delta_x = error + x_latent
             x = x + local_lr * delta_x
 
-            anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach().T)
+            anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
             W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
         
         else:
