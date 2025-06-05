@@ -88,20 +88,35 @@ class PCLayer(nn.Module):
         self.layer_type = layer_type
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            x_word = layer["word"].weight[input_ids]  # [B, S, D]
-            x_pos = layer["pos"].weight[position_ids]  # [B, S, D]
+            x_word = layer["word"].weight[input_ids] 
+            x_pos = layer["pos"].weight[position_ids] 
             self.x = (x_word, x_pos)
-            self._x_cache["embed"] = self.x  # Store tuple in x_cache for embedding layer
+            self._x_cache["embed"] = self.x  
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
-            H_out = proj_layers["v_proj"].weight.shape[0]  # Output dimension
+            H_in = proj_layers["q_proj"].weight.shape[1]
+            H_out = proj_layers["v_proj"].weight.shape[0] 
             self.x = x_init(batch_size, seq_len, H_out)
-            self._x_cache["attn"] = self.x  # Store tensor in x_cache for attention layer
-        else:  # Linear layers (e.g., fc1, fc2, output)
+            self._x_cache["attn"] = self.x 
+            
+            # Initialize W_latent for attention
+            if self.use_lateral and layer_type not in self.W_latents:
+                W = torch.empty(H_in, H_in)
+                nn.init.xavier_uniform_(W)
+                self.W_latents[layer_type] = nn.Parameter(W)
+
+        else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
             self.x = x_init(batch_size, seq_len, input_dim)
             self._x_cache[layer_type] = self.x
+            H_in = layer.weight.shape[1]
+
+            # Initialize W_latent for linear
+            if self.use_lateral and layer_type not in self.W_latents:
+                W = torch.empty(H_in, H_in)
+                nn.init.xavier_uniform_(W)
+                self.W_latents[layer_type] = nn.Parameter(W)
 
     def _cache(self, layer_type, x, layer, proj_layers = None):
         if layer_type == "embed":
