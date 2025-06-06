@@ -26,6 +26,8 @@ class PCLayer(nn.Module):
         self.energy_fn_name = energy_fn_name 
         self._energy = None
         self._errors = []
+    
+
 
     def forward(
         self,
@@ -43,32 +45,15 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._errors = []
 
-        if layer_type == "embed":
-            assert input_ids is not None and position_ids is not None, "input_ids and position_ids are required for embedding"
-            x_word = layer["word"].weight[input_ids]  
-            x_pos = layer["pos"].weight[position_ids] 
-
-        elif layer_type == "attn":
-            H_in = proj_layers["q_proj"].weight.shape[1]
-            x = x_init(B, S, H_in)
-            self._x_cache[layer_type] = x
-
-            # Initialize W_latent for attention
-            if self.use_lateral and layer_type not in self.W_latents:
-                W = torch.empty(H_in, H_in)
-                nn.init.xavier_uniform_(W)
-                self.W_latents[layer_type] = nn.Parameter(W)       
+        if self.layer_type == "embed":
+            if "embed" not in self._x_cache:
+                raise ValueError("Embedding state not initialized. Call init_x first.")
+            x_word, x_pos = self._x_cache["embed"]
         else:
-            H_in = layer.weight.shape[1]
-            x = x_init(B, S, H_in)
-            self._x_cache[layer_type] = x
-
-            # Initialize W_latent for linear
-            if self.use_lateral and layer_type not in self.W_latents:
-                W = torch.empty(H_in, H_in)
-                nn.init.xavier_uniform_(W)
-                self.W_latents[layer_type] = nn.Parameter(W)
-
+            if self.layer_type not in self._x_cache:
+                raise ValueError(f"{self.layer_type} state not initialized. Call init_x first.")
+            x = self._x_cache[self.layer_type]
+        
         if layer_type == "embed":
                 mu = step_embed(t, T, target_activity, layer, layer_type, input_ids, position_ids, self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error)
         elif layer_type == "attn":
@@ -88,7 +73,51 @@ class PCLayer(nn.Module):
         else:
             self._cache(layer_type, x, layer.weight if hasattr(layer, "weight") else None)
             return x
-        
+
+    def init_x(
+        self,
+        batch_size: int,
+        seq_len: int,
+        layer: Optional[nn.Module] = None,
+        proj_layers: Optional[dict] = None,
+        layer_type: str = "linear",
+        input_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+    ):
+        """Initialize the layer's state variables and store them in x_cache."""
+        self.layer_type = layer_type
+        if layer_type == "embed":
+            assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
+            x_word = layer["word"].weight[input_ids] 
+            x_pos = layer["pos"].weight[position_ids] 
+            self.x = (x_word, x_pos)
+            self._x_cache["embed"] = self.x  
+        elif layer_type == "attn":
+            assert proj_layers is not None, "Attention layer requires proj_layers"
+            H_in = proj_layers["q_proj"].weight.shape[1]
+            H_out = proj_layers["v_proj"].weight.shape[0] 
+            self.x = x_init(batch_size, seq_len, H_out)
+            self._x_cache["attn"] = self.x 
+            
+            # Initialize W_latent for attention
+            if self.use_lateral and layer_type not in self.W_latents:
+                W = torch.empty(H_in, H_in)
+                nn.init.xavier_uniform_(W)
+                self.W_latents[layer_type] = nn.Parameter(W)
+
+        else:  
+            assert layer is not None, "Linear layer requires layer parameter"
+            input_dim = layer.weight.shape[1]
+            self.x = x_init(batch_size, seq_len, input_dim)
+            self._x_cache[layer_type] = self.x
+            H_in = layer.weight.shape[1]
+
+            # Initialize W_latent for linear
+            if self.use_lateral and layer_type not in self.W_latents:
+                W = torch.empty(H_in, H_in)
+                nn.init.xavier_uniform_(W)
+                self.W_latents[layer_type] = nn.Parameter(W)
+
     def _cache(self, layer_type, x, layer, proj_layers = None):
         if layer_type == "embed":
             x_word, x_pos = x

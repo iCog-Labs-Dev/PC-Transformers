@@ -20,65 +20,112 @@ class PCTransformer(nn.Module):
         target_logits = ids_to_one_hot(target_ids, self.output.config.vocab_size)
         position_ids = (torch.arange(seq_len).unsqueeze(0).expand(batch_size, seq_len))
 
-        H = self.config.n_embed
-        V = self.config.vocab_size
-        init_target = x_init(batch_size, seq_len, H)
-
-        self.embedding.pc_layer.forward(
-            target_activity=init_target,
-            layer={
-                "word": self.embedding.word_embeddings,
-                "pos": self.embedding.position_embeddings,
-            },
+        
+        self.embedding.pc_layer.init_x(
+            batch_size=batch_size,
+            seq_len=seq_len,
+            layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
             layer_type="embed",
             input_ids=input_ids,
-            position_ids=position_ids,
-            t=0,
-            T=1,
-        )
-        for block in self.blocks:
-            block.attn.pc_qkv.forward(
-                target_activity=init_target,
-                proj_layers={
-                    "q_proj": block.attn.q,
-                    "k_proj": block.attn.k,
-                    "v_proj": block.attn.v,
-                },
-                layer_type="attn",
-                t=0,
-                T=1,
-            )
-            block.attn.pc_output.forward(
-                target_activity=init_target,
-                layer=block.attn.output,
-                layer_type="linear",
-                t=0,
-                T=1,
-            )
-            block.mlp.pc_layer1.forward(
-                target_activity=x_init(batch_size, seq_len, 4 * H),
-                layer=block.mlp.fc1,
-                layer_type="fc1",
-                t=0,
-                T=1,
-            )
-            block.mlp.pc_layer2.forward(
-                target_activity=init_target,
-                layer=block.mlp.fc2,
-                layer_type="linear",
-                t=0,
-                T=1,
-            )
-        self.output.pc_layer.forward(
-            target_activity=target_logits,
-            layer=self.output.output,
-            layer_type="linear",
-            t=0,
-            T=1,
+            position_ids=position_ids
         )
 
+
+        for block in self.blocks:
+
+            block.attn.pc_qkv.init_x(
+                batch_size=batch_size,
+                seq_len=seq_len,
+                proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                layer_type="attn"
+            )
+
+            block.attn.pc_output.init_x(
+                batch_size=batch_size,
+                seq_len=seq_len,
+                layer=block.attn.output,
+                layer_type="linear"
+            )
+
+            block.mlp.pc_layer1.init_x(
+                batch_size=batch_size,
+                seq_len=seq_len,
+                layer=block.mlp.fc1,
+                layer_type="fc1"
+            )
+            
+            block.mlp.pc_layer2.init_x(
+                batch_size=batch_size,
+                seq_len=seq_len,
+                layer=block.mlp.fc2,
+                layer_type="linear"
+            )
+
+          
+        self.output.pc_layer.init_x(
+              batch_size=batch_size,
+              seq_len=seq_len,
+              layer=self.output.output,
+              layer_type="linear"
+          )
+
         for t in range(self.config.T):
-            self.embedding.pc_layer.forward(
+            futures = []
+            
+            futures.append(torch.jit.fork(
+                self.output.pc_layer.forward,
+                target_activity=target_logits,
+                layer=self.output.output,
+                layer_type="linear",
+                t=t,
+                T=self.config.T,
+            ))
+
+            for block_idx, block in enumerate(self.blocks):
+                futures.append(torch.jit.fork(
+                    block.attn.pc_qkv.forward,
+                    target_activity=block.attn.pc_output.get_x("linear"),
+                    proj_layers={
+                        "q_proj": block.attn.q,
+                        "k_proj": block.attn.k,
+                        "v_proj": block.attn.v,
+                    },
+                    layer_type="attn",
+                    t=t,
+                    T=self.config.T,
+                ))
+                futures.append(torch.jit.fork(
+                    block.attn.pc_output.forward,
+                    target_activity=block.mlp.pc_layer1.get_x("fc1"),
+                    layer=block.attn.output,
+                    layer_type="linear",
+                    t=t,
+                    T=self.config.T,
+                ))
+                futures.append(torch.jit.fork(
+                    block.mlp.pc_layer1.forward,
+                    target_activity=block.mlp.pc_layer2.get_x("linear"),
+                    layer=block.mlp.fc1,
+                    layer_type="fc1",
+                    t=t,
+                    T=self.config.T,
+                ))
+                target = (
+                    self.blocks[block_idx + 1].attn.pc_qkv.get_x("attn")
+                    if block_idx < len(self.blocks) - 1
+                    else self.output.pc_layer.get_x("linear")
+                )
+                futures.append(torch.jit.fork(
+                    block.mlp.pc_layer2.forward,
+                    target_activity=target,
+                    layer=block.mlp.fc2,
+                    layer_type="linear",
+                    t=t,
+                    T=self.config.T,
+                ))
+
+            futures.append(torch.jit.fork(
+                self.embedding.pc_layer.forward,
                 target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
                 layer={
                     "word": self.embedding.word_embeddings,
@@ -89,52 +136,11 @@ class PCTransformer(nn.Module):
                 position_ids=position_ids,
                 t=t,
                 T=self.config.T,
-            )
-            for block_idx, block in enumerate(self.blocks):
-                block.attn.pc_qkv.forward(
-                    target_activity=block.attn.pc_output.get_x("linear"),
-                    proj_layers={
-                        "q_proj": block.attn.q,
-                        "k_proj": block.attn.k,
-                        "v_proj": block.attn.v,
-                    },
-                    layer_type="attn",
-                    t=t,
-                    T=self.config.T,
-                )
-                block.attn.pc_output.forward(
-                    target_activity=block.mlp.pc_layer1.get_x("fc1"),
-                    layer=block.attn.output,
-                    layer_type="linear",
-                    t=t,
-                    T=self.config.T,
-                )
-                block.mlp.pc_layer1.forward(
-                    target_activity=block.mlp.pc_layer2.get_x("linear"),
-                    layer=block.mlp.fc1,
-                    layer_type="fc1",
-                    t=t,
-                    T=self.config.T,
-                )
-                target = (
-                    self.blocks[block_idx + 1].attn.pc_qkv.get_x("attn")
-                    if block_idx < len(self.blocks) - 1
-                    else self.output.pc_layer.get_x("linear")
-                )
-                block.mlp.pc_layer2.forward(
-                    target_activity=target,
-                    layer=block.mlp.fc2,
-                    layer_type="linear",
-                    t=t,
-                    T=self.config.T,
-                )
-            self.output.pc_layer.forward(
-                target_activity=target_logits,
-                layer=self.output.output,
-                layer_type="linear",
-                t=t,
-                T=self.config.T,
-            )
+            ))
+            
+
+            for future in futures:
+                torch.jit.wait(future)
 
         # Compute logits
         output_x = self.output.pc_layer.get_x("linear")
