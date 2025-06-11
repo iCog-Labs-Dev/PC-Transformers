@@ -4,7 +4,7 @@ from dataclasses import dataclass
 class GPTConfig:
     vocab_size: int
     block_size: int
-    n_embed: int
+    n_embed: int =64
     dropout: float = 0.1
     local_learning_rate: float = 1e-3
     T: int = 10
