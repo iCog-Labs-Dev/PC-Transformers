@@ -72,12 +72,9 @@ def evaluate(model, dataloader, max_batches=None, compute_text_metrics=True):
             total_loss += loss.item()
             batch_count += 1
             
-            # Prediction accuracy calculation
+           
             preds = torch.argmax(logits, dim=-1)
             mask = targets != 0
-            correct = (preds == targets) & mask
-            correct_preds += correct.sum().item()
-            total_preds += mask.sum().item()
             
             if compute_text_metrics:
                 for i in range(preds.size(0)):
@@ -89,12 +86,12 @@ def evaluate(model, dataloader, max_batches=None, compute_text_metrics=True):
                     if i == 0:
                         # Show a sample prediction
                         prompt_len = 10
-                        prompt = input_ids[i][:prompt_len].cpu()
-                        gen_ids = generate_text(prompt, max_new_tokens=50, temperature=0.7)
-                        gen_text = decode_ids(tokenizer, gen_ids.tolist())
+                        prompt_ids = input_ids[i][:prompt_len].cpu()
+                        generated_ids = generate_text(prompt_ids, max_new_tokens=50, temperature=0.7)
+                        gen_text = decode_ids(tokenizer, generated_ids.tolist())
 
                         print(f"\n[Batch {batch_idx+1}, Sample {i+1}]")
-                        print(f"[PROMPT ]: {decode_ids(tokenizer, prompt.tolist())}")
+                        print(f"[PROMPT ]: {decode_ids(tokenizer, prompt_ids.tolist())}")
                         print(f"[TARGET ]: {tgt_str}")
                         print(f"[PREDICT]: {gen_text}")
 
