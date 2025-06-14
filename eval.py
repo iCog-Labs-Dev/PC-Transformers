@@ -4,60 +4,76 @@ import torch
 from tokenizers import Tokenizer
 from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
+from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import test_loader
 from Data_preprocessing.config import Config
 import torch.nn.functional as F
 
-def load_model(model_path, config):
-    model = PCTransformer(config)
-    model.load_state_dict(torch.load(model_path), strict = False)
-    return model
-
 def evaluate(model, dataloader):
-    start_time = time.time()
     model.eval()
-    total_loss = 0.0
+    total_energy = 0.0
     batch_count = 0
-
+    total_ce_loss = 0.0
+    
     with torch.no_grad():
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
             input_ids = batch["input_ids"]
             targets = batch["target_ids"]
 
-            logits = model.evaluate(input_ids)
+            logits = model(targets, input_ids)
 
-            loss = F.cross_entropy(
+            ce_loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 targets.view(-1),
                 ignore_index=0,
             )
-
-            total_loss += loss.item()
+            total_ce_loss += ce_loss.item()
+            
+            layer_energies = []
+            for module in model.modules():
+                if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
+                    energy = module.get_energy()
+                    if energy is not None:
+                        layer_energies.append(energy)
+            
+            batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
+            total_energy += batch_energy
             batch_count += 1
 
-    average_loss = total_loss / batch_count
-    perplexity = torch.exp(torch.tensor(average_loss)) 
+            if (batch_idx + 1) % 10 == 0:
+                print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
 
-    elapsed_time = time.time() - start_time
-    print(f"Evaluation completed in {elapsed_time:.2f}s")
-    print(f"Cross-Entropy Loss: {average_loss:.4f}")
-    print(f"Perplexity: {perplexity:.2f}")
-  
+            # Clear energies and errors for next batch
+            for module in model.modules():
+                if hasattr(module, "clear_energy"):
+                    module.clear_energy()
+                if hasattr(module, "clear_errors"):
+                    module.clear_errors()
 
-    return average_loss
+    avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
+    avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
+    return avg_energy, avg_ce_loss 
 
-def generate_text(input_ids, max_new_tokens=50, temperature=1.0):
+def generate_text(model, input_ids, config, max_new_tokens=50, temperature=1.0):
+    model.eval()
     input_tensor = input_ids.unsqueeze(0)
 
     for _ in range(max_new_tokens):
         if input_tensor.size(1) > config.block_size:
             input_tensor = input_tensor[:, -config.block_size:]
-
-        logits = model.evaluate(input_tensor)
-        logits = logits[:, -1, :] / temperature
-        probs = F.softmax(logits, dim=-1)
-        next_token = torch.multinomial(probs, num_samples=1)
-        input_tensor = torch.cat((input_tensor, next_token), dim=1)
+        
+        with torch.no_grad():
+            logits = model(input_tensor, input_tensor)
+            logits = logits[:, -1, :] / temperature
+            probs = F.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+            input_tensor = torch.cat((input_tensor, next_token), dim=1)
+        
+        for module in model.modules():
+            if hasattr(module, "clear_errors"):
+                module.clear_errors()
+            if hasattr(module, "clear_energy"):
+                module.clear_energy()
 
     return input_tensor[0]
 
@@ -70,20 +86,31 @@ config = GPTConfig(
     block_size=256,
     n_embed=64,
     dropout=0.1,
-    local_learning_rate=1e-7,
-    T=1,
+    local_learning_rate=1e-5,
+    T=2,
     is_holding_error=True,
     num_heads=2,
-    n_blocks=2,
+    n_blocks=4,
     num_epochs=1,
     update_bias=True,
     energy_fn_name="kld"
 )
 
-model_path = "checkpoints/pc_transformer.pt"
-model = load_model(model_path, config)
-model
-evaluate(model, test_loader)
+model = PCTransformer(config)
+checkpoint = torch.load("checkpoints/pc_transformer.pt")
+model.register_all_lateral_weights() 
+model.load_state_dict(checkpoint["model_state"])
+
+print("========== Evaluation started ==========", flush=True)
+start_time = time.time()
+avg_energy, avg_ce_loss = evaluate(model, test_loader) 
+elapsed = time.time() - start_time
+
+print(f"Average Energy on Evaluation Set: {avg_energy:.4f}")
+print(f"Average CE Loss on Evaluation Set: {avg_ce_loss:.4f}")
+print(f"Evaluation Time: {elapsed:.2f} seconds")
+print("========== Evaluation completed ==========", flush=True)
+
 
 # Generate text using the trained model
 for batch in test_loader:
@@ -93,7 +120,7 @@ for batch in test_loader:
 
 prompt_length = 10
 prompt_ids = input_ids[:prompt_length]
-generated_ids = generate_text(prompt_ids, max_new_tokens=50, temperature=0.7)
+generated_ids = generate_text(model, prompt_ids, config, max_new_tokens=50, temperature=0.7)
 
 print("\n Prompt:")
 print(tokenizer.decode(prompt_ids.tolist()))

@@ -5,7 +5,7 @@ import math
 def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
     return torch.zeros(batch_size, seq_len, embedding_size)
 
-def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error):
+def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update):
     word_layer = layer["word"]
     pos_layer = layer["pos"]
 
@@ -15,20 +15,21 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     error = target - mu
 
     update = torch.clamp(error, -clamp_value, clamp_value)
-    with torch.no_grad():
-        for b in range(error.size(0)):
-            for s in range(error.size(1)):
-                idx_w = input_ids[b, s]
-                idx_p = position_ids[b, s]
-                word_layer.weight.data[idx_w] += local_lr * update[b, s]
-                pos_layer.weight.data[idx_p] += local_lr * update[b, s]
+    if requires_update:
+        with torch.no_grad():
+            for b in range(error.size(0)):
+                for s in range(error.size(1)):
+                    idx_w = input_ids[b, s]
+                    idx_p = position_ids[b, s]
+                    word_layer.weight.data[idx_w] += local_lr * update[b, s]
+                    pos_layer.weight.data[idx_p] += local_lr * update[b, s]
 
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
     return mu
     
-def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias = True):
+def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update):
         mu = layer(x)
         if layer_type == "fc1":
             mu = F.gelu(mu)
@@ -50,8 +51,9 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
             delta_x = error_proj + x_latent
             x = x + local_lr * delta_x
 
-            anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
+            if requires_update:
+                anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+                W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
         
         else:
             x= x + local_lr * error 
@@ -60,18 +62,19 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         x = torch.clamp(x, -clamp_value, clamp_value)
         
         # Hebbian Update W_layer
-        delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-        layer.weight.data.add_(delta_W)
+        if requires_update:
+            delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+            layer.weight.data.add_(delta_W)
 
-        if layer.bias is not None and update_bias:
-            layer.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
+            if layer.bias is not None and update_bias:
+                layer.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
         
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
         return x, mu
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias = True):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         q_proj = proj_layers.get("q_proj", None)
         k_proj = proj_layers.get("k_proj", None)
@@ -97,9 +100,10 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             delta_x = error + x_latent
             x = x + local_lr * delta_x
 
-            anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
-        
+            if requires_update:
+                anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+                W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
+            
         else:
             x= x+ local_lr * error
             # x = x + local_lr * x_layer
@@ -107,11 +111,12 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         x = torch.clamp(x, -clamp_value, clamp_value)
 
         # Hebbian update W_latent
-        for proj in (q_proj, k_proj, v_proj):
-            delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-            proj.weight.data.add_(delta_W)
-            if proj.bias is not None and update_bias:
-                proj.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
+        if requires_update:
+            for proj in (q_proj, k_proj, v_proj):
+                delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+                proj.weight.data.add_(delta_W)
+                if proj.bias is not None and update_bias:
+                    proj.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
 
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)

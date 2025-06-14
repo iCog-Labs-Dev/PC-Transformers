@@ -64,14 +64,14 @@ config = GPTConfig(
     n_embed=64,
     dropout=0.1,
     local_learning_rate=1e-5,
-    T=1,
+    T=5,
     is_holding_error = True,
     num_heads=2,
-    n_blocks=2,
+    n_blocks=4,
     num_epochs=5,
     update_bias=True,
     use_lateral = True,
-    energy_fn_name="kld" 
+    energy_fn_name="scaled_mse" 
 )
 
 model = PCTransformer(config)
@@ -88,15 +88,11 @@ for epoch in range(config.num_epochs):
 total_training_time = time.time() - start_training_time
 print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
 print("========== Training completed ==========", flush=True)
-# Save trained model
-save_path = "checkpoints/pc_transformer.pt"
-os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-if os.path.exists(save_path):
-    os.remove(save_path)
-    
-torch.save(model.state_dict(), save_path)
-print(f"Model saved to {save_path}")
+# Saving trained model
+torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
+print("Model saved.")
+
 # Plotting average energy vs. epoch
 epochs = list(range(1, len(train_energies) + 1))
 plt.figure(figsize=(10, 6))
