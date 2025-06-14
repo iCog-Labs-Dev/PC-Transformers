@@ -57,7 +57,7 @@ class PCLayer(nn.Module):
         if layer_type == "embed":
                 mu = step_embed(t, T, target_activity, layer, layer_type, input_ids, position_ids, self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error)
         elif layer_type == "attn":
-                x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,self.energy_fn_name, self.update_bias)
+                x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,self.energy_fn_name, self.update_bias, layer_instance=self)
         else:
                 x, mu = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type, self.local_lr, self.clamp_value,  self.use_lateral, self.is_holding_error,self.energy_fn_name, self.update_bias)
         
@@ -154,9 +154,12 @@ class PCLayer(nn.Module):
 
     def clear_energy(self):
         self._energy = None
+        self._head_similarity = None
+        self._head_similarity_avg = None
+        self._head_similarity_max = None
         self._x_cache.clear()
         self._W_cache.clear()
-
+        
     def get_errors(self) -> list:
         return self._errors
 
