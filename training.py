@@ -10,6 +10,9 @@ from Data_preprocessing.dataloader import train_loader
 from Data_preprocessing.config import Config
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import matplotlib.pyplot as plt
+
+
 
 """Usage: python training.py"""
 
@@ -31,16 +34,32 @@ def train(model, dataloader):
         )
 
         layer_energies = []
+        head_similarity_values=[]
+        attn_layer_idx = 0 
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
                 if energy is not None:
                     layer_energies.append(energy)
+                if module.layer_type == "attn" and hasattr(module, "_head_similarity"):
+                    sim_matrix = module._head_similarity.numpy()
+                    avg_sim = module._head_similarity_avg
+                    max_sim = module._head_similarity_max
+                    #print(f"  Attn Layer {attn_layer_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
 
-        # Compute average energy for current batch
+                    # Save for later plotting
+                    head_similarity_values.append((attn_layer_idx, avg_sim, max_sim, sim_matrix))
+
+                 
+                    attn_layer_idx += 1
+                 # Compute average energy for current batch
         batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
         total_energy += batch_energy
         batch_count += 1
+        
+        # for layer_idx, avg_sim, max_sim, sim_matrix in head_similarity_values:
+        #      print(f"    Attn Layer {layer_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
+                
 
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f}", flush=True)
@@ -61,13 +80,13 @@ vocab_size = tokenizer.get_vocab_size()
 config = GPTConfig(
     vocab_size = vocab_size,
     block_size= 256,
-    n_embed=64,
+    n_embed=516,
     dropout=0.1,
     local_learning_rate=1e-5,
     T=1,
     is_holding_error = True,
-    num_heads=2,
-    n_blocks=2,
+    num_heads=12,
+    n_blocks=4,
     num_epochs=5,
     update_bias=True,
     use_lateral = True,
@@ -85,6 +104,7 @@ for epoch in range(config.num_epochs):
     avg_energy = train(model, train_loader)
     train_energies.append(avg_energy)
     print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f}", flush=True)
+    
 total_training_time = time.time() - start_training_time
 print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
 print("========== Training completed ==========", flush=True)
