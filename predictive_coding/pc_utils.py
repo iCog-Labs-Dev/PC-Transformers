@@ -1,7 +1,25 @@
 import torch
 import torch.nn.functional as F
 import math
+import torch
+import torch.nn.functional as F
+from predictive_coding.config import GPTConfig
+import math
 
+
+def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
+    return torch.zeros(batch_size, seq_len, embedding_size)
+def compute_DVL(attn_v):
+    num_heads= GPTConfig.num_heads
+    seq_len, _ = attn_v.shape
+    attn_flat = attn_v.permute(0, 2, 1, 3).reshape(-1, num_heads, seq_len)
+    attn_norm= F.normalize(attn_flat, p=2, dim=-1)
+    corr= torch.einsum("bhi, bhj->bij", attn_norm, attn_norm)
+    identity= torch.eye(num_heads, device=attn_v.device)
+    DVL=((corr - identity)**2).mean()
+    
+    return DVL
+    
 def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
     return torch.zeros(batch_size, seq_len, embedding_size)
 
@@ -79,16 +97,33 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         q_proj = proj_layers.get("q_proj", None)
         k_proj = proj_layers.get("k_proj", None)
         v_proj = proj_layers.get("v_proj", None)
-
+        
         assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"
+        #assert len(q_proj) == len(k_proj) == len(v_proj), "Number of projections must match num_heads"
+        
+        Q= q_proj(x)
+        K= k_proj(x)
+        V= v_proj(x)
+        batch_size, seq_len, embed_dim=target.shape
+        
+        num_heads = GPTConfig.num_heads
+        head_dim = GPTConfig.n_embed // GPTConfig.num_heads # or from config
+        
+        
+        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+        K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+        V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
 
-        Q, K, V = q_proj(x), k_proj(x), v_proj(x)
+          
         scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))
         mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
         scores = scores.masked_fill(~mask, float("-inf"))
         attn_weights = scores.softmax(dim=-1)
-        mu = attn_weights @ V
-
+        mu_heads = attn_weights @ V #(batch_size, num_heads, seq_len, head_dim)
+        mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+      
+       # dvl=compute_DVL(mu)
+        #error +=dvl
         error = target - mu
         # Latent state and W_latent update
         # W_layer = (q_proj.weight.T + k_proj.weight.T + v_proj.weight.T) / 3
