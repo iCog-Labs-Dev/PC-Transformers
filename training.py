@@ -35,7 +35,7 @@ def train(model, dataloader):
 
         layer_energies = []
         head_similarity_values=[]
-        attn_layer_idx = 0 
+        attn_block_idx = 0 
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
@@ -45,20 +45,20 @@ def train(model, dataloader):
                     sim_matrix = module._head_similarity.numpy()
                     avg_sim = module._head_similarity_avg
                     max_sim = module._head_similarity_max
-                    #print(f"  Attn Layer {attn_layer_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
+                   # print(f"  Attn Layer {attn_block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
 
                     # Save for later plotting
-                    head_similarity_values.append((attn_layer_idx, avg_sim, max_sim, sim_matrix))
+                    head_similarity_values.append((attn_block_idx, avg_sim, max_sim, sim_matrix))
 
                  
-                    attn_layer_idx += 1
+                    attn_block_idx += 1
                  # Compute average energy for current batch
         batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
         total_energy += batch_energy
         batch_count += 1
         
-        # for layer_idx, avg_sim, max_sim, sim_matrix in head_similarity_values:
-        #      print(f"    Attn Layer {layer_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
+        # for block_idx, avg_sim, max_sim, sim_matrix in head_similarity_values:
+        #       print(f"    Attn Layer {block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
                 
 
         if (batch_idx + 1) % 10 == 0:
