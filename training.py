@@ -1,13 +1,13 @@
 import torch
-import os
 import time
 import torch.nn.functional as F
-from tokenizers import Tokenizer
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader
-from Data_preprocessing.config import Config
+from utils.model_utils import load_tokenizer, reset_pc_modules
+from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 """Usage: python training.py"""
 
@@ -43,17 +43,12 @@ def train(model, dataloader):
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f}", flush=True)
 
-        for module in model.modules():
-            if hasattr(module, "clear_energy"):
-                module.clear_energy()
-            if hasattr(module, "clear_errors"):
-                module.clear_errors()
+        reset_pc_modules(model)
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     return avg_energy
 
-tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
-tokenizer = Tokenizer.from_file(tokenizer_path)
+tokenizer = load_tokenizer()
 vocab_size = tokenizer.get_vocab_size()
 
 config = GPTConfig(
@@ -61,15 +56,15 @@ config = GPTConfig(
     block_size= 256,
     n_embed=64,
     dropout=0.1,
-    local_learning_rate=1e-7,
-    T=1,
+    local_learning_rate=1e-5,
+    T=5,
     is_holding_error = True,
     num_heads=2,
-    n_blocks=2,
+    n_blocks=4,
     num_epochs=5,
     update_bias=True,
     use_lateral = True,
-    energy_fn_name="kld" 
+    energy_fn_name="scaled_mse" 
 )
 
 model = PCTransformer(config)
@@ -86,12 +81,22 @@ for epoch in range(config.num_epochs):
 total_training_time = time.time() - start_training_time
 print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
 print("========== Training completed ==========", flush=True)
-# Save trained model
-save_path = "checkpoints/pc_transformer.pt"
-os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-if os.path.exists(save_path):
-    os.remove(save_path)
-    
-torch.save(model.state_dict(), save_path)
-print(f"Model saved to {save_path}")
+# Saving trained model
+torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
+print("Model saved.")
+
+# Plotting average energy vs. epoch
+epochs = list(range(1, len(train_energies) + 1))
+plt.figure(figsize=(10, 6))
+plt.plot(epochs, train_energies, marker='o', linestyle='-', color='b', label='Average Batch Energy')
+plt.xlabel('Epoch')
+plt.ylabel('Average Batch Energy')
+plt.title('Average Batch Energy vs. Epoch')
+plt.grid(True)
+plt.legend()
+# Force x-axis to show only whole numbers
+plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+plt.tight_layout()
+plt.savefig('assets/energy_plot.png')
+plt.show()
