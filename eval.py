@@ -1,57 +1,26 @@
-import os
 import time
 import torch
-from tokenizers import Tokenizer
-from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import test_loader
-from Data_preprocessing.config import Config
 import torch.nn.functional as F
-from bert_score import score as bertscore
-from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, compute_text_metrics, decode_ids
 
-# Helper to decode a list of token IDs into a string
-def decode_ids(tokenizer, ids):
-    return tokenizer.decode(ids, skip_special_tokens=True).strip()
+"""Usage: python eval.py"""
 
-def load_model(model_path, config):
-    model = PCTransformer(config)
-    model.load_state_dict(torch.load(model_path), strict = False)
-    return model
-
-def generate_text(input_ids, max_new_tokens=50, temperature=1.0):
-    input_tensor = input_ids.unsqueeze(0)
-
-    for _ in range(max_new_tokens):
-        if input_tensor.size(1) > config.block_size:
-            input_tensor = input_tensor[:, -config.block_size:]
-
-        logits = model.evaluate(input_tensor)
-        logits = logits[:, -1, :] / temperature
-        probs = F.softmax(logits, dim=-1)
-        next_token = torch.multinomial(probs, num_samples=1)
-        input_tensor = torch.cat((input_tensor, next_token), dim=1)
-
-    return input_tensor[0] # Return generated sequence without batch dim
-
-
-# Evaluate model on test dataset with optional text metrics
-def evaluate(model, dataloader, max_batches=None, compute_text_metrics=True):
+def evaluate(model, dataloader, max_batches=None, compute_metrics=True):
     start_time = time.time()
     model.eval()
-    
-    total_loss = 0.0
+    total_energy = 0.0
     batch_count = 0
-    
-    references = []
-    candidates = []
+    total_ce_loss = 0.0
+
+    decoded_targets, decoded_predictions = [], []
     
     if max_batches is None:
         print(f"Evaluating on the full test set...")
     else:
         print(f"Evaluating on up to {max_batches} batches...")
-        
         
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
@@ -62,9 +31,7 @@ def evaluate(model, dataloader, max_batches=None, compute_text_metrics=True):
             targets = batch["target_ids"]
 
             logits = model(targets, input_ids)
-
-            # Cross-entropy loss (ignore padding index 0)
-            loss = F.cross_entropy(
+            ce_loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 targets.view(-1),
                 ignore_index=0,
@@ -81,68 +48,34 @@ def evaluate(model, dataloader, max_batches=None, compute_text_metrics=True):
             batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
             total_energy += batch_energy
             batch_count += 1
-            
-           
+
+            if (batch_idx + 1) % 10 == 0:
+                print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
+
+            reset_pc_modules(model)
+
+        if compute_metrics:
             preds = torch.argmax(logits, dim=-1)
             mask = targets != 0
-            
-            if compute_text_metrics:
-                for i in range(preds.size(0)):
-                    pred_str = decode_ids(tokenizer, preds[i][mask[i]].tolist())
-                    tgt_str = decode_ids(tokenizer, targets[i][mask[i]].tolist())
-                    candidates.append(pred_str)
-                    references.append(tgt_str)
+            for i in range(preds.size(0)):
+                pred_str = decode_ids(tokenizer, preds[i][mask[i]].tolist())
+                tgt_str = decode_ids(tokenizer, targets[i][mask[i]].tolist())
+                decoded_predictions.append(pred_str)
+                decoded_targets.append(tgt_str)
 
-                    if i == 0:
-                        # Show a sample prediction
-                        prompt_len = 10
-                        prompt_ids = input_ids[i][:prompt_len].cpu()
-                        generated_ids = generate_text(prompt_ids, max_new_tokens=50, temperature=0.7)
-                        gen_text = decode_ids(tokenizer, generated_ids.tolist())
+    if compute_metrics and decoded_predictions and decoded_targets:
+        compute_text_metrics(decoded_predictions, decoded_targets)
 
-                        print(f"\n[Batch {batch_idx+1}, Sample {i+1}]")
-                        print(f"[PROMPT ]: {decode_ids(tokenizer, prompt_ids.tolist())}")
-                        print(f"[TARGET ]: {tgt_str}")
-                        print(f"[PREDICT]: {gen_text}")
-
-    average_loss = total_loss / batch_count if batch_count > 0 else 0.0
-
-    # Print evaluation results
-    print("\nEvaluation Results:")
-    print(f"Cross-Entropy Loss: {average_loss:.4f}")
-    
-    # Compute additional text-level metrics
-    if compute_text_metrics and candidates and references:
-        print("\nComputing BERTScore and BLEU...")
-
-        P, R, F1 = bertscore(
-            candidates,
-            references,
-            lang="en",
-            model_type="roberta-base",
-            rescale_with_baseline=True,
-        )
-        print(f"BERTScore (F1): {F1.mean().item():.4f}")
-
-        smooth_fn = SmoothingFunction().method4
-        tokenized_refs = [[ref.split()] for ref in references]
-        tokenized_cands = [cand.split() for cand in candidates]
-        bleu = corpus_bleu(tokenized_refs, tokenized_cands, smoothing_function=smooth_fn)
-        print(f"BLEU Score: {bleu:.4f}")
-        
+    avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
+    avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
         
     elapsed = time.time() - start_time
     print(f"Evaluation completed in {elapsed:.2f} seconds")
     print(f"Total Batches Processed: {batch_idx + 1}")
+    print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
+    return avg_energy, avg_ce_loss 
 
-  
-
-    return average_loss
-
-
-
-tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
-tokenizer = Tokenizer.from_file(tokenizer_path)
+tokenizer = load_tokenizer()
 vocab_size = tokenizer.get_vocab_size()
 
 config = GPTConfig(
@@ -160,10 +93,8 @@ config = GPTConfig(
     energy_fn_name="kld"
 )
 
-
 model_path = "checkpoints/pc_transformer.pt"
 model = load_model(model_path, config)
 
-# Run evaluation
 # Max batches can be set to limit evaluation, or None for full dataset
-evaluate(model, test_loader, max_batches=10, compute_text_metrics=True)
+evaluate(model, test_loader, max_batches=10, compute_metrics=True)

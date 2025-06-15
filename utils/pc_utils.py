@@ -1,14 +1,8 @@
 import torch
 import torch.nn.functional as F
 import math
-import torch
-import torch.nn.functional as F
 from predictive_coding.config import GPTConfig
-import math
 
-
-def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
-    return torch.zeros(batch_size, seq_len, embedding_size)
 def compute_DVL(attn_v):
     num_heads= GPTConfig.num_heads
     seq_len, _ = attn_v.shape
@@ -54,14 +48,9 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
         error = target - mu
         if layer.weight.shape[0] != layer.weight.shape[1]:
-            error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  # project error from H_out → H_in
+            error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
         else:
-            error_proj = error  # in case of square weights
-
-        
-
-        # Latent state and W_latent update
-        # x_layer = error @ layer.weight.T
+            error_proj = error  
 
         if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type]
@@ -75,7 +64,6 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         
         else:
             x= x + local_lr * error 
-           # x = x + local_lr * x_layer
         
         x = torch.clamp(x, -clamp_value, clamp_value)
         
@@ -86,7 +74,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
             if layer.bias is not None and update_bias:
                 layer.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
-        
+
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
@@ -98,17 +86,14 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         k_proj = proj_layers.get("k_proj", None)
         v_proj = proj_layers.get("v_proj", None)
         
-        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"
-        #assert len(q_proj) == len(k_proj) == len(v_proj), "Number of projections must match num_heads"
-        
+        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"        
         Q= q_proj(x)
         K= k_proj(x)
         V= v_proj(x)
         batch_size, seq_len, embed_dim=target.shape
         
         num_heads = GPTConfig.num_heads
-        head_dim = GPTConfig.n_embed // GPTConfig.num_heads # or from config
-        
+        head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
         
         Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
         K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
@@ -125,9 +110,6 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
        # dvl=compute_DVL(mu)
         #error +=dvl
         error = target - mu
-        # Latent state and W_latent update
-        # W_layer = (q_proj.weight.T + k_proj.weight.T + v_proj.weight.T) / 3
-        # x_layer = error @ W_layer
 
         if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type]
@@ -141,7 +123,6 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             
         else:
             x= x+ local_lr * error
-            # x = x + local_lr * x_layer
 
         x = torch.clamp(x, -clamp_value, clamp_value)
 
@@ -179,3 +160,7 @@ def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_er
     energy = energy_fn(mu, target,energy_fn_name).mean().item() if is_holding_error else None
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
+    
+def ids_to_one_hot(input_ids, vocab_size):
+        """input_id from [B, S] to [B, S, V]"""
+        return F.one_hot(input_ids, num_classes=vocab_size).float()

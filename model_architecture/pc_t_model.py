@@ -2,9 +2,8 @@ import torch
 import torch.nn as nn
 from .embedding import Embedding_Layer
 from .transformer_block import TransformerBlock
-from .transformer_utils import ids_to_one_hot
+from utils.pc_utils import ids_to_one_hot
 from .output import OutputLayer
-from predictive_coding.pc_utils import x_init
 
 
 class PCTransformer(nn.Module):

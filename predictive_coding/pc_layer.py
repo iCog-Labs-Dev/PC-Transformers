@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Optional
-from .pc_utils import x_init, step_embed, step_linear, step_attn, finalize_step
+from utils.pc_utils import x_init, step_embed, step_linear, step_attn, finalize_step
 
 
 class PCLayer(nn.Module):

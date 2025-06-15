@@ -1,13 +1,11 @@
 import torch
-import os
 import time
 import torch.nn.functional as F
-from tokenizers import Tokenizer
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader
-from Data_preprocessing.config import Config
+from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
@@ -45,17 +43,12 @@ def train(model, dataloader):
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f}", flush=True)
 
-        for module in model.modules():
-            if hasattr(module, "clear_energy"):
-                module.clear_energy()
-            if hasattr(module, "clear_errors"):
-                module.clear_errors()
+        reset_pc_modules(model)
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     return avg_energy
 
-tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
-tokenizer = Tokenizer.from_file(tokenizer_path)
+tokenizer = load_tokenizer()
 vocab_size = tokenizer.get_vocab_size()
 
 config = GPTConfig(
