@@ -14,6 +14,7 @@ from matplotlib.ticker import MaxNLocator
 def train(model, dataloader):
     model.train()
     total_energy = 0.0
+    total_ce_loss = 0.0
     batch_count = 0
 
     for batch_idx, batch in enumerate(dataloader):
@@ -27,6 +28,8 @@ def train(model, dataloader):
             target_ids.view(-1),
             ignore_index=0
         )
+        
+        total_ce_loss += ce_loss.item()
 
         layer_energies = []
         for module in model.modules():
@@ -46,7 +49,10 @@ def train(model, dataloader):
         reset_pc_modules(model)
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
-    return avg_energy
+    avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
+    perplexity = torch.exp(torch.tensor(avg_ce_loss)).item()
+    
+    return avg_energy, perplexity
 
 tokenizer = load_tokenizer()
 vocab_size = tokenizer.get_vocab_size()
@@ -69,15 +75,17 @@ config = GPTConfig(
 
 model = PCTransformer(config)
 train_energies = []
+perplexities = []
 
 print("========== Training started ==========", flush=True) 
 # Measure total training time
 start_training_time = time.time()
 for epoch in range(config.num_epochs):
     print(f"Epoch {epoch+1} started", flush=True)
-    avg_energy = train(model, train_loader)
+    avg_energy, perplexity = train(model, train_loader)
     train_energies.append(avg_energy)
-    print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f}", flush=True)
+    perplexities.append(perplexity)
+    print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 total_training_time = time.time() - start_training_time
 print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
 print("========== Training completed ==========", flush=True)
