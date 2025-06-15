@@ -61,45 +61,52 @@ def generate_text(input_ids, max_new_tokens=50, temperature=1.0):
 
     return input_tensor[0]
 
-tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
-tokenizer = Tokenizer.from_file(tokenizer_path)
-vocab_size = tokenizer.get_vocab_size()
 
-config = GPTConfig(
-    vocab_size = vocab_size,
-    block_size=256,
-    n_embed=64,
-    dropout=0.1,
-    local_learning_rate=1e-7,
-    T=1,
-    is_holding_error=True,
-    num_heads=2,
-    n_blocks=2,
-    num_epochs=1,
-    update_bias=True,
-    energy_fn_name="kld"
-)
+def main():
+    tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
+    tokenizer = Tokenizer.from_file(tokenizer_path)
+    vocab_size = tokenizer.get_vocab_size()
 
-model_path = "checkpoints/pc_transformer.pt"
-model = load_model(model_path, config)
-model
-evaluate(model, test_loader)
+    config = GPTConfig(
+        vocab_size=vocab_size,
+        block_size=256,
+        n_embed=64,
+        dropout=0.1,
+        local_learning_rate=1e-7,
+        T=1,
+        is_holding_error=True,
+        num_heads=2,
+        n_blocks=2,
+        num_epochs=1,
+        update_bias=True,
+        energy_fn_name="kld"
+    )
 
-# Generate text using the trained model
-for batch in test_loader:
-    input_ids = batch["input_ids"][0]
-    target_ids = batch["target_ids"][0]
-    break
+    model_path = "checkpoints/pc_transformer.pt"
+    model = load_model(model_path, config)
+    
+    
+    test_loss = evaluate(model, test_loader)
+    
 
-prompt_length = 10
-prompt_ids = input_ids[:prompt_length]
-generated_ids = generate_text(prompt_ids, max_new_tokens=50, temperature=0.7)
+    for batch in test_loader:
+        input_ids = batch["input_ids"][0]
+        target_ids = batch["target_ids"][0]
+        break
 
-print("\n Prompt:")
-print(tokenizer.decode(prompt_ids.tolist()))
+    prompt_length = 10
+    prompt_ids = input_ids[:prompt_length]
+    generated_ids = generate_text(prompt_ids, max_new_tokens=50, temperature=0.7)
 
-print("\n Target")
-print(tokenizer.decode(input_ids.tolist()))
+    print("\nPrompt:")
+    print(tokenizer.decode(prompt_ids.tolist()))
 
-print("\n Generated Text:")
-print(tokenizer.decode(generated_ids.tolist()))
+    print("\nTarget:")
+    print(tokenizer.decode(input_ids.tolist()))
+
+    print("\nGenerated Text:")
+    print(tokenizer.decode(generated_ids.tolist()))
+
+if __name__ == "__main__":
+    main()
+
