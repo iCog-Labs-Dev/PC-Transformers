@@ -8,7 +8,6 @@ from Data_preprocessing.dataloader import train_loader
 from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
-import matplotlib.pyplot as plt
 
 
 
