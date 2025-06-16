@@ -1,8 +1,9 @@
 import torch
-import numpy as np
 import torch.nn.functional as F
 import math
 from predictive_coding.config import GPTConfig
+import numpy as np
+
 
 def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
     return torch.randn(batch_size, seq_len, embedding_size)
