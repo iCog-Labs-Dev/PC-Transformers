@@ -191,6 +191,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
                 if proj.bias is not None and update_bias:
                     proj.bias.data.add_(local_lr * error_dvl.mean(dim=(0, 1)))
 
+
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
