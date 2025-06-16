@@ -2,20 +2,57 @@ import torch
 import torch.nn.functional as F
 import math
 from predictive_coding.config import GPTConfig
+import numpy as np
+
+
+def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
+    return torch.randn(batch_size, seq_len, embedding_size)
 
 def compute_DVL(attn_v):
-    num_heads= GPTConfig.num_heads
-    seq_len, _ = attn_v.shape
-    attn_flat = attn_v.permute(0, 2, 1, 3).reshape(-1, num_heads, seq_len)
-    attn_norm= F.normalize(attn_flat, p=2, dim=-1)
-    corr= torch.einsum("bhi, bhj->bij", attn_norm, attn_norm)
-    identity= torch.eye(num_heads, device=attn_v.device)
-    DVL=((corr - identity)**2).mean()
+    B, H, T, D= attn_v.shape
     
-    return DVL
+    #print(f"Head Outputs Variance: {attn_v.var().item():.4f}")
+    # Ensure input tensor has requires_grad=True
+    x= attn_v.transpose(0, 1).flatten(2, 3)
+    x=F.normalize(x, p=2, dim=-1)
+    s_m=torch.bmm(x, x.transpose(1, 2))
+    N = s_m.size(1)
+    mask = ~torch.eye(N, device=x.device).bool()
+    s_m= s_m[:, mask].view(H, H, -1)
+    s_m= s_m.mean(dim=-1)
+    identity = torch.eye(s_m.size(1), device=s_m.device)
+    identity = identity.unsqueeze(0).expand(H, -1, -1)
     
-def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
-    return torch.zeros(batch_size, seq_len, embedding_size)
+    corr=  s_m - identity
+    dvl=(corr** 2).mean()
+    
+   
+    try:
+        dvl_grad= torch.autograd.grad(dvl, 
+                                      attn_v,
+                                      retain_graph= True,
+                                      )[0]
+    except Exception as e:
+        print(f" Error computing diversity gradient: {e}")
+        dvl_grad=torch.zeros_like(attn_v)
+        
+    
+    return dvl_grad
+
+
+def get_head_similarity(mu_heads):
+    B, H, T, D = mu_heads.shape
+    x = mu_heads.transpose(0, 1).flatten(2, 3)  # [H, N, D]
+    x = F.normalize(x, p=2, dim=-1)
+    
+    # Compute pairwise cosine similarity between heads
+    corr = torch.bmm(x, x.transpose(1, 2))  # [H, N, N]
+    mask = ~torch.eye(corr.size(1), device=corr.device).bool()
+    s_v = corr[:, mask].view(H, H, -1)
+    corr = s_v.abs().mean(dim=-1)  # [H, H]
+
+    return corr.detach().cpu()
+        
 
 def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update):
     word_layer = layer["word"]
@@ -80,7 +117,8 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
         return x, mu
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias = True, layer_instance=None):
+
         assert proj_layers is not None, "proj_layers dict is required for attention"
         q_proj = proj_layers.get("q_proj", None)
         k_proj = proj_layers.get("k_proj", None)
@@ -90,27 +128,46 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         Q= q_proj(x)
         K= k_proj(x)
         V= v_proj(x)
+        
         batch_size, seq_len, embed_dim=target.shape
-        
         num_heads = GPTConfig.num_heads
-        head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
-        
-        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-        K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-        V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+        head_dim = GPTConfig.n_embed // GPTConfig.num_heads # or from config
+        la= GPTConfig.la * math.sqrt(1.0 / head_dim)
+
+        Q = Q.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2) #[B, H, T, D]
+        K = K.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
+        V = V.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
 
           
-        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))
+        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #[B, H, T, T]
         mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
         scores = scores.masked_fill(~mask, float("-inf"))
         attn_weights = scores.softmax(dim=-1)
-        mu_heads = attn_weights @ V #(batch_size, num_heads, seq_len, head_dim)
+        
+        mu_heads = attn_weights @ V #(B, H, T, D)
+        
+        dvl_grad=compute_DVL(mu_heads)
+        #dvl_norm = dvl_grad.norm().item()
+    
+        #print(f"Diversity Grad Norm: {dvl_norm:.8f}")
+        similarity = get_head_similarity(mu_heads)
+        #print(f"Headwise Similarity Matrix:\n{similarity.numpy()}")
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-      
-       # dvl=compute_DVL(mu)
-        #error +=dvl
+        
         error = target - mu
-
+        if dvl_grad is not None:
+            B, H, T, D = dvl_grad.shape
+            dvl_projected = dvl_grad.transpose(1, 2).reshape(B, T, -1)
+            dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
+            error_dvl = error + la * dvl_projected
+        else:
+            error_dvl = error
+       
+        if layer_instance is not None:
+            setattr(layer_instance, '_head_similarity', similarity)
+            setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
+            setattr(layer_instance, '_head_similarity_max', similarity.max().item())
+    
         if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type]
             x_latent = x @ W_latent
@@ -129,13 +186,14 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         # Hebbian update W_latent
         if requires_update:
             for proj in (q_proj, k_proj, v_proj):
-                delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+                delta_W = local_lr * torch.einsum("bsh,bsv->hv", error_dvl, x.detach())
                 proj.weight.data.add_(delta_W)
                 if proj.bias is not None and update_bias:
-                    proj.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
+                    proj.bias.data.add_(local_lr * error_dvl.mean(dim=(0, 1)))
+
 
         if t == T - 1:
-            finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+            finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
         return x, mu
     
