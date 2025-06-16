@@ -1,13 +1,11 @@
 import torch
-import os
 import time
 import torch.nn.functional as F
-from tokenizers import Tokenizer
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader
-from Data_preprocessing.config import Config
+from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import matplotlib.pyplot as plt
@@ -19,6 +17,7 @@ import matplotlib.pyplot as plt
 def train(model, dataloader):
     model.train()
     total_energy = 0.0
+    total_ce_loss = 0.0
     batch_count = 0
 
     for batch_idx, batch in enumerate(dataloader):
@@ -32,6 +31,8 @@ def train(model, dataloader):
             target_ids.view(-1),
             ignore_index=0
         )
+        
+        total_ce_loss += ce_loss.item()
 
         layer_energies = []
         head_similarity_values=[]
@@ -46,11 +47,9 @@ def train(model, dataloader):
                     avg_sim = module._head_similarity_avg
                     max_sim = module._head_similarity_max
                    # print(f"  Attn Layer {attn_block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
-
                     # Save for later plotting
                     head_similarity_values.append((attn_block_idx, avg_sim, max_sim, sim_matrix))
 
-                 
                     attn_block_idx += 1
                  # Compute average energy for current batch
         batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
@@ -60,21 +59,18 @@ def train(model, dataloader):
         # for block_idx, avg_sim, max_sim, sim_matrix in head_similarity_values:
         #       print(f"    Attn Layer {block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
                 
-
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f}", flush=True)
 
-        for module in model.modules():
-            if hasattr(module, "clear_energy"):
-                module.clear_energy()
-            if hasattr(module, "clear_errors"):
-                module.clear_errors()
+        reset_pc_modules(model)
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
-    return avg_energy
+    avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
+    perplexity = torch.exp(torch.tensor(avg_ce_loss)).item()
+    
+    return avg_energy, perplexity
 
-tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
-tokenizer = Tokenizer.from_file(tokenizer_path)
+tokenizer = load_tokenizer()
 vocab_size = tokenizer.get_vocab_size()
 
 config = GPTConfig(
@@ -83,40 +79,37 @@ config = GPTConfig(
     n_embed=516,
     dropout=0.1,
     local_learning_rate=1e-5,
-    T=1,
+    T=5,
     is_holding_error = True,
-    num_heads=12,
+    num_heads=2,
     n_blocks=4,
     num_epochs=5,
     update_bias=True,
     use_lateral = True,
-    energy_fn_name="kld" 
+    energy_fn_name="scaled_mse" 
 )
 
 model = PCTransformer(config)
 train_energies = []
+perplexities = []
 
 print("========== Training started ==========", flush=True) 
 # Measure total training time
 start_training_time = time.time()
 for epoch in range(config.num_epochs):
     print(f"Epoch {epoch+1} started", flush=True)
-    avg_energy = train(model, train_loader)
+    avg_energy, perplexity = train(model, train_loader)
     train_energies.append(avg_energy)
-    print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f}", flush=True)
-    
+    perplexities.append(perplexity)
+    print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 total_training_time = time.time() - start_training_time
 print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
 print("========== Training completed ==========", flush=True)
-# Save trained model
-save_path = "checkpoints/pc_transformer.pt"
-os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-if os.path.exists(save_path):
-    os.remove(save_path)
-    
-torch.save(model.state_dict(), save_path)
-print(f"Model saved to {save_path}")
+# Saving trained model
+torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
+print("Model saved.")
+
 # Plotting average energy vs. epoch
 epochs = list(range(1, len(train_energies) + 1))
 plt.figure(figsize=(10, 6))
