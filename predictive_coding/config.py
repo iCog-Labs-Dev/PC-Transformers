@@ -4,10 +4,9 @@ from dataclasses import dataclass
 class GPTConfig:
     vocab_size: int
     block_size: int
-    la: float=0.5
     n_embed: int =64
     dropout: float = 0.1
-    local_learning_rate: float = 1e-5
+    local_learning_rate: float = 1e-3
     T: int = 10
     is_holding_error: bool = False
     update_bias: bool = True
