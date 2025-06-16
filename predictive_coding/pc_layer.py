@@ -63,7 +63,9 @@ class PCLayer(nn.Module):
                             self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error,
                             requires_update)
         elif layer_type == "attn":
-                x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type, self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,self.energy_fn_name, self.update_bias, layer_instance=self)
+            x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
+                              self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
+                              self.energy_fn_name, self.update_bias, requires_update)
         else:
             x, mu = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
                                self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,

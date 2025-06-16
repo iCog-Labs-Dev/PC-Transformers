@@ -9,8 +9,6 @@ from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-
-
 """Usage: python training.py"""
 
 def train(model, dataloader):
@@ -34,30 +32,17 @@ def train(model, dataloader):
         total_ce_loss += ce_loss.item()
 
         layer_energies = []
-        head_similarity_values=[]
-        attn_block_idx = 0 
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
                 if energy is not None:
                     layer_energies.append(energy)
-                if module.layer_type == "attn" and hasattr(module, "_head_similarity"):
-                    sim_matrix = module._head_similarity.numpy()
-                    avg_sim = module._head_similarity_avg
-                    max_sim = module._head_similarity_max
-                   # print(f"  Attn Layer {attn_block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
-                    # Save for later plotting
-                    head_similarity_values.append((attn_block_idx, avg_sim, max_sim, sim_matrix))
 
-                    attn_block_idx += 1
-                 # Compute average energy for current batch
+        # Compute average energy for current batch
         batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
         total_energy += batch_energy
         batch_count += 1
-        
-        # for block_idx, avg_sim, max_sim, sim_matrix in head_similarity_values:
-        #       print(f"    Attn Layer {block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
-                
+
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f}", flush=True)
 
