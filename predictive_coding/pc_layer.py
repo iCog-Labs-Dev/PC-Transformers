@@ -124,9 +124,8 @@ class PCLayer(nn.Module):
         return self._energy
 
     def clear_energy(self):
-        self._energy = None
+        self._energy = 0.0
         self._x_cache.clear()
-        self._W_cache.clear()
 
     def get_errors(self) -> list:
         return self._errors

@@ -124,7 +124,6 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         k_proj = proj_layers.get("k_proj", None)
         v_proj = proj_layers.get("v_proj", None)
         
-
         assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"        
         Q= q_proj(x)
         K= k_proj(x)
@@ -184,12 +183,13 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
 
         x = torch.clamp(x, -clamp_value, clamp_value)
 
-        # Hebbian update W_layer
-        for proj in (q_proj, k_proj, v_proj):
-            delta_W = local_lr * torch.einsum("bsh,bsv->hv", error_dvl, x.detach())
-            proj.weight.data.add_(delta_W)
-            if proj.bias is not None and update_bias:
-                proj.bias.data.add_(local_lr * error_dvl.mean(dim=(0, 1)))
+        # Hebbian update W_latent
+        if requires_update:
+            for proj in (q_proj, k_proj, v_proj):
+                delta_W = local_lr * torch.einsum("bsh,bsv->hv", error_dvl, x.detach())
+                proj.weight.data.add_(delta_W)
+                if proj.bias is not None and update_bias:
+                    proj.bias.data.add_(local_lr * error_dvl.mean(dim=(0, 1)))
 
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
