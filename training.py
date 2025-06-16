@@ -54,57 +54,61 @@ def train(model, dataloader):
     
     return avg_energy, perplexity
 
-tokenizer = load_tokenizer()
-vocab_size = tokenizer.get_vocab_size()
+def main():
+    tokenizer = load_tokenizer()
+    vocab_size = tokenizer.get_vocab_size()
 
-config = GPTConfig(
-    vocab_size = vocab_size,
-    block_size= 256,
-    n_embed=64,
-    dropout=0.1,
-    local_learning_rate=1e-5,
-    T=5,
-    is_holding_error = True,
-    num_heads=2,
-    n_blocks=4,
-    num_epochs=5,
-    update_bias=True,
-    use_lateral = True,
-    energy_fn_name="scaled_mse" 
-)
+    config = GPTConfig(
+        vocab_size = vocab_size,
+        block_size= 256,
+        n_embed=64,
+        dropout=0.1,
+        local_learning_rate=1e-5,
+        T=5,
+        is_holding_error = True,
+        num_heads=2,
+        n_blocks=4,
+        num_epochs=5,
+        update_bias=True,
+        use_lateral = True,
+        energy_fn_name="scaled_mse" 
+    )
 
-model = PCTransformer(config)
-train_energies = []
-perplexities = []
+    model = PCTransformer(config)
+    train_energies = []
+    perplexities = []
 
-print("========== Training started ==========", flush=True) 
-# Measure total training time
-start_training_time = time.time()
-for epoch in range(config.num_epochs):
-    print(f"Epoch {epoch+1} started", flush=True)
-    avg_energy, perplexity = train(model, train_loader)
-    train_energies.append(avg_energy)
-    perplexities.append(perplexity)
-    print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
-total_training_time = time.time() - start_training_time
-print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
-print("========== Training completed ==========", flush=True)
+    print("========== Training started ==========", flush=True) 
+    # Measure total training time
+    start_training_time = time.time()
+    for epoch in range(config.num_epochs):
+        print(f"Epoch {epoch+1} started", flush=True)
+        avg_energy, perplexity = train(model, train_loader)
+        train_energies.append(avg_energy)
+        perplexities.append(perplexity)
+        print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
+    total_training_time = time.time() - start_training_time
+    print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
+    print("========== Training completed ==========", flush=True)
 
-# Saving trained model
-torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
-print("Model saved.")
+    # Saving trained model
+    torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
+    print("Model saved.")
 
-# Plotting average energy vs. epoch
-epochs = list(range(1, len(train_energies) + 1))
-plt.figure(figsize=(10, 6))
-plt.plot(epochs, train_energies, marker='o', linestyle='-', color='b', label='Average Batch Energy')
-plt.xlabel('Epoch')
-plt.ylabel('Average Batch Energy')
-plt.title('Average Batch Energy vs. Epoch')
-plt.grid(True)
-plt.legend()
-# Force x-axis to show only whole numbers
-plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
-plt.tight_layout()
-plt.savefig('assets/energy_plot.png')
-plt.show()
+    # Plotting average energy vs. epoch
+    epochs = list(range(1, len(train_energies) + 1))
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, train_energies, marker='o', linestyle='-', color='b', label='Average Batch Energy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Average Batch Energy')
+    plt.title('Average Batch Energy vs. Epoch')
+    plt.grid(True)
+    plt.legend()
+    # Force x-axis to show only whole numbers
+    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+    plt.tight_layout()
+    plt.savefig('assets/energy_plot.png')
+    plt.show()
+
+if __name__ == "__main__":
+    main()
