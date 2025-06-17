@@ -16,3 +16,4 @@ class GPTConfig:
     num_epochs: int = 5
     use_lateral: bool = True
     energy_fn_name: str = "scaled_mse"
+    eos_token_id: int = None
