@@ -145,7 +145,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
     
         #print(f"Diversity Grad Norm: {dvl_norm:.8f}")
         similarity = get_head_similarity(mu_heads)
-        print(f"Headwise Similarity Matrix:\n{similarity.numpy()}")
+        #print(f"Headwise Similarity Matrix:\n{similarity.numpy()}")
         
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
