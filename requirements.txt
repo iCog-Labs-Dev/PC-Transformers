@@ -26,3 +26,4 @@ tokenizers==0.21.1
 matplotlib == 3.10.3
 nltk==3.9.1
 bert-score==0.3.13
+optuna
