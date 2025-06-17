@@ -35,10 +35,10 @@ def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
     """
     return torch.zeros(batch_size, seq_len, embedding_size)
 
-def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update):
+def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update, mu_word_cache=None, mu_pos_cache=None):
     """
     Perform a predictive coding update step for the embedding layer.
-
+    Now supports vectorized updates and caching of mu_word/mu_pos for inference.
     Args:
         t (int): Current inference step.
         T (int): Total number of inference steps.
@@ -52,31 +52,41 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
         energy_fn_name (str): Name of energy function.
         is_holding_error (bool): Whether to accumulate errors.
         requires_update (bool): Whether to update weights.
+        mu_word_cache, mu_pos_cache: Optional cached values for inference.
     Returns:
-        torch.Tensor: Updated embedding activity.
+        tuple: (mu, mu_word, mu_pos)
     """
     word_layer = layer["word"]
     pos_layer = layer["pos"]
 
-    mu_word = word_layer(input_ids)
-    mu_pos = pos_layer(position_ids)
+    if requires_update or mu_word_cache is None or mu_pos_cache is None:
+        mu_word = word_layer(input_ids)
+        mu_pos = pos_layer(position_ids)
+    else:
+        mu_word = mu_word_cache
+        mu_pos = mu_pos_cache
     mu = mu_word + mu_pos
-    error = target - mu
 
+    if not requires_update:
+        if t == T - 1:
+            finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
+        return mu, mu_word, mu_pos
+
+    error = target - mu
     update = torch.clamp(error, -clamp_value, clamp_value)
-    if requires_update:
-        with torch.no_grad():
-            for b in range(error.size(0)):
-                for s in range(error.size(1)):
-                    idx_w = input_ids[b, s]
-                    idx_p = position_ids[b, s]
-                    word_layer.weight.data[idx_w] += local_lr * update[b, s]
-                    pos_layer.weight.data[idx_p] += local_lr * update[b, s]
+    with torch.no_grad():
+        # Vectorized weight update for word embeddings
+        flat_input_ids = input_ids.reshape(-1)
+        flat_update = update.reshape(-1, update.size(-1))
+        word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
+        # Vectorized weight update for position embeddings
+        flat_position_ids = position_ids.reshape(-1)
+        pos_layer.weight.data.index_add_(0, flat_position_ids, local_lr * flat_update)
 
     if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+        finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
-    return mu
+    return mu, mu_word, mu_pos
     
 def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update):
     """

@@ -105,9 +105,22 @@ class PCLayer(nn.Module):
             x = self._x_cache[layer_type]
 
         if layer_type == "embed":
-            mu = step_embed(t, T, target_activity, layer, layer_type, input_ids, position_ids,
-                            self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error,
-                            requires_update)
+            # Caching for mu_word and mu_pos during inference
+            if not hasattr(self, '_embed_cache'):
+                self._embed_cache = {"mu_word": None, "mu_pos": None, "step": -1}
+            use_cache = (not requires_update) and (self._embed_cache["step"] == t)
+            mu, mu_word, mu_pos = step_embed(
+                t, T, target_activity, layer, layer_type, input_ids, position_ids,
+                self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error,
+                requires_update,
+                mu_word_cache=self._embed_cache["mu_word"] if use_cache else None,
+                mu_pos_cache=self._embed_cache["mu_pos"] if use_cache else None
+            )
+            # Update cache if not requires_update or first step
+            if not requires_update or t == 0:
+                self._embed_cache["mu_word"] = mu_word
+                self._embed_cache["mu_pos"] = mu_pos
+                self._embed_cache["step"] = t
         elif layer_type == "attn":
             x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
                               self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
@@ -126,8 +139,8 @@ class PCLayer(nn.Module):
 
         if layer_type == "embed":
             # Cache updated x for next step inference
-            self._x_cache["embed"] = (x_word, x_pos)
-            return x_word, x_pos
+            self._x_cache["embed"] = (mu_word, mu_pos)
+            return mu_word, mu_pos
         else:
             self._x_cache[layer_type] = x
             return x
