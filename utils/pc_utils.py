@@ -11,13 +11,7 @@ def compute_DVL(attn_v):
     x= attn_v.transpose(0, 1).flatten(2, 3)
     x=F.normalize(x, p=2, dim=-1)
     s_m=torch.bmm(x, x.transpose(1, 2))
-    N = s_m.size(1)
-    mask = ~torch.eye(N, device=x.device).bool()
-    s_m= s_m[:, mask].view(H, H, -1)
-    s_m= s_m.mean(dim=-1)
-    identity = torch.eye(s_m.size(1), device=s_m.device)
-    identity = identity.unsqueeze(0).expand(H, -1, -1)
-    
+    identity = torch.eye(H, device=s_m.device)    
     corr=  s_m - identity
     dvl=(corr** 2).mean()
     
@@ -43,7 +37,7 @@ def get_head_similarity(mu_heads):
     # Compute pairwise cosine similarity between heads
     corr = torch.bmm(x, x.transpose(1, 2))  # [H, N, N]
     mask = ~torch.eye(corr.size(1), device=corr.device).bool()
-    s_v = corr[:, mask].view(H, H, -1)
+    s_v = corr[:, mask].mean(dim= -1)
     corr = s_v.abs().mean(dim=-1)  # [H, H]
 
     return corr.detach().cpu()
