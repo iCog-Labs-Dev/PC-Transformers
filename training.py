@@ -1,3 +1,4 @@
+import os
 import torch
 import time
 import torch.nn.functional as F
@@ -68,7 +69,7 @@ vocab_size = tokenizer.get_vocab_size()
 
 config = GPTConfig(
     vocab_size = vocab_size,
-    block_size= 256,
+    block_size= 256, 
     n_embed=64,
     dropout=0.1,
     local_learning_rate=1e-5,
@@ -76,7 +77,7 @@ config = GPTConfig(
     is_holding_error = True,
     num_heads=2,
     n_blocks=4,
-    num_epochs=5,
+    num_epochs=2,
     update_bias=True,
     use_lateral = True,
     energy_fn_name="scaled_mse" 
@@ -98,6 +99,7 @@ print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
 print("========== Training completed ==========", flush=True)
 
 # Saving trained model
+os.makedirs("checkpoints", exist_ok=True) # create checkpoints directory if it doesnt exist
 torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
 print("Model saved.")
 
