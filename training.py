@@ -30,6 +30,7 @@ def train(model, dataloader):
     """
     model.train()
     total_energy = 0.0
+    total_ce_loss = 0.0
     batch_count = 0
 
     for batch_idx, batch in enumerate(dataloader):
@@ -43,6 +44,8 @@ def train(model, dataloader):
             target_ids.view(-1),
             ignore_index=0
         )
+        
+        total_ce_loss += ce_loss.item()
 
         layer_energies = []
         for module in model.modules():
@@ -62,58 +65,66 @@ def train(model, dataloader):
         reset_pc_modules(model)
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
-    return avg_energy
+    avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
+    perplexity = torch.exp(torch.tensor(avg_ce_loss)).item()
+    
+    return avg_energy, perplexity
 
-tokenizer = load_tokenizer()
-vocab_size = tokenizer.get_vocab_size()
+def main():
+    tokenizer = load_tokenizer()
+    vocab_size = tokenizer.get_vocab_size()
 
-config = GPTConfig(
-    vocab_size = vocab_size,
-    block_size= 256, 
-    n_embed=64,
-    dropout=0.1,
-    local_learning_rate=1e-5,
-    T=5,
-    is_holding_error = True,
-    num_heads=2,
-    n_blocks=4,
-    num_epochs=2,
-    update_bias=True,
-    use_lateral = True,
-    energy_fn_name="scaled_mse" 
-)
+    config = GPTConfig(
+        vocab_size = vocab_size,
+        block_size= 256, 
+        n_embed=64,
+        dropout=0.1,
+        local_learning_rate=1e-5,
+        T=5,
+        is_holding_error = True,
+        num_heads=2,
+        n_blocks=4,
+        num_epochs=2,
+        update_bias=True,
+        use_lateral = True,
+        energy_fn_name="scaled_mse" 
+    )
+    model = PCTransformer(config)
+    train_energies = []
+    perplexities = []
 
-model = PCTransformer(config)
-train_energies = []
+    print("========== Training started ==========", flush=True) 
+    # Measure total training time
+    start_training_time = time.time()
+    for epoch in range(config.num_epochs):
+        print(f"Epoch {epoch+1} started", flush=True)
+        avg_energy, perplexity = train(model, train_loader)
+        train_energies.append(avg_energy)
+        perplexities.append(perplexity)
+        print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
+    total_training_time = time.time() - start_training_time
+    print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
+    print("========== Training completed ==========", flush=True)
 
-print("========== Training started ==========", flush=True) 
-# Measure total training time
-start_training_time = time.time()
-for epoch in range(config.num_epochs):
-    print(f"Epoch {epoch+1} started", flush=True)
-    avg_energy = train(model, train_loader)
-    train_energies.append(avg_energy)
-    print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f}", flush=True)
-total_training_time = time.time() - start_training_time
-print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
-print("========== Training completed ==========", flush=True)
+    # Saving trained model
+    os.makedirs("checkpoints", exist_ok=True) # create checkpoints directory if it doesnt exist
+    torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
+    print("Model saved.")
 
-# Saving trained model
-os.makedirs("checkpoints", exist_ok=True) # create checkpoints directory if it doesnt exist
-torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
-print("Model saved.")
+    # Plotting average energy vs. epoch
+    epochs = list(range(1, len(train_energies) + 1))
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, train_energies, marker='o', linestyle='-', color='b', label='Average Batch Energy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Average Batch Energy')
+    plt.title('Average Batch Energy vs. Epoch')
+    plt.grid(True)
+    plt.legend()
+    # Force x-axis to show only whole numbers
+    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+    plt.tight_layout()
+    plt.savefig('assets/energy_plot.png')
+    plt.show()
 
-# Plotting average energy vs. epoch
-epochs = list(range(1, len(train_energies) + 1))
-plt.figure(figsize=(10, 6))
-plt.plot(epochs, train_energies, marker='o', linestyle='-', color='b', label='Average Batch Energy')
-plt.xlabel('Epoch')
-plt.ylabel('Average Batch Energy')
-plt.title('Average Batch Energy vs. Epoch')
-plt.grid(True)
-plt.legend()
-# Force x-axis to show only whole numbers
-plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
-plt.tight_layout()
-plt.savefig('assets/energy_plot.png')
-plt.show()
+if __name__ == "__main__":
+    main()

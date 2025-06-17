@@ -93,26 +93,30 @@ def evaluate(model, dataloader, max_batches=None, compute_metrics=True):
     print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
     return avg_energy, avg_ce_loss 
 
-tokenizer = load_tokenizer()
-vocab_size = tokenizer.get_vocab_size()
+def main():
+    tokenizer = load_tokenizer()
+    vocab_size = tokenizer.get_vocab_size()
 
-config = GPTConfig(
-    vocab_size = vocab_size,
-    block_size=256,
-    n_embed=64,
-    dropout=0.1,
-    local_learning_rate=1e-5,
-    T=2,
-    is_holding_error=True,
-    num_heads=2,
-    n_blocks=4,
-    num_epochs=1,
-    update_bias=True,
-    energy_fn_name="kld"
-)
+    config = GPTConfig(
+        vocab_size = vocab_size,
+        block_size=256,
+        n_embed=64,
+        dropout=0.1,
+        local_learning_rate=1e-5,
+        T=2,
+        is_holding_error=True,
+        num_heads=2,
+        n_blocks=4,
+        num_epochs=1,
+        update_bias=True,
+        energy_fn_name="kld"
+    )
 
-model_path = "checkpoints/pc_transformer.pt"
-model = load_model(model_path, config)
+    model_path = "checkpoints/pc_transformer.pt"
+    model = load_model(model_path, config)
 
-# Max batches can be set to limit evaluation, or None for full dataset
-evaluate(model, test_loader, max_batches=10, compute_metrics=True)
+    # Max batches can be set to limit evaluation, or None for full dataset
+    evaluate(model, test_loader, max_batches=10, compute_metrics=True)
+
+if __name__ == "__main__":
+    main()
