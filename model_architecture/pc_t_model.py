@@ -91,35 +91,9 @@ class PCTransformer(nn.Module):
                 T=self.config.T,
                 requires_update=self.training
             ))
-
-            for idx, block in enumerate(self.blocks):
-                futures.append(torch.jit.fork(
-                    block.attn.pc_qkv.forward,
-                    target_activity=block.attn.pc_output.get_x("linear"),
-                    proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
-                    layer_type="attn",
-                    t=t,
-                    T=self.config.T,
-                    requires_update=self.training
-                ))
-                futures.append(torch.jit.fork(
-                    block.attn.pc_output.forward,
-                    target_activity=block.mlp.pc_layer1.get_x("fc1"),
-                    layer=block.attn.output,
-                    layer_type="linear",
-                    t=t,
-                    T=self.config.T,
-                    requires_update=self.training
-                ))
-                futures.append(torch.jit.fork(
-                    block.mlp.pc_layer1.forward,
-                    target_activity=block.mlp.pc_layer2.get_x("linear"),
-                    layer=block.mlp.fc1,
-                    layer_type="fc1",
-                    t=t,
-                    T=self.config.T,
-                    requires_update=self.training
-                ))
+            
+            for idx in range(len(self.blocks) - 1, -1, -1):
+                block = self.blocks[idx]
                 next_target = (
                     self.blocks[idx + 1].attn.pc_qkv.get_x("attn")
                     if idx < len(self.blocks) - 1
@@ -134,6 +108,38 @@ class PCTransformer(nn.Module):
                     T=self.config.T,
                     requires_update=self.training
                 ))
+
+                futures.append(torch.jit.fork(
+                    block.mlp.pc_layer1.forward,
+                    target_activity=block.mlp.pc_layer2.get_x("linear"),
+                    layer=block.mlp.fc1,
+                    layer_type="fc1",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=self.training
+                ))
+
+                futures.append(torch.jit.fork(
+                    block.attn.pc_output.forward,
+                    target_activity=block.mlp.pc_layer1.get_x("fc1"),
+                    layer=block.attn.output,
+                    layer_type="linear",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=self.training
+                ))
+
+                futures.append(torch.jit.fork(
+                    block.attn.pc_qkv.forward,
+                    target_activity=block.attn.pc_output.get_x("linear"),
+                    proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                    layer_type="attn",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=self.training
+                ))
+
+
             futures.append(torch.jit.fork(
                 self.embedding.pc_layer.forward,
                 target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
