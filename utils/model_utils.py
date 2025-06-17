@@ -6,6 +6,16 @@ from Data_preprocessing.config import Config
 from model_architecture.pc_t_model import PCTransformer
 from bert_score import score as bertscore
 from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+from torch.nn.utils.rnn import pad_sequence
+
+def pad_collate_fn(batch, pad_token_id=0):
+    input_seqs = [item["input_ids"] for item in batch]
+    target_seqs = [item["target_ids"] for item in batch]
+
+    input_seqs = pad_sequence(input_seqs, batch_first=True, padding_value=pad_token_id)
+    target_seqs = pad_sequence(target_seqs, batch_first=True, padding_value=pad_token_id)
+
+    return {"input_ids": input_seqs, "target_ids": target_seqs}
 
 def load_tokenizer():
     tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
@@ -40,5 +50,9 @@ def compute_text_metrics(predictions, targets):
     bleu = corpus_bleu(tokenized_targets, tokenized_pred, smoothing_function=smooth_fn)
     print(f"BLEU Score: {bleu:.4f}")
 
-def decode_ids(tokenizer, ids):
-    return tokenizer.decode(ids, skip_special_tokens=True).strip()
+def decode_ids(tokenizer, ids, stop_at_eos = True):
+    text = tokenizer.decode(ids, skip_special_tokens=True)
+    if stop_at_eos and "[EOS]" in text:
+        text = text.split("[EOS]")[0].strip()
+    return text
+
