@@ -1,7 +1,32 @@
 from dataclasses import dataclass
 
+"""
+predictive_coding.config
+
+This module defines the GPTConfig dataclass, which holds configuration parameters for the predictive coding transformer model.
+"""
+
 @dataclass
 class GPTConfig:
+    """
+    Configuration dataclass for the predictive coding transformer model.
+
+    Attributes:
+        vocab_size (int): Size of the vocabulary.
+        block_size (int): Maximum sequence length.
+        n_embed (int): Embedding dimension size.
+        dropout (float): Dropout probability.
+        local_learning_rate (float): Local learning rate for predictive coding layers.
+        T (int): Number of inference steps for predictive coding.
+        is_holding_error (bool): Whether to accumulate and store errors.
+        update_bias (bool): Whether to update bias terms during learning.
+        num_heads (int): Number of attention heads.
+        n_blocks (int): Number of transformer blocks.
+        batch_size (int): Batch size for training/evaluation.
+        num_epochs (int): Number of training epochs.
+        use_lateral (bool): Whether to use lateral (recurrent) connections.
+        energy_fn_name (str): Name of the energy function to use for error computation.
+    """
     vocab_size: int
     block_size: int
     n_embed: int =64

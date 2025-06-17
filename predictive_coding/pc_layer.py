@@ -3,8 +3,20 @@ import torch.nn as nn
 from typing import Optional
 from utils.pc_utils import x_init, step_embed, step_linear, step_attn, finalize_step
 
+"""
+predictive_coding.pc_layer
+
+This module implements the PCLayer class, which provides predictive coding inference and local learning for neural network layers.
+It supports embedding, attention, and linear layers, and manages iterative inference, error computation, and lateral connections.
+"""
 
 class PCLayer(nn.Module):
+    """
+    Predictive Coding Layer for neural network modules.
+
+    Supports iterative inference, local learning, and optional lateral (recurrent) connections.
+    Can be used for embedding, attention, or linear layers.
+    """
     def __init__(
         self,
         T: int = 1,
@@ -13,6 +25,16 @@ class PCLayer(nn.Module):
         update_bias: bool = True,
         energy_fn_name: str = "scaled_mse",
     ):
+        """
+        Initialize the PCLayer.
+
+        Args:
+            T (int): Number of inference steps.
+            local_learning_rate (float): Learning rate for local/lateral updates.
+            is_holding_error (bool): Whether to accumulate and store errors.
+            update_bias (bool): Whether to update bias terms during learning.
+            energy_fn_name (str): Name of the energy function to use for error computation.
+        """
         super().__init__()
         self.T = T
         self.local_lr = local_learning_rate
@@ -27,6 +49,13 @@ class PCLayer(nn.Module):
         self._errors = []
 
     def register_lateral(self, layer_type: str, size: int):
+        """
+        Register a lateral (recurrent) weight matrix for a given layer type.
+
+        Args:
+            layer_type (str): The type of layer (e.g., 'attn', 'fc1', 'linear').
+            size (int): The size of the square lateral weight matrix.
+        """
         if layer_type not in self.W_latents:
             W = torch.empty(size, size)
             nn.init.xavier_uniform_(W)
@@ -44,6 +73,23 @@ class PCLayer(nn.Module):
         T=1,
         requires_update: bool = True,
     ):
+        """
+        Perform a single predictive coding inference step for the layer.
+
+        Args:
+            target_activity (torch.Tensor): Target activity tensor for the layer.
+            layer (nn.Module, optional): The layer module (for linear layers).
+            proj_layers (dict, optional): Dictionary of projection layers (for attention).
+            layer_type (str): Type of layer ('embed', 'attn', 'fc1', 'linear', etc.).
+            input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
+            position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
+            t (int): Current inference step.
+            T (int): Total number of inference steps.
+            requires_update (bool): Whether to update weights.
+
+        Returns:
+            torch.Tensor or tuple: Updated activity tensor(s) for the layer.
+        """
         B, S, _ = target_activity.shape    
         x = None
         self._energy = 0.0
@@ -96,7 +142,18 @@ class PCLayer(nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
     ):
-        """Initialize the layer's state variables and store them in x_cache."""
+        """
+        Initialize the layer's state variables and store them in x_cache.
+
+        Args:
+            batch_size (int): Batch size.
+            seq_len (int): Sequence length.
+            layer (nn.Module, optional): The layer module (for linear layers).
+            proj_layers (dict, optional): Dictionary of projection layers (for attention).
+            layer_type (str): Type of layer ('embed', 'attn', 'fc1', 'linear', etc.).
+            input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
+            position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
+        """
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
             x_word = layer["word"].weight[input_ids] 
@@ -120,17 +177,43 @@ class PCLayer(nn.Module):
                 self.register_lateral(layer_type, H_in)
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
+        """
+        Get the cached activity tensor for a given layer type.
+
+        Args:
+            layer_type (str): The type of layer.
+        Returns:
+            torch.Tensor or None: Cached activity tensor, or None if not present.
+        """
         return self._x_cache.get(layer_type, None)
 
     def get_energy(self) -> Optional[float]:
+        """
+        Get the accumulated energy for the layer (if error holding is enabled).
+
+        Returns:
+            float or None: The accumulated energy value, or None if not computed.
+        """
         return self._energy
 
     def clear_energy(self):
+        """
+        Clear the stored energy and cached states for the layer.
+        """
         self._energy = 0.0
         self._x_cache.clear()
 
     def get_errors(self) -> list:
+        """
+        Get the list of error values accumulated during inference.
+
+        Returns:
+            list: List of error dictionaries for each inference step.
+        """
         return self._errors
 
     def clear_errors(self):
+        """
+        Clear the stored errors for the layer.
+        """
         self._errors = []

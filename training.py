@@ -9,9 +9,24 @@ from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-"""Usage: python training.py"""
+"""
+Usage: python training.py
+
+This script trains a predictive coding transformer model on a dataset.
+It tracks and plots the average predictive coding energy per epoch and saves the trained model.
+"""
 
 def train(model, dataloader):
+    """
+    Train the model for one epoch on the provided dataloader.
+
+    Args:
+        model: The model to train.
+        dataloader: DataLoader providing batches of input and target tensors.
+
+    Returns:
+        avg_energy (float): Average predictive coding energy or CE loss per batch for the epoch.
+    """
     model.train()
     total_energy = 0.0
     batch_count = 0

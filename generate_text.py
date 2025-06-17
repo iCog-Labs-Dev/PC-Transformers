@@ -4,9 +4,25 @@ from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 import torch.nn.functional as F
 from Data_preprocessing.dataloader import test_loader
 
-"""Usage: python generate_text.py"""
+"""
+Usage: python generate_text.py
+
+This script generates text using a trained predictive coding transformer model.
+It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
+"""
 
 def generate_text(input_ids, max_new_tokens=50, temperature=1.0):
+    """
+    Generate text from a prompt using the trained model.
+
+    Args:
+        input_ids (torch.Tensor): Tensor of shape (prompt_length,) with initial token IDs.
+        max_new_tokens (int): Maximum number of new tokens to generate.
+        temperature (float): Sampling temperature for output distribution.
+
+    Returns:
+        torch.Tensor: Tensor of shape (prompt_length + max_new_tokens,) with generated token IDs.
+    """
     model.eval()
     input_tensor = input_ids.unsqueeze(0)
 

@@ -6,9 +6,27 @@ from Data_preprocessing.dataloader import test_loader
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, compute_text_metrics, decode_ids
 
-"""Usage: python eval.py"""
+"""
+Usage: python eval.py
+
+This script evaluates a trained predictive coding transformer model on a test dataset.
+It computes cross-entropy loss, predictive coding energy, and can output text metrics.
+"""
 
 def evaluate(model, dataloader, max_batches=None, compute_metrics=True):
+    """
+    Evaluate the model on a given dataloader.
+
+    Args:
+        model: The trained model to evaluate.
+        dataloader: DataLoader providing batches of input and target tensors.
+        max_batches (int, optional): Maximum number of batches to evaluate. If None, evaluates all.
+        compute_metrics (bool): Whether to compute and print text metrics (accuracy, BLEU, etc.).
+
+    Returns:
+        avg_energy (float): Average predictive coding energy or CE loss per batch.
+        avg_ce_loss (float): Average cross-entropy loss per batch.
+    """
     start_time = time.time()
     model.eval()
     total_energy = 0.0
