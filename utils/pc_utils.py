@@ -141,7 +141,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         attn_weights = scores.softmax(dim=-1) # B, H, T, T
         mu_heads = attn_weights @ V   # B, H, T, D
         dvl_grad=compute_DVL(mu_heads)
-        #dvl_norm = dvl_grad.norm().item()
+        dvl_norm = dvl_grad.norm().item()
     
         #print(f"Diversity Grad Norm: {dvl_norm:.8f}")
         similarity = get_head_similarity(mu_heads)

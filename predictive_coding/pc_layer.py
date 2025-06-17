@@ -12,7 +12,6 @@ class PCLayer(nn.Module):
         is_holding_error: bool = False,
         update_bias: bool = True,
         energy_fn_name: str = "scaled_mse",
-        layer_type: str = "fc1"
     ):
         super().__init__()
         self.T = T
@@ -26,7 +25,6 @@ class PCLayer(nn.Module):
         self.energy_fn_name = energy_fn_name 
         self._energy = None
         self._errors = []
-        self.layer_type= layer_type
 
     def register_lateral(self, layer_type: str, size: int):
         if layer_type not in self.W_latents:
