@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import math
 from predictive_coding.config import GPTConfig
-
+import numpy
 def compute_DVL(attn_v):
     B, H, T, D= attn_v.shape
     
@@ -145,18 +145,14 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
     
         #print(f"Diversity Grad Norm: {dvl_norm:.8f}")
         similarity = get_head_similarity(mu_heads)
-        #print(f"Headwise Similarity Matrix:\n{similarity.numpy()}")
+        print(f"Headwise Similarity Matrix:\n{similarity.numpy()}")
         
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
         error = target - mu  # B, T, D
-        #print("error shape:", error.shape)
-        #print("dvl_grad shape:", dvl_grad.shape)
-
         if dvl_grad is not None:
             B, T, H, D = dvl_grad.shape
             dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
-            #print("dvl_grad shape:", dvl_projected.shape)
             dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
             error = error + la * dvl_projected
         else:

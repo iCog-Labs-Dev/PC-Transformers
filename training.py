@@ -44,9 +44,6 @@ def train(model, dataloader):
                     avg_sim = module._head_similarity_avg
                     max_sim = module._head_similarity_max
                     #print(f"  Attn Layer {attn_block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
-                    # Save for later plotting
-                    head_similarity_values.append((attn_block_idx, avg_sim, max_sim, sim_matrix))
-
                     attn_block_idx += 1
 
         # Compute average energy for current batch
