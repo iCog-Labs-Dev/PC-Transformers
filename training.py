@@ -81,7 +81,7 @@ def main():
         local_learning_rate=1e-5,
         T=5,
         is_holding_error = True,
-        num_heads=2,
+        num_heads=5,
         n_blocks=4,
         num_epochs=2,
         update_bias=True,
