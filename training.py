@@ -107,8 +107,6 @@ def main():
     print("========== Training completed ==========", flush=True)
 
     # Saving trained model
-    os.makedirs("checkpoints", exist_ok=True) # create checkpoints directory if it doesnt exist
-    torch.save({"model_state": model.state_dict()}, "checkpoints/pc_transformer.pt")
     print("Model saved.")
 
     # Plotting average energy vs. epoch
