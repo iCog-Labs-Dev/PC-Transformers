@@ -11,7 +11,7 @@ class BPETokenizer:
         os.makedirs(Config.TOKENIZER_DIR, exist_ok=True)
         self.tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
         self.tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
-        self.special_tokens = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"]
+        self.special_tokens = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]", "[EOS]"]
 
     def train_and_save(self):
         """Train BPE tokenizer and save the model"""
@@ -59,8 +59,15 @@ class BPETokenizer:
             raise FileNotFoundError(f"{subset_name}.txt not found in {Config.DATA_DIR}")
         
         with open(subset_path, "r", encoding="utf-8") as f:
-            tokenized = [self.tokenizer.encode(line.strip()).ids for line in f if line.strip()]
-        
+            sep_id = self.tokenizer.token_to_id("[EOS]") or self.tokenizer.token_to_id("[SEP]")
+            if sep_id is None:
+                raise ValueError("Special token [EOS] or [SEP] not found in tokenizer vocabulary.")
+
+            tokenized = [
+                self.tokenizer.encode(line.strip()).ids + [sep_id]
+                for line in f if line.strip()
+            ]
+
         output_path = os.path.join(Config.TOKENIZER_DIR, f"{subset_name}_ids.pkl")
         if os.path.exists(output_path):
             print(f"Tokenized IDs already exist for {subset_name} at {output_path}, skipping.")

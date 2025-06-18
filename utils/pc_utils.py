@@ -2,38 +2,53 @@ import torch
 import torch.nn.functional as F
 import math
 from predictive_coding.config import GPTConfig
-
+import numpy
 def compute_DVL(attn_v):
-    """
-    Compute the Diversity of Value Layer (DVL) metric for attention heads.
-
-    Args:
-        attn_v (torch.Tensor): Attention value tensor of shape (B, T, num_heads, head_dim).
-    Returns:
-        torch.Tensor: Scalar DVL value.
-    """
-    num_heads= GPTConfig.num_heads
-    seq_len, _ = attn_v.shape
-    attn_flat = attn_v.permute(0, 2, 1, 3).reshape(-1, num_heads, seq_len)
-    attn_norm= F.normalize(attn_flat, p=2, dim=-1)
-    corr= torch.einsum("bhi, bhj->bij", attn_norm, attn_norm)
-    identity= torch.eye(num_heads, device=attn_v.device)
-    DVL=((corr - identity)**2).mean()
+    B, H, T, D= attn_v.shape
     
-    return DVL
+    #print(f"Head Outputs Variance: {attn_v.var().item():.4f}")
+    # Ensure input tensor has requires_grad=True
+    x= attn_v.transpose(0, 1).flatten(2, 3)
+    x=F.normalize(x, p=2, dim=-1)
+    s_m=torch.bmm(x, x.transpose(1, 2))
+    N = s_m.size(1)
+    mask = ~torch.eye(N, device=x.device).bool()
+    s_m= s_m[:, mask].mean(dim=-1)
+    identity = torch.eye(H, device=s_m.device)
+    identity = identity.unsqueeze(0).expand(H, -1, -1)
+    
+    corr=  s_m - identity
+    dvl=(corr** 2).mean()
+    
+   
+    try:
+        dvl_grad= torch.autograd.grad(dvl, 
+                                      attn_v,
+                                      retain_graph= True,
+                                      )[0]
+    except Exception as e:
+        print(f" Error computing diversity gradient: {e}")
+        dvl_grad=torch.zeros_like(attn_v)
+        
+    
+    return dvl_grad
+
+
+def get_head_similarity(mu_heads):
+    B, H, T, D = mu_heads.shape
+    x = mu_heads.transpose(0, 1).flatten(2, 3)  # [H, N, D]
+    x = F.normalize(x, p=2, dim=-1)
+    
+    # Compute pairwise cosine similarity between heads
+    corr = torch.bmm(x, x.transpose(1, 2))  
+    mask = ~torch.eye(corr.size(1), device=corr.device).bool()
+    s_v = corr[:, mask].mean(dim= -1)
+    corr = s_v.abs().mean(dim=-1)  
+
+    return corr.detach().cpu()
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
-    """
-    Initialize a tensor of zeros for hidden state/activity.
-
-    Args:
-        batch_size (int): Batch size.
-        seq_len (int): Sequence length.
-        embedding_size (int): Embedding or hidden size.
-    Returns:
-        torch.Tensor: Zero tensor of shape (batch_size, seq_len, embedding_size).
-    """
-    return torch.zeros(batch_size, seq_len, embedding_size)
+    return torch.randn(batch_size, seq_len, embedding_size)
 
 def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update, mu_word_cache=None, mu_pos_cache=None):
     """
@@ -75,11 +90,9 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     error = target - mu
     update = torch.clamp(error, -clamp_value, clamp_value)
     with torch.no_grad():
-        # Vectorized weight update for word embeddings
         flat_input_ids = input_ids.reshape(-1)
         flat_update = update.reshape(-1, update.size(-1))
         word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
-        # Vectorized weight update for position embeddings
         flat_position_ids = position_ids.reshape(-1)
         pos_layer.weight.data.index_add_(0, flat_position_ids, local_lr * flat_update)
 
@@ -148,85 +161,75 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     return x, mu
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update):
-    """
-    Perform a predictive coding update step for an attention layer.
-
-    Args:
-        t (int): Current inference step.
-        T (int): Total number of inference steps.
-        target (torch.Tensor): Target activity tensor.
-        x (torch.Tensor): Current activity tensor.
-        W_latents (dict): Lateral weights.
-        proj_layers (dict): Q/K/V projection layers.
-        layer_type (str): Layer type string.
-        local_lr (float): Local learning rate.
-        clamp_value (float): Value to clamp updates.
-        use_lateral (bool): Whether to use lateral connections.
-        is_holding_error (bool): Whether to accumulate errors.
-        energy_fn_name (str): Name of energy function.
-        update_bias (bool): Whether to update bias.
-        requires_update (bool): Whether to update weights.
-    Returns:
-        tuple: (updated activity tensor, predicted output tensor)
-    """
-    assert proj_layers is not None, "proj_layers dict is required for attention"
-    q_proj = proj_layers.get("q_proj", None)
-    k_proj = proj_layers.get("k_proj", None)
-    v_proj = proj_layers.get("v_proj", None)
-    
-    assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"        
-    Q= q_proj(x)
-    K= k_proj(x)
-    V= v_proj(x)
-    batch_size, seq_len, embed_dim=target.shape
-    
-    num_heads = GPTConfig.num_heads
-    head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
-    
-    Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-    K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-    V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance):
+        assert proj_layers is not None, "proj_layers dict is required for attention"
+        q_proj = proj_layers.get("q_proj", None)
+        k_proj = proj_layers.get("k_proj", None)
+        v_proj = proj_layers.get("v_proj", None)
         
-    scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))
-    mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
-    scores = scores.masked_fill(~mask, float("-inf"))
-    attn_weights = scores.softmax(dim=-1)
-    mu_heads = attn_weights @ V #(batch_size, num_heads, seq_len, head_dim)
-    mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-    
-    # dvl=compute_DVL(mu)
-    #error +=dvl
-    error = target - mu
+        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"        
+        Q= q_proj(x)
+        K= k_proj(x)
+        V= v_proj(x)
+        batch_size, seq_len, embed_dim=target.shape
+        
+        num_heads = GPTConfig.num_heads
+        head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
+        la= GPTConfig.la * math.sqrt(1.0 / head_dim)
 
-    if use_lateral and layer_type in W_latents:
-        W_latent = W_latents[layer_type]
-        x_latent = x @ W_latent
-        delta_x = error + x_latent
-        x = x + local_lr * delta_x
+        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
+        K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+        V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+
+          
+        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #B,H,T,T
+        mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
+        scores = scores.masked_fill(~mask, float("-inf"))
+        attn_weights = scores.softmax(dim=-1) # B, H, T, T
+        mu_heads = attn_weights @ V   # B, H, T, D
+        dvl_grad=compute_DVL(mu_heads)
+        dvl_norm = dvl_grad.norm().item()
+    
+        #print(f"Diversity Grad Norm: {dvl_norm:.8f}")
+        similarity = get_head_similarity(mu_heads)
+        
+        mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+     
+        error = target - mu  # B, T, D
+        if dvl_grad is not None:
+            B, T, H, D = dvl_grad.shape
+            dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
+            dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
+            error = error + la * dvl_projected
+        else:
+            error = error
+        if layer_instance is not None:
+            setattr(layer_instance, '_head_similarity', similarity)
+            setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
+            setattr(layer_instance, '_head_similarity_max', similarity.max().item())
+    
 
         if requires_update:
             anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
             W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
         
-    else:
-        x= x+ local_lr * error
+        else:
+            x= x+ local_lr * error
 
-    x = torch.clamp(x, -clamp_value, clamp_value)
+        x = torch.clamp(x, -clamp_value, clamp_value)
 
-    # Hebbian update W_latent
-    if requires_update:
-        for proj in (q_proj, k_proj, v_proj):
-            delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-            proj.weight.data.add_(delta_W)
-            if proj.bias is not None and update_bias:
-                proj.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
+        # Hebbian update W_latent
+        if requires_update:
+            for proj in (q_proj, k_proj, v_proj):
+                delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+                proj.weight.data.add_(delta_W)
+                if proj.bias is not None and update_bias:
+                    proj.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
 
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+        if t == T - 1:
+            finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
-    return x, mu
+        return x, mu
     
 ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,

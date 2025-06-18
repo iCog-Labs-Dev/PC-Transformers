@@ -23,18 +23,16 @@ class PennTreebankDataset(Dataset):
             )
 
         with open(tokenized_file_path, 'rb') as f:
-            self.tokens = pickle.load(f)
+            self.sequences = pickle.load(f)
 
-        if isinstance(self.tokens[0], list):
-            self.tokens = [token for seq in self.tokens for token in seq]
-
-        self.num_sequences = len(self.tokens) - self.block_size
+        self.sequences = [seq for seq in self.sequences if len(seq) > 1]
 
     def __len__(self):
-        return self.num_sequences
+        return len(self.sequences)
 
     def __getitem__(self, idx):
-        input_ids = torch.tensor(self.tokens[idx : idx + self.block_size], dtype=torch.long)
-        target_ids = torch.tensor(self.tokens[idx + 1 : idx + 1 + self.block_size], dtype=torch.long)
-
+        seq = self.sequences[idx]
+        input_ids = torch.tensor(seq[:-1][:self.block_size], dtype=torch.long)
+        target_ids = torch.tensor(seq[1:][:self.block_size], dtype=torch.long)
+        
         return {"input_ids": input_ids, "target_ids": target_ids}

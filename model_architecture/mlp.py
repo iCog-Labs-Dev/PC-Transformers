@@ -35,17 +35,3 @@ class MLP(nn.Module):
             update_bias=config.update_bias,
             energy_fn_name=config.energy_fn_name,
         )
-
-    def evaluate(self, x):
-        """
-        Evaluate the MLP block in inference mode (no predictive coding).
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, T, n_embed).
-        Returns:
-            torch.Tensor: Output tensor after two linear layers.
-        """
-        fc_1 = self.fc1(x)
-        fc_2 = self.fc2(fc_1)
-
-        return fc_2

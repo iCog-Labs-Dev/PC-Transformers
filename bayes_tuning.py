@@ -43,7 +43,7 @@ def objective(trial):
         model = model.to(device)
         
         for epoch in range(1):
-            avg_energy, _ = train(model, train_loader)
+            avg_energy, _ = train(model, train_loader, tokenizer)
         
         avg_energy_val, val_loss = evaluate(model, valid_loader, max_batches=10, compute_metrics=False)
         return val_loss

@@ -23,16 +23,3 @@ class OutputLayer(nn.Module):
             update_bias = config.update_bias,
             energy_fn_name=config.energy_fn_name,
         )
-
-
-    def evaluate(self, x):
-        """
-        Compute the output logits from the input tensor (inference mode).
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, T, n_embed).
-        Returns:
-            torch.Tensor: Output logits of shape (B, T, vocab_size).
-        """
-        output = self.output(x)
-        return output
