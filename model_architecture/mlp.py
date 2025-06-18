@@ -25,10 +25,3 @@ class MLP(nn.Module):
             energy_fn_name=config.energy_fn_name,
             
         )
-        
-    
-    def evaluate(self, x):
-         fc_1 = self.fc1(x)
-         fc_2 = self.fc2(fc_1)
-
-         return fc_2
