@@ -35,18 +35,28 @@ def train(model, dataloader, tokenizer):
         total_ce_loss += ce_loss.item()
 
         layer_energies = []
+        attn_block_idx = 0 
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
                 if energy is not None:
                     layer_energies.append(energy)
+                if hasattr(module, "_head_similarity"):
+                    avg_sim = module._head_similarity_avg
+                    max_sim = module._head_similarity_max
+                    # print(f"  Attn Layer {attn_block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
+                    # attn_block_idx += 1
 
         # Compute average energy for current batch
         batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
         total_energy += batch_energy
         batch_count += 1
+<<<<<<< optim_attn
+        
+=======
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
+>>>>>>> model_architecture
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
