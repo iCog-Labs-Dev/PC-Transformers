@@ -51,12 +51,8 @@ def train(model, dataloader, tokenizer):
         batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
         total_energy += batch_energy
         batch_count += 1
-<<<<<<< optim_attn
-        
-=======
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
-
->>>>>>> model_architecture
+        
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
