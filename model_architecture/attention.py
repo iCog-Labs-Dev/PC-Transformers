@@ -32,37 +32,3 @@ class Attention(nn.Module):
             update_bias = config.update_bias,
             energy_fn_name=config.energy_fn_name,
         )
-
-    def evaluate(self, x):
-        batch_size, seq_len, _ = x.size()
-
-        Q = self.q(x)
-        K = self.k(x)
-        V = self.v(x)
-
-        # Reshape for multi-head: [B, T, H, D/H] → [B, H, T, D/H]
-        Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        V = V.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-
-        # Attention score: [B, H, T, T]
-        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(
-            self.head_dim
-        )
-        mask = torch.tril(torch.ones(seq_len, seq_len)).bool()
-        mask = mask.unsqueeze(0).unsqueeze(0)
-        scores = attention_scores.masked_fill(~mask, float("-inf"))
-
-        attention_probs = nn.Softmax(dim=-1)(scores)
-        attention_probs = self.dropout(attention_probs)
-
-        # Context vector: [B, H, T, D/H]
-        context = torch.matmul(attention_probs, V)
-
-        # Concatenate heads: [B, T, H, D/H] → [B, T, D]
-        context = (
-            context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.n_embed)
-        )
-        output = self.output(context)
-
-        return output
