@@ -14,8 +14,3 @@ class OutputLayer(nn.Module):
             update_bias = config.update_bias,
             energy_fn_name=config.energy_fn_name,
         )
-
-
-    def evaluate(self, x):
-        output = self.output(x)
-        return output
