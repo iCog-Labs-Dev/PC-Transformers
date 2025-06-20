@@ -6,3 +6,6 @@ __pycache__/
 pc_transformer_venv/
 data_preprocessing/
 
+.venv/
+*.egg-info/
+checkpoints/

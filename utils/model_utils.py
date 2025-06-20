@@ -18,15 +18,36 @@ def pad_collate_fn(batch, pad_token_id=0):
     return {"input_ids": input_seqs, "target_ids": target_seqs}
 
 def load_tokenizer():
+    """
+    Load a pre-trained tokenizer from the specified directory in the config.
+
+    Returns:
+        Tokenizer: An instance of the loaded tokenizer.
+    """
     tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
     return Tokenizer.from_file(tokenizer_path)
 
 def load_model(model_path, config):
+    """
+    Load a PCTransformer model from a checkpoint file.
+
+    Args:
+        model_path (str): Path to the saved model checkpoint.
+        config: Model configuration object.
+    Returns:
+        PCTransformer: The loaded model with weights.
+    """
     model = PCTransformer(config)
     model.load_state_dict(torch.load(model_path), strict = False)
     return model
 
 def reset_pc_modules(model):
+    """
+    Reset predictive coding modules in the model by clearing errors and energy.
+
+    Args:
+        model: The model containing predictive coding modules.
+    """
     for module in model.modules():
         if hasattr(module, "clear_errors"):
             module.clear_errors()
@@ -34,6 +55,13 @@ def reset_pc_modules(model):
             module.clear_energy()
 
 def compute_text_metrics(predictions, targets):
+    """
+    Compute and print BERTScore and BLEU metrics for predicted and target texts.
+
+    Args:
+        predictions (list of str): List of generated text strings.
+        targets (list of str): List of reference text strings.
+    """
     print("\nComputing BERTScore and BLEU...")
     P, R, F1 = bertscore(
         predictions,
@@ -55,4 +83,3 @@ def decode_ids(tokenizer, ids, stop_at_eos = True):
     if stop_at_eos and "[EOS]" in text:
         text = text.split("[EOS]")[0].strip()
     return text
-

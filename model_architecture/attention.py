@@ -4,7 +4,17 @@ import math
 from predictive_coding.pc_layer import PCLayer
 
 class Attention(nn.Module):
+    """
+    Multi-head self-attention module with predictive coding layers for use in transformer architectures.
+    Computes attention scores, applies masking, and outputs context vectors.
+    """
     def __init__(self, config):
+        """
+        Initialize the Attention module.
+
+        Args:
+            config: Configuration object with num_heads, n_embed, dropout, T, local_learning_rate, etc.
+        """
         super().__init__()
 
         self.config = config
