@@ -1,3 +1,4 @@
+import os
 import torch
 import os
 import math
@@ -11,7 +12,12 @@ from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-"""Usage: python training.py"""
+"""
+Usage: python training.py
+
+This script trains a predictive coding transformer model on a dataset.
+It tracks and plots the average predictive coding energy per epoch and saves the trained model.
+"""
 
 def train(model, dataloader, tokenizer):
     model.train()
@@ -69,20 +75,19 @@ def main():
 
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size= 256,
+        block_size= 256, 
         n_embed=64,
         dropout=0.1,
         local_learning_rate=1e-5,
         T=5,
         is_holding_error = True,
-        num_heads=2,
+        num_heads=5,
         n_blocks=4,
-        num_epochs=5,
+        num_epochs=2,
         update_bias=True,
         use_lateral = True,
         energy_fn_name="kld" 
     )
-
     model = PCTransformer(config)
     train_energies = []
     perplexities = []

@@ -4,7 +4,12 @@ from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, deco
 import torch.nn.functional as F
 from Data_preprocessing.dataloader import test_loader
 
-"""Usage: python generate_text.py"""
+"""
+Usage: python generate_text.py
+
+This script generates text using a trained predictive coding transformer model.
+It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
+"""
 
 def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
     model.eval()
