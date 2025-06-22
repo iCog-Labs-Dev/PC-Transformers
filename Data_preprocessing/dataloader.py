@@ -7,10 +7,6 @@ train_dataset = PennTreebankDataset("train_ids.pkl", Config.TOKENIZER_DIR, Confi
 valid_dataset = PennTreebankDataset("valid_ids.pkl", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
 test_dataset = PennTreebankDataset("test_ids.pkl", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
 
-print(f"Train dataset size: {len(train_dataset)}")
-print(f"Valid dataset size: {len(valid_dataset)}")
-print(f"Test dataset size: {len(test_dataset)}")
-
 tokenizer = load_tokenizer()
 pad_token_id = tokenizer.token_to_id("[PAD]")
 train_loader = DataLoader(
