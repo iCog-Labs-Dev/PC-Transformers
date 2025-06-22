@@ -52,7 +52,7 @@ def get_optimal_data_sizes():
         else:
             return 800, 160
 
-def create_subset_loaders(batch_size=16):
+def create_subset_loaders(batch_size):
     """Create appropriately sized data loaders"""
     train_size, valid_size = get_optimal_data_sizes()
     max_train = len(train_loader.dataset)
@@ -76,17 +76,17 @@ def create_subset_loaders(batch_size=16):
     
     return train_subset_loader, valid_subset_loader
 
-def get_dynamic_batch_size(n_embed, n_blocks, block_size):
+def get_dynamic_batch_size(n_embed, block_size):
     """Calculate optimal batch size based on model size"""
     if torch.cuda.is_available():
         gpu_memory = torch.cuda.get_device_properties(0).total_memory
         available_memory = gpu_memory - 1.5 * (1024**3) 
         sequence_memory = block_size * n_embed * 4
-        estimated_batch_size = max(4, min(24, int(available_memory / (sequence_memory * 3000))))
+        batch_size = max(4, min(24, int(available_memory / (sequence_memory * 3000))))
     else:
-        estimated_batch_size = max(4, min(12, 8))
+        batch_size = max(4, min(12, 8))
     
-    return estimated_batch_size
+    return batch_size
 
 def update_global_config(config):
     """Update global GPTConfig to match trial config - CRITICAL for shape consistency"""
@@ -231,12 +231,10 @@ def objective(trial):
             return float("inf")
         
 
-        optimal_batch_size = get_dynamic_batch_size(config.n_embed, config.n_blocks, config.block_size)
-        train_subset_loader, valid_subset_loader = create_subset_loaders(batch_size=optimal_batch_size)
+        batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
+        train_subset_loader, valid_subset_loader = create_subset_loaders(batch_size=batch_size)
         
-        logger.info(f"Using batch size: {optimal_batch_size}")
-        logger.info(f"Train loader length: {len(train_subset_loader)}, Valid loader length: {len(valid_subset_loader)}")
-
+        logger.info(f"Using batch size: {batch_size}")
 
         if len(train_subset_loader) == 0:
             logger.error("Train loader is empty!")
@@ -257,6 +255,8 @@ def objective(trial):
             import traceback
             logger.error(f"Training traceback: {traceback.format_exc()}")
             return float("inf")
+        
+        reset_pc_modules(model)
         
         try:
             model.eval()
