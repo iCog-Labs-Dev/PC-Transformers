@@ -1,39 +1,23 @@
 """
 Bayesian Hyperparameter Tuning
 """
-
 import optuna
 import torch
 import gc
 import psutil
 import os
-import sys
-import contextlib
-from io import StringIO
 from predictive_coding.config import GPTConfig
 from model_architecture.pc_t_model import PCTransformer
-from Data_preprocessing.dataloader import train_loader, valid_loader
+from Data_preprocessing.dataloader import train_loader, valid_loader, tokenizer, pad_token_id
 from training import train
 from eval import evaluate
-from utils.model_utils import load_tokenizer, reset_pc_modules, pad_collate_fn
+from utils.model_utils import reset_pc_modules, pad_collate_fn
 from torch.utils.data import DataLoader, Subset
 import logging
 import time
 
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-@contextlib.contextmanager
-def suppress_stdout():
-    """Context manager to suppress stdout (for hiding diversity gradient warnings)"""
-    with open(os.devnull, "w") as devnull:
-        old_stdout = sys.stdout
-        sys.stdout = devnull
-        try:
-            yield
-        finally:
-            sys.stdout = old_stdout
 
 def get_memory_usage():
     """Get current memory usage in MB"""
@@ -68,49 +52,27 @@ def get_optimal_data_sizes():
         else:
             return 800, 160
 
-def create_subset_loaders(train_size=None, valid_size=None, batch_size=16):
+def create_subset_loaders(batch_size=16):
     """Create appropriately sized data loaders"""
-    if train_size is None or valid_size is None:
-        train_size, valid_size = get_optimal_data_sizes()
+    train_size, valid_size = get_optimal_data_sizes()
+    max_train = len(train_loader.dataset)
+    max_valid = len(valid_loader.dataset)
+    logger.info(f"Original dataset sizes: train={max_train}, valid={max_valid}")
 
-    try:
-        max_train = len(train_loader.dataset)
-        max_valid = len(valid_loader.dataset)
-        logger.info(f"Original dataset sizes: train={max_train}, valid={max_valid}")
-    except Exception as e:
-        logger.error(f"Error accessing original data loaders: {e}")
-        raise
-    
     train_size = min(train_size, max_train)
     valid_size = min(valid_size, max_valid)
-    
-    logger.info(f"Using {train_size} training samples and {valid_size} validation samples")
-    
-
+        
     train_indices = torch.randperm(max_train)[:train_size]
     train_subset = Subset(train_loader.dataset, train_indices)
     
     valid_indices = torch.randperm(max_valid)[:valid_size]
     valid_subset = Subset(valid_loader.dataset, valid_indices)
+        
+    train_subset_loader = DataLoader(train_subset, batch_size=batch_size, 
+        shuffle=True, collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
     
-
-    tokenizer = load_tokenizer()
-    pad_token_id = tokenizer.token_to_id("[PAD]")
-    
-
-    train_subset_loader = DataLoader(
-        train_subset, 
-        batch_size=batch_size, 
-        shuffle=True,
-        collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id)
-    )
-    
-    valid_subset_loader = DataLoader(
-        valid_subset, 
-        batch_size=batch_size, 
-        shuffle=False,
-        collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id)
-    )
+    valid_subset_loader = DataLoader(valid_subset, batch_size=batch_size, 
+        shuffle=False, collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
     
     return train_subset_loader, valid_subset_loader
 
@@ -244,7 +206,6 @@ def objective(trial):
         
         cleanup_memory()
         
-        tokenizer = load_tokenizer()
         vocab_size = tokenizer.get_vocab_size()
         config = get_dynamic_model_config(trial, vocab_size)
 
@@ -301,9 +262,8 @@ def objective(trial):
             model.eval()
             logger.info("Starting evaluation")
             
-            with torch.no_grad(), suppress_stdout():
-                max_val_batches = min(10, len(valid_subset_loader))
-                avg_energy_val, val_loss = evaluate(model, valid_subset_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
+            max_val_batches = min(10, len(valid_subset_loader))
+            _, val_loss = evaluate(model, valid_subset_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
             
             trial_time = time.time() - start_time
             logger.info(f"Trial {trial.number} completed in {trial_time:.1f}s")
