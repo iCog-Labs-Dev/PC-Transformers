@@ -1,13 +1,15 @@
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 from .datasets.penn_treebank import PennTreebankDataset
 from .config import Config
 from utils.model_utils import pad_collate_fn, load_tokenizer
 
 train_dataset = PennTreebankDataset("train_ids.pkl", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
-train_dataset = Subset(train_dataset, range(min(len(train_dataset), 100000)))
 valid_dataset = PennTreebankDataset("valid_ids.pkl", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
 test_dataset = PennTreebankDataset("test_ids.pkl", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
-test_dataset = Subset(test_dataset, range(min(len(test_dataset), 25000)))
+
+print(f"Train dataset size: {len(train_dataset)}")
+print(f"Valid dataset size: {len(valid_dataset)}")
+print(f"Test dataset size: {len(test_dataset)}")
 
 tokenizer = load_tokenizer()
 pad_token_id = tokenizer.token_to_id("[PAD]")
