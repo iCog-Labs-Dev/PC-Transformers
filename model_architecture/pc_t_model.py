@@ -116,9 +116,12 @@ class PCTransformer(nn.Module):
                     if idx < len(self.blocks) - 1
                     else self.output.pc_layer.get_x("linear")
                 )
+                
+                layer_norm2 = block.ln2(next_target)
+                
                 futures.append(torch.jit.fork(
                     block.mlp.pc_layer2.forward,
-                    target_activity=next_target,
+                    target_activity=layer_norm2,
                     layer=block.mlp.fc2,
                     layer_type="linear",
                     t=t,
@@ -135,10 +138,12 @@ class PCTransformer(nn.Module):
                     T=self.config.T,
                     requires_update=self.training
                 ))
-
+                
+                layer_norm1 = block.ln1(block.mlp.pc_layer1.get_x("fc1"))
+                    
                 futures.append(torch.jit.fork(
                     block.attn.pc_output.forward,
-                    target_activity=block.mlp.pc_layer1.get_x("fc1"),
+                    target_activity=layer_norm1,
                     layer=block.attn.output,
                     layer_type="linear",
                     t=t,
