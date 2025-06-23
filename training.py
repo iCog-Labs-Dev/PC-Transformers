@@ -41,17 +41,14 @@ def train(model, dataloader, tokenizer):
         total_ce_loss += ce_loss.item()
 
         layer_energies = []
-        attn_block_idx = 0 
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
                 if energy is not None:
                     layer_energies.append(energy)
                 if hasattr(module, "_head_similarity"):
-                    avg_sim = module._head_similarity_avg
-                    max_sim = module._head_similarity_max
-                    # print(f"  Attn Layer {attn_block_idx} | Avg Head Sim: {avg_sim:.4f}, Max Pair: {max_sim:.4f}")
-                    # attn_block_idx += 1
+                    _ = module._head_similarity_avg
+                    _ = module._head_similarity_max
 
         # Compute average energy for current batch
         batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
@@ -79,14 +76,15 @@ def main():
         n_embed=64,
         dropout=0.1,
         local_learning_rate=1e-5,
-        T=5,
+        T= 20,
         is_holding_error = True,
         num_heads=5,
         n_blocks=4,
-        num_epochs=2,
+        num_epochs= 50,
         update_bias=True,
         use_lateral = True,
-        energy_fn_name="kld" 
+        energy_fn_name="scaled_mse",
+        eos_token_id = tokenizer.token_to_id("[EOS]")
     )
     model = PCTransformer(config)
     train_energies = []

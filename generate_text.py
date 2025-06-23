@@ -18,12 +18,12 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
     for _ in range(max_new_tokens):
         if input_tensor.size(1) > config.block_size:
             input_tensor = input_tensor[:, -config.block_size:]
-        with torch.no_grad():
-            logits = model(input_tensor, input_tensor)
-            logits = logits[:, -1, :] / temperature
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-            input_tensor = torch.cat((input_tensor, next_token), dim=1)
+      
+        logits = model(input_tensor, input_tensor)
+        logits = logits[:, -1, :] / temperature
+        probs = F.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
+        input_tensor = torch.cat((input_tensor, next_token), dim=1)
         
         reset_pc_modules(model)
         if next_token.item() == config.eos_token_id:
@@ -60,7 +60,7 @@ for batch_idx, batch in enumerate(test_loader):
     break 
 
 num_samples = 5
-prompt_len = 10
+prompt_len = 5
 i = 64
 
 for i in range(num_samples):

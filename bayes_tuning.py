@@ -221,7 +221,7 @@ def objective(trial):
                 pass
         cleanup_memory()
 
-def run_tuning(n_trials=5, study_name="bayesian_tuning"):
+def run_tuning(n_trials=30, study_name="bayesian_tuning"):
     """Run clean dynamic hyperparameter tuning"""
     
     study = optuna.create_study(
@@ -287,4 +287,4 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
     
-    study = run_tuning(n_trials=5, study_name="bayesian_tuning")
+    study = run_tuning(n_trials= 30, study_name="bayesian_tuning")
