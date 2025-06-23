@@ -3,6 +3,11 @@ __pycache__/
 *.pkl
 *.json
 *.pt
+*.txt
+*.db
 pc_transformer_venv/
 data_preprocessing/
 
+.venv/
+*.egg-info/
+checkpoints/
