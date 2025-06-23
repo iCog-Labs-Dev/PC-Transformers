@@ -199,6 +199,7 @@ def objective(trial):
             trial_time = time.time() - start_time
             logger.info(f"Trial {trial.number} completed in {trial_time:.1f}s")
 
+            trial.set_user_attr("config", config.__dict__)
             return val_loss   
         except Exception as e:
             logger.error(f"Evaluation failed: {str(e)}")
@@ -244,20 +245,37 @@ def run_tuning(n_trials=5, study_name="bayesian_tuning"):
             trial = study.best_trial
             logger.info(f"Best trial: {trial.number}. Best value: {trial.value:.5f}")
             logger.info("Best parameters:")
-
-            for key, value in trial.params.items():
-                logger.info(f"  {key}: {value}")
             
+            config_dict = trial.user_attrs.get("config")
+            if config_dict:
+                logger.info(
+                    f"n_embed={config_dict['n_embed']}, block_size={config_dict['block_size']}, num_heads={config_dict['num_heads']} "
+                    f"(head_dim={config_dict['n_embed'] // config_dict['num_heads']}), "
+                    f"n_blocks={config_dict['n_blocks']}, T={config_dict['T']}, energy_fn={config_dict['energy_fn_name']}, "
+                    f"update_bias={config_dict['update_bias']}, use_lateral={config_dict['use_lateral']}, "
+                    f"base_lr={config_dict['local_learning_rate']:.2e}, scaled_lr={config_dict['local_learning_rate']:.2e}")
+
             # Save results
             results_path = f"{study_name}_results.txt"
             with open(results_path, "w") as f:
                 f.write(f"Best validation loss: {trial.value:.4f}\n\n")
                 f.write("Best parameters:\n")
-                for key, value in trial.params.items():
-                    f.write(f"  {key}: {value}\n")
+                config = trial.user_attrs.get("config")  
+                
+                if config:
+                    f.write(f"  n_embed: {config['n_embed']}\n")
+                    f.write(f"  block_size: {config['block_size']}\n")
+                    f.write(f"  num_heads: {config['num_heads']}\n")
+                    f.write(f"  head_dim: {config['n_embed'] // config['num_heads']}\n")
+                    f.write(f"  n_blocks: {config['n_blocks']}\n")
+                    f.write(f"  T: {config['T']}\n")
+                    f.write(f"  dropout: {config['dropout']}\n")
+                    f.write(f"  energy_fn: {config['energy_fn_name']}\n")
+                    f.write(f"  update_bias: {config['update_bias']}\n")
+                    f.write(f"  use_lateral: {config['use_lateral']}\n")
+                    f.write(f"  scaled_lr: {config['local_learning_rate']:.2e}\n")
             
             logger.info(f"Results saved to {results_path}")
-        
         return study
         
     except KeyboardInterrupt:
