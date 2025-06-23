@@ -121,7 +121,7 @@ class PCTransformer(nn.Module):
                 
                 futures.append(torch.jit.fork(
                     block.mlp.pc_layer2.forward,
-                    target_activity=next_target,
+                    target_activity=layer_norm2,
                     layer=block.mlp.fc2,
                     layer_type="linear",
                     t=t,
