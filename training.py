@@ -80,7 +80,7 @@ def main():
         is_holding_error = True,
         num_heads=8,
         n_blocks=4,
-        num_epochs= 50,
+        num_epochs= 20,
         update_bias=True,
         use_lateral = True,
         energy_fn_name="scaled_mse",
