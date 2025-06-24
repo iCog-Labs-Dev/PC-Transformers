@@ -2,12 +2,9 @@ import torch
 import torch.nn.functional as F
 import math
 from predictive_coding.config import GPTConfig
-import numpy
+
 def compute_DVL(attn_v):
     B, H, T, D= attn_v.shape
-    
-    #print(f"Head Outputs Variance: {attn_v.var().item():.4f}")
-    # Ensure input tensor has requires_grad=True
     x= attn_v.transpose(0, 1).flatten(2, 3)
     x=F.normalize(x, p=2, dim=-1)
     s_m=torch.bmm(x, x.transpose(1, 2))
@@ -15,31 +12,21 @@ def compute_DVL(attn_v):
     mask = ~torch.eye(N, device=x.device).bool()
     s_m= s_m[:, mask].mean(dim=-1)
     identity = torch.eye(H, device=s_m.device)
-    identity = identity.unsqueeze(0).expand(H, -1, -1)
-    
+    identity = identity.unsqueeze(0).expand(H, -1, -1) 
     corr=  s_m - identity
     dvl=(corr** 2).mean()
-    
-   
+
     try:
-        dvl_grad= torch.autograd.grad(dvl, 
-                                      attn_v,
-                                      retain_graph= True,
-                                      )[0]
+        dvl_grad= torch.autograd.grad(dvl, attn_v, retain_graph= True,)[0]
     except Exception as e:
         print(f" Error computing diversity gradient: {e}")
         dvl_grad=torch.zeros_like(attn_v)
-        
-    
     return dvl_grad
-
 
 def get_head_similarity(mu_heads):
     B, H, T, D = mu_heads.shape
     x = mu_heads.transpose(0, 1).flatten(2, 3)  # [H, N, D]
     x = F.normalize(x, p=2, dim=-1)
-    
-    # Compute pairwise cosine similarity between heads
     corr = torch.bmm(x, x.transpose(1, 2))  
     mask = ~torch.eye(corr.size(1), device=corr.device).bool()
     s_v = corr[:, mask].mean(dim= -1)
@@ -180,7 +167,6 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
         K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
         V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-
           
         scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #B,H,T,T
         mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
@@ -189,10 +175,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         mu_heads = attn_weights @ V   # B, H, T, D
         dvl_grad=compute_DVL(mu_heads)
         dvl_norm = dvl_grad.norm().item()
-    
-        #print(f"Diversity Grad Norm: {dvl_norm:.8f}")
         similarity = get_head_similarity(mu_heads)
-        
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
         error = target - mu  # B, T, D
@@ -203,17 +186,18 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             error = error + la * dvl_projected
         else:
             error = error
+        
         if layer_instance is not None:
             setattr(layer_instance, '_head_similarity', similarity)
             setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
             setattr(layer_instance, '_head_similarity_max', similarity.max().item())
+        
         if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type]
             x_latent = x @ W_latent
             delta_x = error + x_latent
             x = x + local_lr * delta_x
 
-           
             if requires_update:
                anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
                W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
