@@ -207,11 +207,16 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             setattr(layer_instance, '_head_similarity', similarity)
             setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
             setattr(layer_instance, '_head_similarity_max', similarity.max().item())
-    
+        if use_lateral and layer_type in W_latents:
+            W_latent = W_latents[layer_type]
+            x_latent = x @ W_latent
+            delta_x = error + x_latent
+            x = x + local_lr * delta_x
 
-        if requires_update:
-            anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
+           
+            if requires_update:
+               anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+               W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
         
         else:
             x= x+ local_lr * error
