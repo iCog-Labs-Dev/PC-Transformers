@@ -90,7 +90,7 @@ def main():
         n_blocks=4,
         num_epochs=1,
         update_bias=True,
-        energy_fn_name="mse", 
+        energy_fn_name="scaled_mse", 
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
 
