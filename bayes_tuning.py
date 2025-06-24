@@ -144,21 +144,24 @@ def update_global_config(config):
 
 def get_dynamic_model_config(trial, vocab_size):
     """Get model configuration with dynamic parameter combinations like nanoGPT"""
-    
+
     n_embed_candidates = []
-    
+
     for base in range(64, 769, 16):
         n_embed_candidates.append(base)
-    
+
     special_values = [384, 576, 640, 704]
     for val in special_values:
         if val not in n_embed_candidates and 64 <= val <= 768:
             n_embed_candidates.append(val)
-    
+
     n_embed_candidates = sorted(n_embed_candidates)
-    
+
     embed_idx = trial.suggest_int('embed_idx', 0, len(n_embed_candidates) - 1)
     n_embed = n_embed_candidates[embed_idx]
+
+    # Store actual value for results
+    trial.set_user_attr('n_embed', n_embed)
     
     valid_heads = []
     min_heads = 4
@@ -186,10 +189,14 @@ def get_dynamic_model_config(trial, vocab_size):
     
     head_idx = trial.suggest_int('head_idx', 0, len(valid_heads) - 1)
     num_heads = valid_heads[head_idx]
-    
+
+    trial.set_user_attr('num_heads', num_heads)
+
     block_candidates = [64, 96, 128, 192, 256, 320, 384, 512]
     block_idx = trial.suggest_int('block_idx', 0, len(block_candidates) - 1)
     block_size = block_candidates[block_idx]
+
+    trial.set_user_attr('block_size', block_size)
     
     n_blocks = trial.suggest_int('n_blocks', 1, 6)
     T = trial.suggest_int('T', 5, 10)
@@ -202,10 +209,14 @@ def get_dynamic_model_config(trial, vocab_size):
     energy_choices = ['kld', 'mse', 'scaled_mse']
     energy_idx = trial.suggest_int('energy_idx', 0, len(energy_choices) - 1)
     energy_fn_name = energy_choices[energy_idx]
-    
+
+    trial.set_user_attr('energy_fn_name', energy_fn_name)
 
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     use_lateral = True
+
+    trial.set_user_attr('update_bias', update_bias)
+    trial.set_user_attr('use_lateral', use_lateral)
     
     head_dim = n_embed // num_heads
     
@@ -308,7 +319,7 @@ def objective(trial):
             trial_time = time.time() - start_time
             logger.info(f"Trial {trial.number} completed in {trial_time:.1f}s")
             logger.info(f"Validation loss: {val_loss:.4f}")
-            
+
             return val_loss
             
         except Exception as e:
@@ -331,9 +342,36 @@ def objective(trial):
                 pass
         cleanup_memory()
 
+def trial_callback(study, trial):
+    """Custom callback to log actual parameter values after each trial"""
+    user_attrs = trial.user_attrs
+    logger.info(f"Trial {trial.number} finished with validation loss: {trial.value:.6f}")
+    logger.info("Configuration:")
+    if 'n_embed' in user_attrs:
+        logger.info(f"  n_embed: {user_attrs['n_embed']}")
+    if 'num_heads' in user_attrs:
+        logger.info(f"  num_heads: {user_attrs['num_heads']}")
+    if 'block_size' in user_attrs:
+        logger.info(f"  block_size: {user_attrs['block_size']}")
+    if 'energy_fn_name' in user_attrs:
+        logger.info(f"  energy_fn_name: {user_attrs['energy_fn_name']}")
+    if 'update_bias' in user_attrs:
+        logger.info(f"  update_bias: {user_attrs['update_bias']}")
+    if 'use_lateral' in user_attrs:
+        logger.info(f"  use_lateral: {user_attrs['use_lateral']}")
+
+    # Log other direct parameters
+    for key, value in trial.params.items():
+        if key not in ['embed_idx', 'head_idx', 'block_idx', 'energy_idx', 'update_bias_int']:
+            logger.info(f"  {key}: {value}")
+
+    # Show best trial info
+    if study.best_trial:
+        logger.info(f"Best trial so far: {study.best_trial.number} with loss: {study.best_value:.6f}")
+
 def run_tuning(n_trials=30, study_name="bayesian_tuning"):
-    """Run clean dynamic hyperparameter tuning"""
-    
+    """hyperparameter tuning"""
+
     study = optuna.create_study(
         direction='minimize',
         study_name=study_name,
@@ -348,27 +386,60 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
     )
     
     logger.info(f"Starting bayesian tuning with {n_trials} trials")
-    
+
+    # Set optuna logging to WARNING to reduce verbose output
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
     try:
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=True, callbacks=[trial_callback])
         
-        # Results
         logger.info("Optimization completed!")
         if study.best_trial:
             trial = study.best_trial
             logger.info(f"Best loss: {trial.value:.4f}")
-            logger.info("Best parameters:")
+            logger.info("Best configuration:")
+            user_attrs = trial.user_attrs
+            if 'n_embed' in user_attrs:
+                logger.info(f"  n_embed: {user_attrs['n_embed']}")
+            if 'num_heads' in user_attrs:
+                logger.info(f"  num_heads: {user_attrs['num_heads']}")
+            if 'block_size' in user_attrs:
+                logger.info(f"  block_size: {user_attrs['block_size']}")
+            if 'energy_fn_name' in user_attrs:
+                logger.info(f"  energy_fn_name: {user_attrs['energy_fn_name']}")
+            if 'update_bias' in user_attrs:
+                logger.info(f"  update_bias: {user_attrs['update_bias']}")
+            if 'use_lateral' in user_attrs:
+                logger.info(f"  use_lateral: {user_attrs['use_lateral']}")
+
+            # Log other direct parameters
             for key, value in trial.params.items():
-                logger.info(f"  {key}: {value}")
-            
-            # Save results
+                if key not in ['embed_idx', 'head_idx', 'block_idx', 'energy_idx', 'update_bias_int']:
+                    logger.info(f"  {key}: {value}")
+
             results_path = f"{study_name}_results.txt"
             with open(results_path, "w") as f:
                 f.write(f"Best validation loss: {trial.value:.4f}\n\n")
-                f.write("Best parameters:\n")
+
+                f.write("Best Configuration:\n")
+                user_attrs = trial.user_attrs
+                if 'n_embed' in user_attrs:
+                    f.write(f"  n_embed: {user_attrs['n_embed']}\n")
+                if 'num_heads' in user_attrs:
+                    f.write(f"  num_heads: {user_attrs['num_heads']}\n")
+                if 'block_size' in user_attrs:
+                    f.write(f"  block_size: {user_attrs['block_size']}\n")
+                if 'energy_fn_name' in user_attrs:
+                    f.write(f"  energy_fn_name: {user_attrs['energy_fn_name']}\n")
+                if 'update_bias' in user_attrs:
+                    f.write(f"  update_bias: {user_attrs['update_bias']}\n")
+                if 'use_lateral' in user_attrs:
+                    f.write(f"  use_lateral: {user_attrs['use_lateral']}\n")
+
                 for key, value in trial.params.items():
-                    f.write(f"  {key}: {value}\n")
-            
+                    if key not in ['embed_idx', 'head_idx', 'block_idx', 'energy_idx', 'update_bias_int']:
+                        f.write(f"  {key}: {value}\n")
+
             logger.info(f"Results saved to {results_path}")
         
         return study
