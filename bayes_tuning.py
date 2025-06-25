@@ -131,7 +131,7 @@ def get_dynamic_model_config(trial, vocab_size):
     logger.info(
     f"Params: n_embed={n_embed}, block_size={block_size}, num_heads={num_heads} (head_dim={head_dim}), "
     f"n_blocks={n_blocks}, T={T}, energy_fn={energy_fn_name}, update_bias={update_bias}, use_lateral={use_lateral}, "
-    f"base_lr={base_lr:.2e}, scaled_lr={scaled_lr:.2e}, valid_heads={valid_heads}"
+    f"peak_lr={scaled_lr:.2e}, valid_heads={valid_heads}"
     f"warmup_steps={warmup_steps}")
     
     
@@ -260,7 +260,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
                     f"(head_dim={config_dict['n_embed'] // config_dict['num_heads']}), "
                     f"n_blocks={config_dict['n_blocks']}, T={config_dict['T']}, energy_fn={config_dict['energy_fn_name']}, "
                     f"update_bias={config_dict['update_bias']}, use_lateral={config_dict['use_lateral']}, "
-                    f"base_lr={config_dict['local_learning_rate']:.2e}, scaled_lr={config_dict['local_learning_rate']:.2e}"
+                    f"peak_lr={config_dict['peak_learning_rate']:.2e}"
                     f"warmup_steps={config_dict['warmup_steps']}")
                 
 
@@ -282,7 +282,6 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
                     f.write(f"  energy_fn: {config['energy_fn_name']}\n")
                     f.write(f"  update_bias: {config['update_bias']}\n")
                     f.write(f"  use_lateral: {config['use_lateral']}\n")
-                    f.write(f"  scaled_lr: {config['local_learning_rate']:.2e}\n")
                     f.write(f"  warmup_steps: {config['warmup_steps']}\n")
             
             logger.info(f"Results saved to {results_path}")
