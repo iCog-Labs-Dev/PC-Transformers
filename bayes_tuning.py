@@ -87,6 +87,8 @@ def update_global_config(config):
     GPTConfig.vocab_size = config.vocab_size
     GPTConfig.dropout = config.dropout
     GPTConfig.local_learning_rate = config.local_learning_rate
+    GPTConfig.peak_learning_rate = config.peak_learning_rate
+    GPTConfig.warmup_steps = config.warmup_steps
     GPTConfig.T = config.T
     GPTConfig.n_blocks = config.n_blocks
     GPTConfig.update_bias = config.update_bias
