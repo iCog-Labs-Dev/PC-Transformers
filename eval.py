@@ -93,14 +93,14 @@ def main():
         block_size=256,
         n_embed=64,
         dropout=0.1,
-        local_learning_rate=1e-5,
-        T=2,
+        local_learning_rate= 1e-5,
+        T=20,
         is_holding_error=True,
-        num_heads=2,
+        num_heads=8,
         n_blocks=4,
         num_epochs=1,
         update_bias=True,
-        energy_fn_name="kld", 
+        energy_fn_name="scaled_mse", 
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
 
@@ -108,7 +108,7 @@ def main():
     model = load_model(model_path, config)
 
     # Max batches can be set to limit evaluation, or None for full dataset
-    evaluate(model, test_loader, tokenizer, max_batches=10, compute_metrics=True)
+    evaluate(model, test_loader, tokenizer, max_batches= None, compute_metrics=True)
 
 if __name__ == "__main__":
     main()
