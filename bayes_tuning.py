@@ -8,16 +8,12 @@ import os
 from predictive_coding.config import GPTConfig
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader, valid_loader, tokenizer, pad_token_id
-from Data_preprocessing.dataloader import train_loader, valid_loader, tokenizer, pad_token_id
 from training import train
 from eval import evaluate
-from utils.model_utils import reset_pc_modules, pad_collate_fn
 from utils.model_utils import reset_pc_modules, pad_collate_fn
 from torch.utils.data import DataLoader, Subset
 import logging
 import time
-import optuna
-optuna.logging.set_verbosity(optuna.logging.WARNING)
 import optuna
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -49,19 +45,13 @@ def get_optimal_data_sizes():
             return 800, 160
 
 def create_subset_loaders(batch_size):
-def create_subset_loaders(batch_size):
     """Create appropriately sized data loaders"""
-    train_size, valid_size = get_optimal_data_sizes()
-    max_train = len(train_loader.dataset)
-    max_valid = len(valid_loader.dataset)
-
     train_size, valid_size = get_optimal_data_sizes()
     max_train = len(train_loader.dataset)
     max_valid = len(valid_loader.dataset)
 
     train_size = min(train_size, max_train)
     valid_size = min(valid_size, max_valid)
-        
         
     train_indices = torch.randperm(max_train)[:train_size]
     train_subset = Subset(train_loader.dataset, train_indices)
@@ -71,18 +61,12 @@ def create_subset_loaders(batch_size):
         
     train_subset_loader = DataLoader(train_subset, batch_size=batch_size, 
         shuffle=True, collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
-        
-    train_subset_loader = DataLoader(train_subset, batch_size=batch_size, 
-        shuffle=True, collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
     
-    valid_subset_loader = DataLoader(valid_subset, batch_size=batch_size, 
-        shuffle=False, collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
     valid_subset_loader = DataLoader(valid_subset, batch_size=batch_size, 
         shuffle=False, collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
     
     return train_subset_loader, valid_subset_loader
 
-def get_dynamic_batch_size(n_embed, block_size):
 def get_dynamic_batch_size(n_embed, block_size):
     """Calculate optimal batch size based on model size"""
     if torch.cuda.is_available():
@@ -90,9 +74,7 @@ def get_dynamic_batch_size(n_embed, block_size):
         available_memory = gpu_memory - 1.5 * (1024**3) 
         sequence_memory = block_size * n_embed * 4
         batch_size = max(4, min(24, int(available_memory / (sequence_memory * 3000))))
-        batch_size = max(4, min(24, int(available_memory / (sequence_memory * 3000))))
     else:
-        batch_size = max(4, min(12, 8))
         batch_size = max(4, min(12, 8))
     
     return batch_size
@@ -141,15 +123,7 @@ def update_global_config(config):
     GPTConfig.use_lateral = config.use_lateral
     GPTConfig.energy_fn_name = config.energy_fn_name
     
-    
 def get_dynamic_model_config(trial, vocab_size):
-    """Get model configuration with dynamic parameter combinations"""
-    n_embed_candidates = list(range(64, 769, 16))
-    n_embed = n_embed_candidates[trial.suggest_int('embed_idx', 0, len(n_embed_candidates) - 1)]
-
-    valid_heads = [h for h in range(4, min(16, n_embed // 12) + 1)
-                if n_embed % h == 0 and 12 <= n_embed // h <= 128]
-
     """Get model configuration with dynamic parameter combinations"""
     n_embed_candidates = list(range(64, 769, 16))
     n_embed = n_embed_candidates[trial.suggest_int('embed_idx', 0, len(n_embed_candidates) - 1)]
@@ -160,10 +134,7 @@ def get_dynamic_model_config(trial, vocab_size):
     if not valid_heads:
         valid_heads = [h for h in [4, 6, 8, 12, 16]
                     if h <= n_embed and n_embed % h == 0 and n_embed // h >= 8]
-        valid_heads = [h for h in [4, 6, 8, 12, 16]
-                    if h <= n_embed and n_embed % h == 0 and n_embed // h >= 8]
         if not valid_heads:
-            if n_embed >= 48 and n_embed % 4 == 0:
             if n_embed >= 48 and n_embed % 4 == 0:
                 logger.warning(f"Forcing num_heads=4 for n_embed={n_embed} (head_dim={n_embed//4})")
             else:
@@ -174,29 +145,16 @@ def get_dynamic_model_config(trial, vocab_size):
     block_size_candidates = list(range(64, 513, 16))
     block_size = block_size_candidates[trial.suggest_int('block_idx', 0, len(block_size_candidates)-1)]
 
-                return None
-        
-    num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
-    block_size_candidates = list(range(64, 513, 16))
-    block_size = block_size_candidates[trial.suggest_int('block_idx', 0, len(block_size_candidates)-1)]
-
     n_blocks = trial.suggest_int('n_blocks', 1, 6)
-    T = trial.suggest_int('T', 4, 20)
     T = trial.suggest_int('T', 4, 20)
     base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
-    scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
 
-    energy_fn_name = ['kld', 'mse', 'scaled_mse'][trial.suggest_int('energy_idx', 0, 2)]
     energy_fn_name = ['kld', 'mse', 'scaled_mse'][trial.suggest_int('energy_idx', 0, 2)]
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     use_lateral = True
     head_dim = n_embed // num_heads
     
-    logger.info(
-    f"Params: n_embed={n_embed}, block_size={block_size}, num_heads={num_heads} (head_dim={head_dim}), "
-    f"n_blocks={n_blocks}, T={T}, energy_fn={energy_fn_name}, update_bias={update_bias}, use_lateral={use_lateral}, "
-    f"base_lr={base_lr:.2e}, scaled_lr={scaled_lr:.2e}, valid_heads={valid_heads}")
     logger.info(
     f"Params: n_embed={n_embed}, block_size={block_size}, num_heads={num_heads} (head_dim={head_dim}), "
     f"n_blocks={n_blocks}, T={T}, energy_fn={energy_fn_name}, update_bias={update_bias}, use_lateral={use_lateral}, "
@@ -223,9 +181,7 @@ def objective(trial):
     start_time = time.time()
     model = None
 
-
     try:
-        logger.info(f"Trial {trial.number}")
         logger.info(f"Trial {trial.number}")
         cleanup_memory()
         vocab_size = tokenizer.get_vocab_size()
@@ -238,7 +194,6 @@ def objective(trial):
         update_global_config(config)
         try:
             model = PCTransformer(config)            
-            model = PCTransformer(config)            
         except Exception as e:
             logger.error(f"Model creation failed: {str(e)}")
             import traceback
@@ -248,15 +203,10 @@ def objective(trial):
         batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
         train_loader, valid_loader = create_subset_loaders(batch_size=batch_size)
         logger.info(f"Using batch size: {batch_size}")
-        batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
-        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size)
-        logger.info(f"Using batch size: {batch_size}")
 
-        if len(train_loader) == 0:
         if len(train_loader) == 0:
             logger.error("Train loader is empty!")
             return float("inf")
-        if len(valid_loader) == 0:
         if len(valid_loader) == 0:
             logger.error("Valid loader is empty!")
             return float("inf")
@@ -264,15 +214,11 @@ def objective(trial):
         try:
             model.train()
             _, _ = train(model, train_loader, tokenizer)
-            _, _ = train(model, train_loader, tokenizer)
         except Exception as e:
             logger.error(f"Training failed: {str(e)}")
             import traceback
             logger.error(f"Training traceback: {traceback.format_exc()}")
             return float("inf")
-        
-        reset_pc_modules(model)
-
         
         reset_pc_modules(model)
 
@@ -330,11 +276,9 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
             n_startup_trials=5,
             n_warmup_steps=3,
             interval_steps=1))
-            interval_steps=1))
     
     logger.info(f"Starting bayesian tuning with {n_trials} trials")
     try:
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
         study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
         
 
@@ -404,5 +348,4 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
     
-    study = run_tuning(n_trials= 30, study_name="bayesian_tuning")
     study = run_tuning(n_trials= 30, study_name="bayesian_tuning")
