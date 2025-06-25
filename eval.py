@@ -23,49 +23,50 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
     else:
         print(f"Evaluating on up to {max_batches} batches...")
         
-    for batch_idx, batch in enumerate(dataloader):
-        if max_batches is not None and batch_idx >= max_batches:
-            break
-        
-        input_ids = batch["input_ids"]
-        targets = batch["target_ids"]
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(dataloader):
+            if max_batches is not None and batch_idx >= max_batches:
+                break
 
-        logits = model(targets, input_ids)
-        ce_loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            targets.view(-1),
-            ignore_index= pad_token_id,
-        )
-        total_ce_loss += ce_loss.item()
-        
-        layer_energies = []
-        for module in model.modules():
-            if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
-                energy = module.get_energy()
-                if energy is not None and not (torch.isnan(torch.tensor(energy)) if isinstance(energy, (int, float)) else False):
-                    layer_energies.append(energy)
+            input_ids = batch["input_ids"]
+            targets = batch["target_ids"]
 
-        if layer_energies:
-            valid_energies = [e for e in layer_energies if not (torch.isnan(torch.tensor(e)) if isinstance(e, (int, float)) else True)]
-            batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
-        else:
-            batch_energy = ce_loss.item()
-        total_energy += batch_energy
-        batch_count += 1
+            logits = model(targets, input_ids)
+            ce_loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1),
+                ignore_index= pad_token_id,
+            )
+            total_ce_loss += ce_loss.item()
 
-        if (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
+            layer_energies = []
+            for module in model.modules():
+                if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
+                    energy = module.get_energy()
+                    if energy is not None and not (torch.isnan(torch.tensor(energy)) if isinstance(energy, (int, float)) else False):
+                        layer_energies.append(energy)
 
-        if compute_metrics:
-            preds = torch.argmax(logits, dim=-1)
-            mask = targets != pad_token_id
-            for i in range(preds.size(0)):
-                pred_str = decode_ids(tokenizer, preds[i][mask[i]].tolist(), stop_at_eos=True)
-                tgt_str = decode_ids(tokenizer, targets[i][mask[i]].tolist(), stop_at_eos=True)
-                decoded_predictions.append(pred_str)
-                decoded_targets.append(tgt_str)
-        
-        reset_pc_modules(model)
+            if layer_energies:
+                valid_energies = [e for e in layer_energies if not (torch.isnan(torch.tensor(e)) if isinstance(e, (int, float)) else True)]
+                batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
+            else:
+                batch_energy = ce_loss.item()
+            total_energy += batch_energy
+            batch_count += 1
+
+            if (batch_idx + 1) % 10 == 0:
+                print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
+
+            if compute_metrics:
+                preds = torch.argmax(logits, dim=-1)
+                mask = targets != pad_token_id
+                for i in range(preds.size(0)):
+                    pred_str = decode_ids(tokenizer, preds[i][mask[i]].tolist(), stop_at_eos=True)
+                    tgt_str = decode_ids(tokenizer, targets[i][mask[i]].tolist(), stop_at_eos=True)
+                    decoded_predictions.append(pred_str)
+                    decoded_targets.append(tgt_str)
+
+            reset_pc_modules(model)
 
     if compute_metrics and decoded_predictions and decoded_targets:
         compute_text_metrics(decoded_predictions, decoded_targets)
