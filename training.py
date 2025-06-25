@@ -97,7 +97,7 @@ def main():
         dropout=0.1,
         local_learning_rate= 0.0,
         peak_learning_rate= 1.29e-04,
-        warmup_steps= 1000,
+        warmup_steps= 58,
         T= 20,
         is_holding_error = True,
         num_heads=8,
