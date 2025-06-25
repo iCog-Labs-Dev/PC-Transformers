@@ -61,6 +61,15 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     word_layer = layer["word"]
     pos_layer = layer["pos"]
 
+    # Clip input_ids and position_ids to valid ranges
+    vocab_size = word_layer.weight.size(0)
+    if input_ids.max() >= vocab_size:
+        input_ids = torch.clamp(input_ids, max=vocab_size-1)
+        
+    max_pos = pos_layer.weight.size(0)
+    if position_ids.max() >= max_pos:
+        position_ids = torch.clamp(position_ids, max=max_pos-1)
+
     if requires_update or mu_word_cache is None or mu_pos_cache is None:
         mu_word = word_layer(input_ids)
         mu_pos = pos_layer(position_ids)
@@ -276,5 +285,7 @@ def ids_to_one_hot(input_ids, vocab_size):
     Returns:
         torch.Tensor: One-hot encoded tensor of shape (B, S, vocab_size).
     """
-    """input_id from [B, S] to [B, S, V]"""
+    if input_ids.max() >= vocab_size:
+        input_ids = torch.clamp(input_ids, max=vocab_size-1)
+    
     return F.one_hot(input_ids, num_classes=vocab_size).float()

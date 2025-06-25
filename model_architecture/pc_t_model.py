@@ -40,21 +40,29 @@ class PCTransformer(nn.Module):
             block.mlp.pc_layer2.register_lateral("linear", block.mlp.fc2.in_features)
         self.output.pc_layer.register_lateral("linear", self.output.output.in_features)
 
-    def forward(self, target_ids: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, target_ids, input_ids):
         """
-        Forward pass for the PCTransformer.
+        Forward pass of the PCTransformer model.
 
         Args:
-            target_ids (torch.Tensor): Tensor of shape (B, T), containing ground truth token IDs.
-            input_ids (torch.Tensor): Tensor of shape (B, T), containing input token IDs.
+            target_ids (torch.Tensor): Target token IDs of shape (B, T).
+            input_ids (torch.Tensor): Input token IDs of shape (B, T).
 
         Returns:
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
         """
         B, S = input_ids.shape
         vocab_size = self.output.config.vocab_size
+        
+        # Clip input_ids and target_ids to valid range before using them
+        if input_ids.max() >= vocab_size:
+            input_ids = torch.clamp(input_ids, max=vocab_size-1)
+        
+        if target_ids.max() >= vocab_size:
+            target_ids = torch.clamp(target_ids, max=vocab_size-1)
+        
         target_logits = ids_to_one_hot(target_ids, vocab_size)
-        position_ids = torch.arange(S).unsqueeze(0).expand(B, S)
+        position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
         self.embedding.pc_layer.init_x(
             batch_size=B,

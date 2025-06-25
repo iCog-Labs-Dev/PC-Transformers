@@ -2,7 +2,7 @@ import torch
 from predictive_coding.config import GPTConfig
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids
 import torch.nn.functional as F
-from Data_preprocessing.dataloader import test_loader
+from Data_preprocessing.dataloader1 import test_loader
 
 """
 Usage: python generate_text.py
