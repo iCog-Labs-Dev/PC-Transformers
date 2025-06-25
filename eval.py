@@ -17,6 +17,8 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
     pad_token_id = tokenizer.token_to_id("[PAD]")
 
     decoded_targets, decoded_predictions = [], []
+    total_tokens = 0
+    correct_tokens = 0
     
     if max_batches is None:
         print(f"Evaluating on the full test set...")
@@ -49,12 +51,16 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
         total_energy += batch_energy
         batch_count += 1
 
+        # Token-level accuracy
+        preds = torch.argmax(logits, dim=-1)
+        mask = targets != pad_token_id
+        correct_tokens += ((preds == targets) & mask).sum().item()
+        total_tokens += mask.sum().item()
+
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
 
         if compute_metrics:
-            preds = torch.argmax(logits, dim=-1)
-            mask = targets != pad_token_id
             for i in range(preds.size(0)):
                 pred_str = decode_ids(tokenizer, preds[i][mask[i]].tolist(), stop_at_eos=True)
                 tgt_str = decode_ids(tokenizer, targets[i][mask[i]].tolist(), stop_at_eos=True)
@@ -68,12 +74,16 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
+    token_accuracy = correct_tokens / total_tokens if total_tokens > 0 else 0.0
+    avg_loss_per_token = total_ce_loss / total_tokens if total_tokens > 0 else 0.0
+    perplexity = torch.exp(torch.tensor(avg_loss_per_token)) if total_tokens > 0 else float('inf')
         
     elapsed = time.time() - start_time
     print(f"Evaluation completed in {elapsed:.2f} seconds")
     print(f"Total Batches Processed: {batch_idx + 1}")
     print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
-    return avg_energy, avg_ce_loss 
+    print(f"Token Accuracy: {token_accuracy:.4f} | Perplexity: {perplexity:.4f}")
+    return avg_energy, avg_ce_loss, token_accuracy, perplexity
 
 def main():
     tokenizer = load_tokenizer()

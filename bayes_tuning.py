@@ -195,11 +195,15 @@ def objective(trial):
         try:
             model.eval()
             max_val_batches = min(10, len(valid_loader))
-            _, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
+            val_energy, val_loss, val_token_acc, val_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
             trial_time = time.time() - start_time
             logger.info(f"Trial {trial.number} completed in {trial_time:.1f}s")
+            logger.info(f"Validation metrics: CE Loss={val_loss:.4f}, Energy={val_energy:.4f}, Token Accuracy={val_token_acc:.4f}, Perplexity={val_perplexity:.4f}")
 
             trial.set_user_attr("config", config.__dict__)
+            trial.set_user_attr("val_energy", val_energy)
+            trial.set_user_attr("val_token_acc", val_token_acc)
+            trial.set_user_attr("val_perplexity", float(val_perplexity))
             return val_loss   
         except Exception as e:
             logger.error(f"Evaluation failed: {str(e)}")
