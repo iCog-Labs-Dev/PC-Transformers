@@ -8,6 +8,7 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader
+from Data_preprocessing.config import Config
 from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -24,18 +25,23 @@ def train(model, dataloader, tokenizer):
     total_energy = 0.0
     total_ce_loss = 0.0
     batch_count = 0
-    pad_token_id = tokenizer.token_to_id("[PAD]")
+    pad_token_id = tokenizer.pad_token_id
+    vocab_size = tokenizer.vocab_size
 
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"]
         target_ids = batch["target_ids"]
+        
+        # Clip target_ids to valid range before using them for loss calculation
+        if target_ids.max() >= vocab_size:
+            target_ids = torch.clamp(target_ids, max=vocab_size-1)
 
         logits = model(target_ids, input_ids)
 
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             target_ids.view(-1),
-            ignore_index= pad_token_id
+            ignore_index=pad_token_id
         )
         
         total_ce_loss += ce_loss.item()
@@ -68,7 +74,7 @@ def train(model, dataloader, tokenizer):
 
 def main():
     tokenizer = load_tokenizer()
-    vocab_size = tokenizer.get_vocab_size()
+    vocab_size = tokenizer.vocab_size
 
     config = GPTConfig(
         vocab_size = vocab_size,
@@ -84,7 +90,7 @@ def main():
         update_bias=True,
         use_lateral = True,
         energy_fn_name="scaled_mse",
-        eos_token_id = tokenizer.token_to_id("[EOS]")
+        eos_token_id = tokenizer.eos_token_id
     )
     model = PCTransformer(config)
     train_energies = []

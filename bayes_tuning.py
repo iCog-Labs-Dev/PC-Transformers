@@ -116,7 +116,7 @@ def get_dynamic_model_config(trial, vocab_size):
     block_size = block_size_candidates[trial.suggest_int('block_idx', 0, len(block_size_candidates)-1)]
 
     n_blocks = trial.suggest_int('n_blocks', 1, 6)
-    T = trial.suggest_int('T', 4, 20)
+    T = trial.suggest_int('T', 4, 20, log=True)
     base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
 
@@ -154,7 +154,7 @@ def objective(trial):
     try:
         logger.info(f"Trial {trial.number}")
         cleanup_memory()
-        vocab_size = tokenizer.get_vocab_size()
+        vocab_size = tokenizer.vocab_size
         config = get_dynamic_model_config(trial, vocab_size)
 
         if config is None:
