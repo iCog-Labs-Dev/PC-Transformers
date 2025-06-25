@@ -50,6 +50,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
             batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
         else:
             batch_energy = ce_loss.item()
+
         total_energy += batch_energy
         batch_count += 1
 

@@ -78,7 +78,7 @@ def get_dynamic_batch_size(n_embed, block_size):
         batch_size = max(4, min(12, 8))
     
     return batch_size
-
+  
 def normalize_energy(energy_value, energy_fn_name):
     """
     Normalize energy values to comparable scales across different energy functions.
@@ -243,6 +243,7 @@ def objective(trial):
             trial.set_user_attr("normalized_energy", normalized_energy)
             trial.set_user_attr("combined_objective", combined_objective)
             return combined_objective
+          
         except Exception as e:
             logger.error(f"Evaluation failed: {str(e)}")
             import traceback
