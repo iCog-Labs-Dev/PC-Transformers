@@ -24,6 +24,7 @@ def train(model, dataloader, tokenizer):
     total_energy = 0.0
     total_ce_loss = 0.0
     batch_count = 0
+    total_loss = 0.0
     pad_token_id = tokenizer.token_to_id("[PAD]")
 
     for batch_idx, batch in enumerate(dataloader):
@@ -59,14 +60,22 @@ def train(model, dataloader, tokenizer):
         batch_count += 1
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         
+        avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
+        
+        # Hybrid loss: alpha * energy + (1 - alpha) * CE loss
+        alpha = 0.2  # Adjust this value to balance between energy and CE loss
+        hybrid_loss = alpha * avg_energy + (1 - alpha) * ce_loss
+        total_loss += hybrid_loss.item()
+        
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
 
-    avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
+    
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
-    avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")    
+    avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")  
+      
     return avg_energy, avg_perplexity
 
 def main():

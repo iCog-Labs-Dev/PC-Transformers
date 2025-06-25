@@ -145,6 +145,15 @@ def get_dynamic_model_config(trial, vocab_size):
         use_lateral=use_lateral,
         energy_fn_name=energy_fn_name
     )
+    
+
+def combined_loss(energy, ce_loss, alpha=0.5):
+    """
+    Combine energy and cross-entropy loss.
+    alpha: weight between energy and CE loss (0.0 = only CE, 1.0 = only energy)
+    """
+    return alpha * energy + (1 - alpha) * ce_loss
+
 
 def objective(trial):
     """Bayesian Objective function"""
@@ -195,11 +204,21 @@ def objective(trial):
         try:
             model.eval()
             max_val_batches = min(10, len(valid_loader))
-            _, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
+            # energy, ce_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
+            energy, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
             trial_time = time.time() - start_time
             logger.info(f"Trial {trial.number} completed in {trial_time:.1f}s")
 
-            return val_loss   
+            # Combine both metrics into a single objective
+            alpha = 0.6  # you can tune this or make it a parameter to sweep over
+            combined = combined_loss(energy, val_loss, alpha=alpha)
+            
+            # Optional: log components separately
+            trial.set_user_attr("val_energy", energy)
+            trial.set_user_attr("val_ce_loss", val_loss)
+            
+            return combined
+           
         except Exception as e:
             logger.error(f"Evaluation failed: {str(e)}")
             import traceback
@@ -243,6 +262,9 @@ def run_tuning(n_trials=5, study_name="bayesian_tuning"):
         if study.best_trial:
             trial = study.best_trial
             logger.info(f"Best trial: {trial.number}. Best value: {trial.value:.5f}")
+            logger.info(f"Best trial: {trial.number}. Combined Loss: {trial.value:.5f}")
+            # logger.info(f"  Energy: {trial.user_attrs.get('val_energy'):.5f}")
+            # logger.info(f"  CE Loss: {trial.user_attrs.get('val_ce_loss'):.5f}")
             logger.info("Best parameters:")
 
             for key, value in trial.params.items():
