@@ -15,7 +15,8 @@ from torch.utils.data import DataLoader, Subset
 import logging
 import time
 import optuna
-optuna.logging.set_verbosity(optuna.logging.WARNING)
+import inquirer
+from inquirer.themes import GreenPassion
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -146,6 +147,28 @@ def get_dynamic_model_config(trial, vocab_size):
         energy_fn_name=energy_fn_name
     )
 
+def select_objective():
+    options = [
+        ("Cross-Entropy Loss (minimize)", "ce_loss"),
+        ("Perplexity (minimize)", "perplexity"),
+        ("Token Accuracy (maximize)", "token_accuracy"),
+        ("Energy (minimize)", "energy"),
+    ]
+    question = [
+        inquirer.List(
+            "objective",
+            message="\033[1;36mSelect the objective metric for Bayesian tuning:\033[0m",
+            choices=[f"\033[1;33m{desc}\033[0m" for desc, _ in options],
+        )
+    ]
+    answer = inquirer.prompt(question, theme=GreenPassion())
+    # Remove color codes for matching
+    import re
+    selected = re.sub(r'\x1b\[[0-9;]*m', '', answer["objective"])
+    for desc, val in options:
+        if desc in selected:
+            return val
+
 def objective(trial):
     """Bayesian Objective function"""
     start_time = time.time()
@@ -225,7 +248,7 @@ def objective(trial):
                 pass
         cleanup_memory()
 
-def run_tuning(n_trials=30, study_name="bayesian_tuning"):
+def run_tuning(n_trials=30, study_name="bayesian_tuning", chosen_objective="ce_loss"):
     """Run clean dynamic hyperparameter tuning"""
     
     study = optuna.create_study(
@@ -287,8 +310,9 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
         return study
 
 if __name__ == "__main__":
+    chosen_objective = select_objective()
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
     
-    study = run_tuning(n_trials= 30, study_name="bayesian_tuning")
+    study = run_tuning(n_trials=5, study_name="bayesian_tuning", chosen_objective=chosen_objective)
