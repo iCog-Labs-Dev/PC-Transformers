@@ -14,7 +14,8 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
     total_energy = 0.0
     batch_count = 0
     total_ce_loss = 0.0
-    pad_token_id = tokenizer.token_to_id("[PAD]")
+    pad_token_id = tokenizer.pad_token_id
+    vocab_size = tokenizer.vocab_size
 
     decoded_targets, decoded_predictions = [], []
     
@@ -82,7 +83,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
 
 def main():
     tokenizer = load_tokenizer()
-    vocab_size = tokenizer.get_vocab_size()
+    vocab_size = tokenizer.vocab_size
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size=256,
@@ -96,7 +97,7 @@ def main():
         num_epochs=1,
         update_bias=True,
         energy_fn_name="scaled_mse", 
-        eos_token_id = tokenizer.token_to_id("[EOS]")
+        eos_token_id = tokenizer.eos_token_id
     )
 
     model_path = "checkpoints/pc_transformer.pt"

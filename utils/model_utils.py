@@ -1,7 +1,7 @@
 import os
 import torch
 import torch.nn.functional as F
-from tokenizers import Tokenizer
+from transformers import GPT2Tokenizer
 from Data_preprocessing.config import Config
 from model_architecture.pc_t_model import PCTransformer
 from bert_score import score as bertscore
@@ -33,32 +33,24 @@ def pad_collate_fn(batch, pad_token_id=0):
     return {"input_ids": input_seqs, "target_ids": target_seqs}
 
 def load_tokenizer():
-    """
-    Load a pre-trained tokenizer from the specified directory in the config.
-
-    Returns:
-        Tokenizer: An instance of the loaded tokenizer.
-    """
-    tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
-    return Tokenizer.from_file(tokenizer_path)
+    tokenizer_path = os.path.join(Config.TOKENIZER_DIR, f"gpt2_tokenizer_{Config.DATASET_NAME}.json")
+    tokenizer= GPT2Tokenizer.from_pretrained(tokenizer_path)
+    special_tokens = {"pad_token": "[PAD]", "eos_token": "[EOS]"}
+    tokenizer.add_special_tokens(special_tokens)
+    
+    Config.VOCAB_SIZE =tokenizer.vocab_size + len(special_tokens)
+    Config.PAD_ID = tokenizer.pad_token_id
+    Config.EOS_ID = tokenizer.eos_token_id
+    return tokenizer
 
 def load_model(model_path, config):
-    """
-    Load a PCTransformer model from a checkpoint file.
-
-    Args:
-        model_path (str): Path to the saved model checkpoint.
-        config: Model configuration object.
-    Returns:
-        PCTransformer: The loaded model with weights.
-    """
     model = PCTransformer(config)
     model.load_state_dict(torch.load(model_path), strict = False)
     return model
 
 def reset_pc_modules(model):
     """
-    Reset predictive coding modules in the model by clearing errors, energy, and caches.
+    Reset predictive coding modules in the model by clearing errors and energy.
 
     Args:
         model: The model containing predictive coding modules.
@@ -74,13 +66,6 @@ def reset_pc_modules(model):
             module._embed_cache = {"mu_word": None, "mu_pos": None, "step": -1}
 
 def compute_text_metrics(predictions, targets):
-    """
-    Compute and print BERTScore and BLEU metrics for predicted and target texts.
-
-    Args:
-        predictions (list of str): List of generated text strings.
-        targets (list of str): List of reference text strings.
-    """
     print("\nComputing BERTScore and BLEU...")
     P, R, F1 = bertscore(
         predictions,
