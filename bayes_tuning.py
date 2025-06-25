@@ -121,6 +121,7 @@ def get_dynamic_model_config(trial, vocab_size):
     T = trial.suggest_int('T', 4, 20, log=True)
     base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
+    warmup_steps = trial.suggest_int('warmup_steps', 10, 100)
 
     energy_fn_name = ['kld', 'mse', 'scaled_mse'][trial.suggest_int('energy_idx', 0, 2)]
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
@@ -130,14 +131,18 @@ def get_dynamic_model_config(trial, vocab_size):
     logger.info(
     f"Params: n_embed={n_embed}, block_size={block_size}, num_heads={num_heads} (head_dim={head_dim}), "
     f"n_blocks={n_blocks}, T={T}, energy_fn={energy_fn_name}, update_bias={update_bias}, use_lateral={use_lateral}, "
-    f"base_lr={base_lr:.2e}, scaled_lr={scaled_lr:.2e}, valid_heads={valid_heads}")
+    f"base_lr={base_lr:.2e}, scaled_lr={scaled_lr:.2e}, valid_heads={valid_heads}"
+    f"peak_lr={scaled_lr:.2e}, valid_heads={valid_heads}"
+    f"warmup_steps={warmup_steps}")
     
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,
         n_embed=n_embed,
         dropout=trial.suggest_float('dropout', 0.05, 0.3),
-        local_learning_rate=scaled_lr,
+        local_learning_rate=0.0,  # Will be set dynamically
+        peak_learning_rate=scaled_lr,
+        warmup_steps=warmup_steps,
         T=T,
         is_holding_error=True,
         num_heads=num_heads,
