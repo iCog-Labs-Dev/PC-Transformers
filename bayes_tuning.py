@@ -79,6 +79,36 @@ def get_dynamic_batch_size(n_embed, block_size):
     
     return batch_size
 
+def normalize_energy(energy_value, energy_fn_name):
+    """
+    Normalize energy values to comparable scales across different energy functions.
+    Based on empirical testing: MSE~1.86, scaled_MSE~0.09, KLD~9.02
+    """
+    normalization_factors = {
+        'mse': 1.0,        
+        'scaled_mse': 20.0,
+        'kld': 0.2
+    }
+    factor = normalization_factors.get(energy_fn_name, 1.0)
+    return energy_value * factor
+
+def get_adaptive_weight(energy_fn_name):
+    """
+    Get adaptive weight for combining CE loss and energy based on energy function type.
+
+    Args:
+        energy_fn_name (str): Name of the energy function
+
+    Returns:
+        float: Weight for CE loss (0-1), where (1-weight) is applied to energy
+    """
+    adaptive_weights = {
+        'kld': 0.4,
+        'mse': 0.6,
+        'scaled_mse': 0.6
+    }
+    return adaptive_weights.get(energy_fn_name, 0.5)
+
 def update_global_config(config):
     """Update global GPTConfig to match trial config - CRITICAL for shape consistency"""
     GPTConfig.num_heads = config.num_heads
@@ -195,12 +225,24 @@ def objective(trial):
         try:
             model.eval()
             max_val_batches = min(10, len(valid_loader))
-            _, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
+            avg_energy, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
+
+            normalized_energy = normalize_energy(avg_energy, config.energy_fn_name)
+            adaptive_weight = get_adaptive_weight(config.energy_fn_name)
+
+            combined_objective = adaptive_weight * val_loss + (1 - adaptive_weight) * normalized_energy
+
             trial_time = time.time() - start_time
             logger.info(f"Trial {trial.number} completed in {trial_time:.1f}s")
+            logger.info(f"  CE Loss: {val_loss:.4f}, Energy: {avg_energy:.4f}, Normalized Energy: {normalized_energy:.4f}")
+            logger.info(f"  Weight: {adaptive_weight:.2f}, Combined Objective: {combined_objective:.4f}")
 
             trial.set_user_attr("config", config.__dict__)
-            return val_loss   
+            trial.set_user_attr("ce_loss", val_loss)
+            trial.set_user_attr("energy", avg_energy)
+            trial.set_user_attr("normalized_energy", normalized_energy)
+            trial.set_user_attr("combined_objective", combined_objective)
+            return combined_objective
         except Exception as e:
             logger.error(f"Evaluation failed: {str(e)}")
             import traceback
@@ -239,30 +281,48 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
     try:
         study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
         
-        # Results
         logger.info("Optimization completed!")
         if study.best_trial:
             trial = study.best_trial
-            logger.info(f"Best trial: {trial.number}. Best value: {trial.value:.5f}")
+            logger.info(f"Best trial: {trial.number}. Best combined objective: {trial.value:.5f}")
+
+
+            ce_loss = trial.user_attrs.get("ce_loss", "N/A")
+            energy = trial.user_attrs.get("energy", "N/A")
+            normalized_energy = trial.user_attrs.get("normalized_energy", "N/A")
+            logger.info(f"  CE Loss: {ce_loss:.4f}, Raw Energy: {energy:.4f}, Normalized Energy: {normalized_energy:.4f}")
+
             logger.info("Best parameters:")
-            
             config_dict = trial.user_attrs.get("config")
             if config_dict:
+                adaptive_weight = get_adaptive_weight(config_dict['energy_fn_name'])
+                logger.info(f"  Energy function: {config_dict['energy_fn_name']} (CE weight: {adaptive_weight:.2f})")
                 logger.info(
-                    f"n_embed={config_dict['n_embed']}, block_size={config_dict['block_size']}, num_heads={config_dict['num_heads']} "
+                    f"  n_embed={config_dict['n_embed']}, block_size={config_dict['block_size']}, num_heads={config_dict['num_heads']} "
                     f"(head_dim={config_dict['n_embed'] // config_dict['num_heads']}), "
-                    f"n_blocks={config_dict['n_blocks']}, T={config_dict['T']}, energy_fn={config_dict['energy_fn_name']}, "
+                    f"n_blocks={config_dict['n_blocks']}, T={config_dict['T']}, "
                     f"update_bias={config_dict['update_bias']}, use_lateral={config_dict['use_lateral']}, "
-                    f"base_lr={config_dict['local_learning_rate']:.2e}, scaled_lr={config_dict['local_learning_rate']:.2e}")
+                    f"scaled_lr={config_dict['local_learning_rate']:.2e}")
 
-            # Save results
+
             results_path = f"{study_name}_results.txt"
             with open(results_path, "w") as f:
-                f.write(f"Best validation loss: {trial.value:.4f}\n\n")
-                f.write("Best parameters:\n")
-                config = trial.user_attrs.get("config")  
-                
+                f.write(f"WEIGHTED OPTIMIZATION RESULTS\n")
+                f.write(f"=====================================\n\n")
+                f.write(f"Best combined objective: {trial.value:.4f}\n")
+                f.write(f"  CE Loss: {trial.user_attrs.get('ce_loss', 'N/A'):.4f}\n")
+                f.write(f"  Raw Energy: {trial.user_attrs.get('energy', 'N/A'):.4f}\n")
+                f.write(f"  Normalized Energy: {trial.user_attrs.get('normalized_energy', 'N/A'):.4f}\n\n")
+
+                config = trial.user_attrs.get("config")
                 if config:
+                    adaptive_weight = get_adaptive_weight(config['energy_fn_name'])
+                    f.write(f"Optimization Strategy:\n")
+                    f.write(f"  Energy function: {config['energy_fn_name']}\n")
+                    f.write(f"  CE Loss weight: {adaptive_weight:.2f}\n")
+                    f.write(f"  Energy weight: {1-adaptive_weight:.2f}\n\n")
+
+                    f.write("Best parameters:\n")
                     f.write(f"  n_embed: {config['n_embed']}\n")
                     f.write(f"  block_size: {config['block_size']}\n")
                     f.write(f"  num_heads: {config['num_heads']}\n")
