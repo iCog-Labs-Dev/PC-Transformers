@@ -3,6 +3,7 @@ from predictive_coding.config import GPTConfig
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids
 import torch.nn.functional as F
 from Data_preprocessing.dataloader import test_loader
+from Data_preprocessing.dataloader import test_loader
 
 """
 Usage: python generate_text.py
@@ -32,23 +33,25 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
     return input_tensor[0] 
 
 tokenizer = load_tokenizer()
-vocab_size = tokenizer.vocab_size
-pad_token_id = tokenizer.eos_token_id
+vocab_size = tokenizer.get_vocab_size()
+pad_token_id = tokenizer.token_to_id("[PAD]")
 
 config = GPTConfig(
     vocab_size = vocab_size,
-    block_size=256,
-    n_embed=64,
-    dropout=0.1,
-    local_learning_rate=1e-5,
-    T=2,
+    block_size=320,
+    peak_learning_rate= 1.51e-04,
+    warmup_steps= 94,
+    n_embed=464,
+    dropout=0.2572947974079954,
+    local_learning_rate= 0.0,
+    T=8,
     is_holding_error=True,
-    num_heads=2,
-    n_blocks=4,
+    num_heads=16,
+    n_blocks=6,
     num_epochs=1,
-    update_bias=True,
-    energy_fn_name="kld",
-    eos_token_id = tokenizer.token_to_id("[EOS]")
+    update_bias=False,
+    energy_fn_name="mse",
+    eos_token_id = tokenizer.eos_token_id
 )
 
 model_path = "checkpoints/pc_transformer.pt"
