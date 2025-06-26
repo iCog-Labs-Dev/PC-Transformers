@@ -61,6 +61,7 @@ for batch_idx, batch in enumerate(test_loader):
 
 num_samples = min(5, input_ids.size(0))
 prompt_len = 5
+decoded_preds, decoded_targets = [], []
 
 for i in range(num_samples):
     prompt_ids = input_ids[i][:prompt_len]
