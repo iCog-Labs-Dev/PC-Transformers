@@ -5,12 +5,14 @@ import torch
 import gc
 import psutil
 import os
+import math
 from predictive_coding.config import GPTConfig
+from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
-from Data_preprocessing.dataloader import train_loader, valid_loader, tokenizer, pad_token_id
+from Data_preprocessing.dataloader import train_loader, valid_loader
 from training import train
 from eval import evaluate
-from utils.model_utils import reset_pc_modules, pad_collate_fn
+from utils.model_utils import reset_pc_modules, pad_collate_fn, load_tokenizer
 from torch.utils.data import DataLoader, Subset
 import logging
 import time
@@ -46,25 +48,28 @@ def get_optimal_data_sizes():
 
 def create_subset_loaders(batch_size):
     """Create appropriately sized data loaders"""
+    tokenizer = load_tokenizer()
+    pad_token_id = tokenizer.pad_token_id
+
     train_size, valid_size = get_optimal_data_sizes()
     max_train = len(train_loader.dataset)
     max_valid = len(valid_loader.dataset)
 
     train_size = min(train_size, max_train)
     valid_size = min(valid_size, max_valid)
-        
+
     train_indices = torch.randperm(max_train)[:train_size]
     train_subset = Subset(train_loader.dataset, train_indices)
-    
+
     valid_indices = torch.randperm(max_valid)[:valid_size]
     valid_subset = Subset(valid_loader.dataset, valid_indices)
-        
-    train_subset_loader = DataLoader(train_subset, batch_size=batch_size, 
+
+    train_subset_loader = DataLoader(train_subset, batch_size=batch_size,
         shuffle=True, collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
-    
-    valid_subset_loader = DataLoader(valid_subset, batch_size=batch_size, 
+
+    valid_subset_loader = DataLoader(valid_subset, batch_size=batch_size,
         shuffle=False, collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
-    
+
     return train_subset_loader, valid_subset_loader
 
 def get_dynamic_batch_size(n_embed, block_size):
@@ -85,29 +90,14 @@ def normalize_energy(energy_value, energy_fn_name):
     Based on empirical testing: MSE~1.86, scaled_MSE~0.09, KLD~9.02
     """
     normalization_factors = {
-        'mse': 1.0,         
-        'scaled_mse': 20.0, 
-        'kld': 0.2   
+        'mse': 1.0, 
+        'scaled_mse': 20.0,
+        'kld': 0.2  
     }
     factor = normalization_factors.get(energy_fn_name, 1.0)
     return energy_value * factor
 
-def get_adaptive_weight(energy_fn_name):
-    """
-    Get adaptive weight for combining CE loss and energy based on energy function type.
 
-    Args:
-        energy_fn_name (str): Name of the energy function
-
-    Returns:
-        float: Weight for CE loss (0-1), where (1-weight) is applied to energy
-    """
-    adaptive_weights = {
-        'kld': 0.4, 
-        'mse': 0.6, 
-        'scaled_mse': 0.6
-    }
-    return adaptive_weights.get(energy_fn_name, 0.5)
 
 def update_global_config(config):
     """Update global GPTConfig to match trial config - CRITICAL for shape consistency"""
@@ -117,6 +107,8 @@ def update_global_config(config):
     GPTConfig.vocab_size = config.vocab_size
     GPTConfig.dropout = config.dropout
     GPTConfig.local_learning_rate = config.local_learning_rate
+    GPTConfig.peak_learning_rate = config.peak_learning_rate
+    GPTConfig.warmup_steps = config.warmup_steps
     GPTConfig.T = config.T
     GPTConfig.n_blocks = config.n_blocks
     GPTConfig.update_bias = config.update_bias
@@ -149,6 +141,7 @@ def get_dynamic_model_config(trial, vocab_size):
     T = trial.suggest_int('T', 4, 20, log=True)
     base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
+    warmup_steps = trial.suggest_int('warmup_steps', 10, 100)
 
     energy_fn_name = ['kld', 'mse', 'scaled_mse'][trial.suggest_int('energy_idx', 0, 2)]
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
@@ -158,14 +151,16 @@ def get_dynamic_model_config(trial, vocab_size):
     logger.info(
     f"Params: n_embed={n_embed}, block_size={block_size}, num_heads={num_heads} (head_dim={head_dim}), "
     f"n_blocks={n_blocks}, T={T}, energy_fn={energy_fn_name}, update_bias={update_bias}, use_lateral={use_lateral}, "
-    f"base_lr={base_lr:.2e}, scaled_lr={scaled_lr:.2e}, valid_heads={valid_heads}")
+    f"base_lr={base_lr:.2e}, scaled_lr={scaled_lr:.2e}, warmup_steps={warmup_steps}, valid_heads={valid_heads}")
     
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,
         n_embed=n_embed,
         dropout=trial.suggest_float('dropout', 0.05, 0.3),
-        local_learning_rate=scaled_lr,
+        local_learning_rate=0.0,
+        peak_learning_rate=scaled_lr,
+        warmup_steps=warmup_steps,
         T=T,
         is_holding_error=True,
         num_heads=num_heads,
@@ -184,6 +179,7 @@ def objective(trial):
     try:
         logger.info(f"Trial {trial.number}")
         cleanup_memory()
+        tokenizer = load_tokenizer()
         vocab_size = tokenizer.vocab_size
         config = get_dynamic_model_config(trial, vocab_size)
 
@@ -227,22 +223,30 @@ def objective(trial):
             max_val_batches = min(10, len(valid_loader))
             avg_energy, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
 
+            # Simple energy normalization (no adaptive weighting)
             normalized_energy = normalize_energy(avg_energy, config.energy_fn_name)
-            adaptive_weight = get_adaptive_weight(config.energy_fn_name)
-
-            combined_objective = adaptive_weight * val_loss + (1 - adaptive_weight) * normalized_energy
 
             trial_time = time.time() - start_time
             logger.info(f"Trial {trial.number} completed in {trial_time:.1f}s")
             logger.info(f"  CE Loss: {val_loss:.4f}, Energy: {avg_energy:.4f}, Normalized Energy: {normalized_energy:.4f}")
-            logger.info(f"  Weight: {adaptive_weight:.2f}, Combined Objective: {combined_objective:.4f}")
+
+            study_name="bayesian_tuning"
+            trial_log_path = f"{study_name}_trials.txt"
+            with open(trial_log_path, "a") as f:
+                f.write(f"TRIAL {trial.number}\n")
+                f.write(f"{'='*50}\n")
+                f.write(f"Time: {trial_time:.1f}s | Objective: {normalized_energy:.6f}\n")
+                f.write(f"CE Loss: {val_loss:.6f} | Raw Energy: {avg_energy:.6f} | Norm Energy: {normalized_energy:.6f}\n")
+                f.write(f"Config: {config.energy_fn_name} | n_embed x block_size: {config.n_embed}x{config.block_size} | heads={config.num_heads} | blocks={config.n_blocks} | T={config.T}\n")
+                f.write(f"LR: {config.peak_learning_rate:.2e} | Warmup: {config.warmup_steps} | Dropout: {config.dropout:.3f} | Bias: {config.update_bias}\n")
+                f.write(f"\n")
 
             trial.set_user_attr("config", config.__dict__)
             trial.set_user_attr("ce_loss", val_loss)
             trial.set_user_attr("energy", avg_energy)
             trial.set_user_attr("normalized_energy", normalized_energy)
-            trial.set_user_attr("combined_objective", combined_objective)
-            return combined_objective
+            trial.set_user_attr("trial_time", trial_time)
+            return normalized_energy  # Optimize normalized energy directly
         except Exception as e:
             logger.error(f"Evaluation failed: {str(e)}")
             import traceback
@@ -277,16 +281,48 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
             n_warmup_steps=3,
             interval_steps=1))
     
-    logger.info(f"Starting bayesian tuning with {n_trials} trials")
-    try:
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-        
+    # Create summary log file
+    summary_log_path = f"{study_name}_summary.txt"
+    with open(summary_log_path, "w") as f:
+        f.write(f"BAYESIAN TUNING SUMMARY - {study_name}\n")
+        f.write(f"{'='*50}\n\n")
+        f.write(f"Target trials: {n_trials}\n")
+        f.write(f"Objective: Minimize normalized energy\n\n")
+        f.write(f"Trial Progress:\n")
+        f.write(f"{'Trial':<6} {'Time(s)':<8} {'CE Loss':<10} {'Raw Energy':<12} {'Norm Energy':<12} {'Energy Fn':<12}\n")
+        f.write(f"{'-'*70}\n")
 
+    # Initialize detailed trials log file
+    trials_log_path = f"{study_name}_trials.txt"
+    with open(trials_log_path, "w") as f:
+        f.write(f"DETAILED TRIAL RESULTS - {study_name}\n")
+        f.write(f"{'='*50}\n")
+        f.write(f"Objective: Minimize normalized energy\n\n")
+
+    logger.info(f"Starting bayesian tuning with {n_trials} trials")
+    logger.info(f"Summary log: {summary_log_path}")
+    logger.info(f"Detailed trials log: {trials_log_path}")
+
+    def log_trial_callback(study, trial):
+        """Callback to log each trial to summary file"""
+        if trial.state == optuna.trial.TrialState.COMPLETE:
+            with open(summary_log_path, "a") as f:
+                ce_loss = trial.user_attrs.get("ce_loss", float('inf'))
+                energy = trial.user_attrs.get("energy", float('inf'))
+                normalized_energy = trial.user_attrs.get("normalized_energy", float('inf'))
+                trial_time = trial.user_attrs.get("trial_time", 0)
+                config = trial.user_attrs.get("config", {})
+                energy_fn = config.get("energy_fn_name", "unknown")
+
+                f.write(f"{trial.number:<6} {trial_time:<8.1f} {ce_loss:<10.4f} {energy:<12.6f} {normalized_energy:<12.6f} {energy_fn:<12}\n")
+
+    try:
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=False, callbacks=[log_trial_callback])
+        
         logger.info("Optimization completed!")
         if study.best_trial:
             trial = study.best_trial
-            logger.info(f"Best trial: {trial.number}. Best combined objective: {trial.value:.5f}")
-
+            logger.info(f"Best trial: {trial.number}. Best normalized energy: {trial.value:.5f}")
 
             ce_loss = trial.user_attrs.get("ce_loss", "N/A")
             energy = trial.user_attrs.get("energy", "N/A")
@@ -296,32 +332,31 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
             logger.info("Best parameters:")
             config_dict = trial.user_attrs.get("config")
             if config_dict:
-                adaptive_weight = get_adaptive_weight(config_dict['energy_fn_name'])
-                logger.info(f"  Energy function: {config_dict['energy_fn_name']} (CE weight: {adaptive_weight:.2f})")
+                logger.info(f"  Energy function: {config_dict['energy_fn_name']}")
                 logger.info(
                     f"  n_embed={config_dict['n_embed']}, block_size={config_dict['block_size']}, num_heads={config_dict['num_heads']} "
                     f"(head_dim={config_dict['n_embed'] // config_dict['num_heads']}), "
                     f"n_blocks={config_dict['n_blocks']}, T={config_dict['T']}, "
                     f"update_bias={config_dict['update_bias']}, use_lateral={config_dict['use_lateral']}, "
-                    f"scaled_lr={config_dict['local_learning_rate']:.2e}")
+                    f"peak_lr={config_dict['peak_learning_rate']:.2e}, warmup_steps={config_dict['warmup_steps']}")
 
 
+
+            # Save results
             results_path = f"{study_name}_results.txt"
             with open(results_path, "w") as f:
-                f.write(f"WEIGHTED OPTIMIZATION RESULTS\n")
-                f.write(f"=====================================\n\n")
-                f.write(f"Best combined objective: {trial.value:.4f}\n")
+                f.write(f"ENERGY NORMALIZATION OPTIMIZATION RESULTS\n")
+                f.write(f"=========================================\n\n")
+                f.write(f"Best normalized energy: {trial.value:.4f}\n")
                 f.write(f"  CE Loss: {trial.user_attrs.get('ce_loss', 'N/A'):.4f}\n")
                 f.write(f"  Raw Energy: {trial.user_attrs.get('energy', 'N/A'):.4f}\n")
                 f.write(f"  Normalized Energy: {trial.user_attrs.get('normalized_energy', 'N/A'):.4f}\n\n")
 
                 config = trial.user_attrs.get("config")
                 if config:
-                    adaptive_weight = get_adaptive_weight(config['energy_fn_name'])
                     f.write(f"Optimization Strategy:\n")
                     f.write(f"  Energy function: {config['energy_fn_name']}\n")
-                    f.write(f"  CE Loss weight: {adaptive_weight:.2f}\n")
-                    f.write(f"  Energy weight: {1-adaptive_weight:.2f}\n\n")
+                    f.write(f"  Objective: Minimize normalized energy\n\n")
 
                     f.write("Best parameters:\n")
                     f.write(f"  n_embed: {config['n_embed']}\n")
@@ -334,7 +369,8 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
                     f.write(f"  energy_fn: {config['energy_fn_name']}\n")
                     f.write(f"  update_bias: {config['update_bias']}\n")
                     f.write(f"  use_lateral: {config['use_lateral']}\n")
-                    f.write(f"  scaled_lr: {config['local_learning_rate']:.2e}\n")
+                    f.write(f"  peak_lr: {config['peak_learning_rate']:.2e}\n")
+                    f.write(f"  warmup_steps: {config['warmup_steps']}\n")
             
             logger.info(f"Results saved to {results_path}")
         return study
