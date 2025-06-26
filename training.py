@@ -108,6 +108,7 @@ def main():
     model = PCTransformer(config)
     train_energies = []
     perplexities = []
+    print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
 
     print("========== Training started ==========", flush=True) 
     # Measure total training time
