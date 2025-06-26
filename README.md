@@ -56,7 +56,7 @@ git lfs install
 2. Pull the repo:
 
 ```bash
-git pull
+git lfs pull
 ```
 
 
