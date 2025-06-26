@@ -38,16 +38,16 @@ pad_token_id = tokenizer.pad_token_id
 config = GPTConfig(
     vocab_size = vocab_size,
     block_size=208,
-    n_embed= 672,
-    dropout= 0.24380706979190103,
-    local_learning_rate= 7.31e-04,
-    T=9,
+    n_embed= 208,
+    dropout= 0.07813827928828256,
+    local_learning_rate= 1.51e-05,
+    T=20,
     is_holding_error=True,
     num_heads=16,
     n_blocks=6,
     num_epochs=1,
     update_bias=True,
-    energy_fn_name="mse",
+    energy_fn_name="scaled_mse",
     eos_token_id = tokenizer.eos_token_id
 )
 
