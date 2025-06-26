@@ -31,6 +31,8 @@ class GPTConfig:
     """
     vocab_size: int
     block_size: int
+    peak_learning_rate: float = 1.29e-04
+    warmup_steps: int= 58
     la: float=0.5
     n_embed: int =64
     dropout: float = 0.1

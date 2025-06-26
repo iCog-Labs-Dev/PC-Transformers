@@ -151,14 +151,24 @@ def get_dynamic_model_config(trial, vocab_size):
     logger.info(
     f"Params: n_embed={n_embed}, block_size={block_size}, num_heads={num_heads} (head_dim={head_dim}), "
     f"n_blocks={n_blocks}, T={T}, energy_fn={energy_fn_name}, update_bias={update_bias}, use_lateral={use_lateral}, "
+<<<<<<< optimization_parallel
     f"base_lr={base_lr:.2e}, scaled_lr={scaled_lr:.2e}, warmup_steps={warmup_steps}, valid_heads={valid_heads}")
+=======
+    f"base_lr={base_lr:.2e}, scaled_lr={scaled_lr:.2e}, valid_heads={valid_heads}"
+    f"peak_lr={scaled_lr:.2e}, valid_heads={valid_heads}"
+    f"warmup_steps={warmup_steps}")
+>>>>>>> optimization
     
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,
         n_embed=n_embed,
         dropout=trial.suggest_float('dropout', 0.05, 0.3),
+<<<<<<< optimization_parallel
         local_learning_rate=0.0,
+=======
+        local_learning_rate=0.0,  # Will be set dynamically
+>>>>>>> optimization
         peak_learning_rate=scaled_lr,
         warmup_steps=warmup_steps,
         T=T,
@@ -338,7 +348,12 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
                     f"(head_dim={config_dict['n_embed'] // config_dict['num_heads']}), "
                     f"n_blocks={config_dict['n_blocks']}, T={config_dict['T']}, "
                     f"update_bias={config_dict['update_bias']}, use_lateral={config_dict['use_lateral']}, "
+<<<<<<< optimization_parallel
                     f"peak_lr={config_dict['peak_learning_rate']:.2e}, warmup_steps={config_dict['warmup_steps']}")
+=======
+                    f"peak_lr={config_dict['peak_learning_rate']:.2e}"
+                    f"warmup_steps={config_dict['warmup_steps']}")
+>>>>>>> optimization
 
 
 
@@ -369,7 +384,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
                     f.write(f"  energy_fn: {config['energy_fn_name']}\n")
                     f.write(f"  update_bias: {config['update_bias']}\n")
                     f.write(f"  use_lateral: {config['use_lateral']}\n")
+<<<<<<< optimization_parallel
                     f.write(f"  peak_lr: {config['peak_learning_rate']:.2e}\n")
+=======
+>>>>>>> optimization
                     f.write(f"  warmup_steps: {config['warmup_steps']}\n")
             
             logger.info(f"Results saved to {results_path}")
