@@ -25,12 +25,26 @@ def train(model, dataloader, tokenizer):
     total_energy = 0.0
     total_ce_loss = 0.0
     batch_count = 0
+    global_step = 0
     pad_token_id = tokenizer.pad_token_id
     vocab_size = tokenizer.vocab_size
 
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"]
         target_ids = batch["target_ids"]
+        
+        if global_step < GPTConfig.warmup_steps:
+            lr = GPTConfig.local_learning_rate + global_step / GPTConfig.warmup_steps * (
+                GPTConfig.peak_learning_rate - GPTConfig.local_learning_rate
+            )
+        else:
+            lr = GPTConfig.peak_learning_rate
+
+        for module in model.modules():
+            if hasattr(module, 'local_lr'):
+                module.local_lr = lr
+
+        global_step += 1
         
         # Clip target_ids to valid range before using them for loss calculation
         if target_ids.max() >= vocab_size:
@@ -56,6 +70,7 @@ def train(model, dataloader, tokenizer):
                     _ = module._head_similarity_avg
                     _ = module._head_similarity_max
 
+
         if layer_energies:
             valid_energies = [e for e in layer_energies if not (torch.isnan(torch.tensor(e)) if isinstance(e, (int, float)) else True)]
             batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
@@ -66,7 +81,7 @@ def train(model, dataloader, tokenizer):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         
         if (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
+             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f} | LR: {lr:.6f}", flush=True)
 
         reset_pc_modules(model)
 
@@ -84,7 +99,9 @@ def main():
         block_size= 256, 
         n_embed=64,
         dropout=0.1,
-        local_learning_rate= 1e-5,
+        local_learning_rate= 0.0,
+        peak_learning_rate= 1.29e-04,
+        warmup_steps= 58,
         T= 20,
         is_holding_error = True,
         num_heads=8,
@@ -100,7 +117,6 @@ def main():
     perplexities = []
 
     print("========== Training started ==========", flush=True) 
-    # Measure total training time
     start_training_time = time.time()
     for epoch in range(config.num_epochs):
         print(f"Epoch {epoch+1} started", flush=True)
@@ -112,6 +128,7 @@ def main():
     print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
     print("========== Training completed ==========", flush=True)
 
+    # Saving trained model
     save_path = "checkpoints/pc_transformer.pt"
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
@@ -120,7 +137,7 @@ def main():
     torch.save({"model_state": model.state_dict()}, save_path)
     print("Model saved.")
 
-
+    # Plotting average energy vs. epoch
     epochs = list(range(1, len(train_energies) + 1))
     plt.figure(figsize=(10, 6))
     plt.plot(epochs, train_energies, marker='o', linestyle='-', color='b', label='Average Batch Energy')
