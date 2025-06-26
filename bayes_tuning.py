@@ -219,7 +219,7 @@ def objective(trial):
         try:
             model.eval()
             max_val_batches = min(10, len(valid_loader))
-            avg_energy, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches)
+            avg_energy, val_loss, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches)
             normalized_energy = normalize_energy(avg_energy, config.energy_fn_name)
 
             trial_time = time.time() - start_time
