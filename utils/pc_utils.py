@@ -234,11 +234,11 @@ ENERGY_FUNCTIONS = {
     "mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1),
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
-    "kld": lambda mu, x: F.kl_div(
+    "kld": lambda mu, x: torch.clamp(F.kl_div(
         mu.log_softmax(dim=-1),
         x.softmax(dim=-1),
         reduction='batchmean'
-    )
+    ), min=0.0, max=100.0)
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
@@ -271,7 +271,12 @@ def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_er
     Returns:
         tuple: (energy value, list of error statistics)
     """
-    energy = energy_fn(mu, target,energy_fn_name).mean().item() if is_holding_error else None
+    if is_holding_error:
+        energy_tensor = energy_fn(mu, target, energy_fn_name)
+        energy_mean = energy_tensor.mean()
+        energy = energy_mean.item() if not torch.isnan(energy_mean) and not torch.isinf(energy_mean) else 0.0
+    else:
+        energy = None
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     
