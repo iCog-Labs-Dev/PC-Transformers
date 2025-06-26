@@ -245,4 +245,17 @@ class PCLayer(nn.Module):
         self._errors = []
         
     def set_learning_rate(self, lr: float):
+        """
+        Set the local learning rate for the layer.
+        This method allows dynamic adjustment of the learning rate during training or inference.
+        """
         self.local_lr = lr
+        
+    def get_learning_rate(self) -> float:
+        """
+        Get the current local learning rate for the layer.
+        
+        Returns:
+            float: The current local learning rate.
+        """
+        return self.local_lr
