@@ -33,7 +33,7 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
 
 tokenizer = load_tokenizer()
 vocab_size = tokenizer.vocab_size
-pad_token_id = tokenizer.token_to_id("[PAD]")
+pad_token_id = tokenizer.pad_token_id
 
 config = GPTConfig(
     vocab_size = vocab_size,
