@@ -94,6 +94,8 @@ class PCLayer(nn.Module):
         x = None
         self._energy = 0.0
         self._errors = []
+        
+        print(f"[{layer_type} | Step {t}] Using local_lr = {self.local_lr:.6f}")
 
         if layer_type == "embed":
             if "embed" not in self._x_cache:
