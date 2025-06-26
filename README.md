@@ -59,33 +59,6 @@ git lfs install
 git pull
 ```
 
-### If you are cloning the repo for the first time and want to get the dataset files:
-
-1. Install Git LFS:
-
-```bash
-git lfs install
-```
-
-2. Pull the repo:
-
-```bash
-git pull
-```
-
-### If you are cloning the repo for the first time and want to get the dataset files:
-
-1. Install Git LFS:
-
-```bash
-git lfs install
-```
-
-2. Pull the repo:
-
-```bash
-git pull
-```
 
 ## Usage
 
