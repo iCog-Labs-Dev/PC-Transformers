@@ -17,6 +17,8 @@ class GPTConfig:
         n_embed (int): Embedding dimension size.
         dropout (float): Dropout probability.
         local_learning_rate (float): Local learning rate for predictive coding layers.
+        peak_learning_rate (float): Peak learning rate for learning rate scheduling.
+        warmup_steps (int): Number of warmup steps for learning rate scheduling.
         T (int): Number of inference steps for predictive coding.
         is_holding_error (bool): Whether to accumulate and store errors.
         update_bias (bool): Whether to update bias terms during learning.
@@ -34,7 +36,9 @@ class GPTConfig:
     la: float=0.5
     n_embed: int =64
     dropout: float = 0.1
-    local_learning_rate: float = 0.0
+    local_learning_rate: float = 1e-3
+    peak_learning_rate: float = 1e-3
+    warmup_steps: int = 100
     T: int = 10
     is_holding_error: bool = False
     update_bias: bool = True

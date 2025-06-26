@@ -64,14 +64,18 @@ def train(model, dataloader, tokenizer):
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
-                if energy is not None:
+                if energy is not None and not (torch.isnan(torch.tensor(energy)) if isinstance(energy, (int, float)) else False):
                     layer_energies.append(energy)
                 if hasattr(module, "_head_similarity"):
                     _ = module._head_similarity_avg
                     _ = module._head_similarity_max
 
-        # Compute average energy for current batch
-        batch_energy = ce_loss.item() if not layer_energies else sum(layer_energies) / len(layer_energies)
+
+        if layer_energies:
+            valid_energies = [e for e in layer_energies if not (torch.isnan(torch.tensor(e)) if isinstance(e, (int, float)) else True)]
+            batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
+        else:
+            batch_energy = ce_loss.item()
         total_energy += batch_energy
         batch_count += 1
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
@@ -113,7 +117,6 @@ def main():
     perplexities = []
 
     print("========== Training started ==========", flush=True) 
-    # Measure total training time
     start_training_time = time.time()
     for epoch in range(config.num_epochs):
         print(f"Epoch {epoch+1} started", flush=True)

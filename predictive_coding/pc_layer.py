@@ -45,7 +45,7 @@ class PCLayer(nn.Module):
         self.use_lateral = True
         self._x_cache = {}
         self.energy_fn_name = energy_fn_name 
-        self._energy = None
+        self._energy = 0.0
         self._errors = []
 
     def register_lateral(self, layer_type: str, size: int):
