@@ -50,7 +50,7 @@ config = GPTConfig(
     num_epochs=1,
     update_bias=False,
     energy_fn_name="mse",
-    eos_token_id = tokenizer.token_to_id("[EOS]")
+    eos_token_id = tokenizer.eos_token_id
 )
 
 model_path = "checkpoints/pc_transformer.pt"
