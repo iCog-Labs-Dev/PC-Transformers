@@ -36,9 +36,7 @@ class GPTConfig:
     la: float=0.5
     n_embed: int =64
     dropout: float = 0.1
-    local_learning_rate: float = 1e-3
-    peak_learning_rate: float = 1e-3
-    warmup_steps: int = 100
+    local_learning_rate: float = 0.0
     T: int = 10
     is_holding_error: bool = False
     update_bias: bool = True
