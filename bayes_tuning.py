@@ -207,7 +207,7 @@ def objective(trial):
         try:
             model.train()
             global_step = 0
-            _, _, _ = train(model, train_loader, tokenizer, global_step)
+            _, _, _ = train(model, train_loader, tokenizer, config ,global_step)
         except Exception as e:
             logger.error(f"Training failed: {str(e)}")
             import traceback
