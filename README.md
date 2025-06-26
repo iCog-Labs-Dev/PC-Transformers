@@ -52,11 +52,17 @@ This branch uses **Git Large File Storage (Git LFS)** to manage large dataset fi
 ```bash
 git lfs install
 ```
-
-2. Pull the repo:
-
+ Then after cloning 
 ```bash
 git lfs pull
+```
+### If you already cloned without LFS, run:
+
+
+```bash
+git lfs install
+git lfs pull
+
 ```
 
 
