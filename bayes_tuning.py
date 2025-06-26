@@ -31,7 +31,7 @@ def get_optimal_data_sizes():
     if torch.cuda.is_available():
         gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         if gpu_gb >= 8:
-            return 3000, 600
+            return 20000, 5000
         elif gpu_gb >= 4:
             return 2000, 400 
         else:
