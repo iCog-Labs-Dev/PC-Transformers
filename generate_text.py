@@ -1,8 +1,7 @@
 import torch
 from predictive_coding.config import GPTConfig
-from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids
+from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids, compute_text_metrics
 import torch.nn.functional as F
-from Data_preprocessing.dataloader import test_loader
 from Data_preprocessing.dataloader import test_loader
 
 """
@@ -34,7 +33,7 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
 
 tokenizer = load_tokenizer()
 vocab_size = tokenizer.vocab_size
-pad_token_id = tokenizer.eos_token_id
+pad_token_id = tokenizer.pad_token_id
 
 config = GPTConfig(
     vocab_size = vocab_size,
@@ -62,7 +61,6 @@ for batch_idx, batch in enumerate(test_loader):
 
 num_samples = min(5, input_ids.size(0))
 prompt_len = 5
-i = 64
 
 for i in range(num_samples):
     prompt_ids = input_ids[i][:prompt_len]
@@ -78,7 +76,12 @@ for i in range(num_samples):
     target_str = decode_ids(tokenizer, target_continuation, stop_at_eos=True)
     predict_str = decode_ids(tokenizer, generated_continuation, stop_at_eos=True)
 
+    decoded_preds.append(predict_str)
+    decoded_targets.append(target_str)
+
     print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
     print(f"[PROMPT ]: {prompt_str}")
     print(f"[TARGET ]: {target_str}")
     print(f"[PREDICT]: {predict_str}")
+
+compute_text_metrics(decoded_preds, decoded_targets)

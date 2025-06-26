@@ -15,21 +15,6 @@ def pad_collate_fn(batch, pad_token_id=0):
     input_seqs = pad_sequence(input_seqs, batch_first=True, padding_value=pad_token_id)
     target_seqs = pad_sequence(target_seqs, batch_first=True, padding_value=pad_token_id)
 
-    max_len = max(
-        max(seq.size(0) for seq in input_seqs),
-        max(seq.size(0) for seq in target_seqs),
-    )
-    def _pad(seq_list):
-        """Pad a list of 1-D tensors to `max_len` using `pad_token_id`."""
-        return pad_sequence(
-            [torch.nn.functional.pad(seq, (0, max_len - seq.size(0)), value=pad_token_id) for seq in seq_list],
-            batch_first=True,
-            padding_value=pad_token_id,
-        )
-        
-    input_seqs = _pad(input_seqs)
-    target_seqs = _pad(target_seqs)
-
     return {"input_ids": input_seqs, "target_ids": target_seqs}
 
 def load_tokenizer():
