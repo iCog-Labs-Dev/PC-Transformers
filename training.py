@@ -8,7 +8,6 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader
-from Data_preprocessing.config import Config
 from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -35,8 +34,7 @@ def train(model, dataloader, tokenizer):
         
         if global_step < GPTConfig.warmup_steps:
             lr = GPTConfig.local_learning_rate + global_step / GPTConfig.warmup_steps * (
-                GPTConfig.peak_learning_rate - GPTConfig.local_learning_rate
-            )
+                GPTConfig.peak_learning_rate - GPTConfig.local_learning_rate)
         else:
             lr = GPTConfig.peak_learning_rate
 
@@ -46,7 +44,6 @@ def train(model, dataloader, tokenizer):
 
         global_step += 1
         
-        # Clip target_ids to valid range before using them for loss calculation
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size-1)
 
@@ -55,9 +52,7 @@ def train(model, dataloader, tokenizer):
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             target_ids.view(-1),
-            ignore_index=pad_token_id
-        )
-        
+            ignore_index=pad_token_id)
         total_ce_loss += ce_loss.item()
 
         layer_energies = []
@@ -69,8 +64,7 @@ def train(model, dataloader, tokenizer):
                 if hasattr(module, "_head_similarity"):
                     _ = module._head_similarity_avg
                     _ = module._head_similarity_max
-
-
+                    
         if layer_energies:
             valid_energies = [e for e in layer_energies if not (torch.isnan(torch.tensor(e)) if isinstance(e, (int, float)) else True)]
             batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
@@ -131,7 +125,6 @@ def main():
     # Saving trained model
     save_path = "checkpoints/pc_transformer.pt"
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
     if os.path.exists(save_path):
         os.remove(save_path)
     torch.save({"model_state": model.state_dict()}, save_path)
