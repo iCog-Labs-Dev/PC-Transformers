@@ -115,7 +115,7 @@ def main():
     global_step = 0
     for epoch in range(config.num_epochs):
         print(f"Epoch {epoch+1} started", flush=True)
-        avg_energy, perplexity, global_step = train(model, train_loader, tokenizer, global_step)
+        avg_energy, perplexity, global_step = train(model, train_loader, tokenizer, config, global_step)
         train_energies.append(avg_energy)
         perplexities.append(perplexity)
         print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
