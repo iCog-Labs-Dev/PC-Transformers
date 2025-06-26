@@ -5,12 +5,8 @@ from Data_preprocessing.config import Config
 from utils.model_utils import pad_collate_fn, load_tokenizer
 
 train_dataset = TokenizedDataset("train", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
-train_dataset = Subset(train_dataset, range(min(len(train_dataset), 1000)))
-
 valid_dataset = TokenizedDataset("valid", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
-
 test_dataset = TokenizedDataset("test", Config.TOKENIZER_DIR, Config.MAX_LENGTH)
-test_dataset = Subset(test_dataset, range(min(len(test_dataset), 25000)))
 
 tokenizer = load_tokenizer()
 pad_token_id = tokenizer.pad_token_id
