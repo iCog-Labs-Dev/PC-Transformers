@@ -2,7 +2,7 @@ import torch
 from predictive_coding.config import GPTConfig
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids
 import torch.nn.functional as F
-from Data_preprocessing.dataloader1 import test_loader
+from Data_preprocessing.dataloader import test_loader
 
 """
 Usage: python generate_text.py
@@ -32,8 +32,8 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
     return input_tensor[0] 
 
 tokenizer = load_tokenizer()
-vocab_size = tokenizer.get_vocab_size()
-pad_token_id = tokenizer.token_to_id("[PAD]")
+vocab_size = tokenizer.vocab_size
+pad_token_id = tokenizer.eos_token_id
 
 config = GPTConfig(
     vocab_size = vocab_size,
