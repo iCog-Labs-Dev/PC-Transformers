@@ -19,14 +19,8 @@ This script trains a predictive coding transformer model on a dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
 """
 
-def log_learning_rates(model, step):
-    print(f"[Step {step}] Learning Rates:")
-    for name, module in model.named_modules():
-        if isinstance(module, PCLayer):
-            print(f"  {name}: {module.local_lr:.6f}")
 
-
-def train(model, dataloader, tokenizer, global_step):
+def train(model, dataloader, tokenizer, config, global_step):
     model.train()
     total_energy = 0.0
     total_ce_loss = 0.0
@@ -38,17 +32,15 @@ def train(model, dataloader, tokenizer, global_step):
         input_ids = batch["input_ids"]
         target_ids = batch["target_ids"]
         
-        if global_step < GPTConfig.warmup_steps:
-            lr = GPTConfig.local_learning_rate + global_step / GPTConfig.warmup_steps * (
-                GPTConfig.peak_learning_rate - GPTConfig.local_learning_rate)
+        if global_step < config.warmup_steps:
+            lr = config.local_learning_rate + global_step / config.warmup_steps * (
+                config.peak_learning_rate - config.local_learning_rate)
         else:
-            lr = GPTConfig.peak_learning_rate
+            lr = config.peak_learning_rate
 
         for module in model.modules():
             if hasattr(module, 'local_lr'):
                 module.set_learning_rate(lr)
-                
-        log_learning_rates(model, global_step)
 
         global_step += 1
         
