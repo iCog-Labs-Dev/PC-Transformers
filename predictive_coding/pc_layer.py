@@ -243,3 +243,6 @@ class PCLayer(nn.Module):
         Clear the stored errors for the layer.
         """
         self._errors = []
+        
+    def set_learning_rate(self, lr: float):
+        self.local_lr = lr

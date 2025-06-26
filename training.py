@@ -46,7 +46,7 @@ def train(model, dataloader, tokenizer, global_step):
 
         for module in model.modules():
             if hasattr(module, 'local_lr'):
-                module.local_lr = lr
+                module.set_learning_rate(lr)
                 
         log_learning_rates(model, global_step)
 
