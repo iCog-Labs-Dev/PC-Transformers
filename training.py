@@ -19,12 +19,11 @@ This script trains a predictive coding transformer model on a dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
 """
 
-def train(model, dataloader, tokenizer):
+def train(model, dataloader, tokenizer, global_step):
     model.train()
     total_energy = 0.0
     total_ce_loss = 0.0
     batch_count = 0
-    global_step = 0
     pad_token_id = tokenizer.pad_token_id
     vocab_size = tokenizer.vocab_size
 
@@ -82,7 +81,7 @@ def train(model, dataloader, tokenizer):
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")    
-    return avg_energy, avg_perplexity
+    return avg_energy, avg_perplexity, global_step
 
 def main():
     tokenizer = load_tokenizer()
@@ -96,7 +95,7 @@ def main():
         n_embed=64,
         dropout=0.1,
         local_learning_rate= 0.0,
-        T= 1,
+        T= 20,
         is_holding_error = True,
         num_heads=8,
         n_blocks=4,
@@ -112,9 +111,10 @@ def main():
 
     print("========== Training started ==========", flush=True) 
     start_training_time = time.time()
+    global_step = 0
     for epoch in range(config.num_epochs):
         print(f"Epoch {epoch+1} started", flush=True)
-        avg_energy, perplexity = train(model, train_loader, tokenizer)
+        avg_energy, perplexity, global_step = train(model, train_loader, tokenizer, global_step)
         train_energies.append(avg_energy)
         perplexities.append(perplexity)
         print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
