@@ -31,10 +31,10 @@ class GPTConfig:
     """
     vocab_size: int
     block_size: int
-    peak_learning_rate: float = 1.29e-04
+    peak_learning_rate: float = 7.31e-04
     warmup_steps: int= 58
     la: float=0.5
-    n_embed: int =464
+    n_embed: int =672
     dropout: float = 0.1
     local_learning_rate: float = 0.0
     T: int = 10
@@ -45,5 +45,5 @@ class GPTConfig:
     batch_size: int = 8
     num_epochs: int = 5
     use_lateral: bool = True
-    energy_fn_name: str = "scaled_mse"
+    energy_fn_name: str = "mse"
     eos_token_id: int = None
