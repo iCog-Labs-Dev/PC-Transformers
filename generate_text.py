@@ -33,8 +33,8 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
     return input_tensor[0] 
 
 tokenizer = load_tokenizer()
-vocab_size = tokenizer.get_vocab_size()
-pad_token_id = tokenizer.token_to_id("[PAD]")
+vocab_size = tokenizer.vocab_size
+pad_token_id = tokenizer.eos_token_id
 
 config = GPTConfig(
     vocab_size = vocab_size,
@@ -62,7 +62,7 @@ for batch_idx, batch in enumerate(test_loader):
     target_ids = batch["target_ids"]
     break 
 
-num_samples = 5
+num_samples = min(5, input_ids.size(0))
 prompt_len = 5
 i = 64
 
