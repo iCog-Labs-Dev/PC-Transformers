@@ -4,10 +4,7 @@ Bayesian Hyperparameter Tuning
 import torch
 import gc
 import psutil
-import os
-import math
 from predictive_coding.config import GPTConfig
-from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader, valid_loader
 from training import train
@@ -97,8 +94,6 @@ def normalize_energy(energy_value, energy_fn_name):
     factor = normalization_factors.get(energy_fn_name, 1.0)
     return energy_value * factor
 
-
-
 def update_global_config(config):
     """Update global GPTConfig to match trial config - CRITICAL for shape consistency"""
     GPTConfig.num_heads = config.num_heads
@@ -160,7 +155,7 @@ def get_dynamic_model_config(trial, vocab_size):
         block_size=block_size,
         n_embed=n_embed,
         dropout=trial.suggest_float('dropout', 0.05, 0.3),
-        local_learning_rate=0.0,  # Will be set dynamically
+        local_learning_rate=0.0, 
         peak_learning_rate=scaled_lr,
         warmup_steps=warmup_steps,
         T=T,
@@ -224,8 +219,6 @@ def objective(trial):
             model.eval()
             max_val_batches = min(10, len(valid_loader))
             avg_energy, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
-
-            # Simple energy normalization (no adaptive weighting)
             normalized_energy = normalize_energy(avg_energy, config.energy_fn_name)
 
             trial_time = time.time() - start_time
@@ -242,13 +235,12 @@ def objective(trial):
                 f.write(f"Config: {config.energy_fn_name} | n_embed x block_size: {config.n_embed}x{config.block_size} | heads={config.num_heads} | blocks={config.n_blocks} | T={config.T}\n")
                 f.write(f"LR: {config.peak_learning_rate:.2e} | Warmup: {config.warmup_steps} | Dropout: {config.dropout:.3f} | Bias: {config.update_bias}\n")
                 f.write(f"\n")
-
             trial.set_user_attr("config", config.__dict__)
             trial.set_user_attr("ce_loss", val_loss)
             trial.set_user_attr("energy", avg_energy)
             trial.set_user_attr("normalized_energy", normalized_energy)
             trial.set_user_attr("trial_time", trial_time)
-            return normalized_energy  # Optimize normalized energy directly
+            return normalized_energy 
         except Exception as e:
             logger.error(f"Evaluation failed: {str(e)}")
             import traceback
@@ -271,7 +263,6 @@ def objective(trial):
 
 def run_tuning(n_trials=30, study_name="bayesian_tuning"):
     """Run clean dynamic hyperparameter tuning"""
-    
     study = optuna.create_study(
         direction='minimize',
         study_name=study_name,
@@ -283,7 +274,6 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
             n_warmup_steps=3,
             interval_steps=1))
     
-    # Create summary log file
     summary_log_path = f"{study_name}_summary.txt"
     with open(summary_log_path, "w") as f:
         f.write(f"BAYESIAN TUNING SUMMARY - {study_name}\n")
@@ -294,7 +284,6 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
         f.write(f"{'Trial':<6} {'Time(s)':<8} {'CE Loss':<10} {'Raw Energy':<12} {'Norm Energy':<12} {'Energy Fn':<12}\n")
         f.write(f"{'-'*70}\n")
 
-    # Initialize detailed trials log file
     trials_log_path = f"{study_name}_trials.txt"
     with open(trials_log_path, "w") as f:
         f.write(f"DETAILED TRIAL RESULTS - {study_name}\n")
@@ -315,12 +304,9 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
                 trial_time = trial.user_attrs.get("trial_time", 0)
                 config = trial.user_attrs.get("config", {})
                 energy_fn = config.get("energy_fn_name", "unknown")
-
                 f.write(f"{trial.number:<6} {trial_time:<8.1f} {ce_loss:<10.4f} {energy:<12.6f} {normalized_energy:<12.6f} {energy_fn:<12}\n")
-
     try:
         study.optimize(objective, n_trials=n_trials, show_progress_bar=False, callbacks=[log_trial_callback])
-        
         logger.info("Optimization completed!")
         if study.best_trial:
             trial = study.best_trial
@@ -343,9 +329,6 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
                     f"peak_lr={config_dict['peak_learning_rate']:.2e}"
                     f"warmup_steps={config_dict['warmup_steps']}")
 
-
-
-            # Save results
             results_path = f"{study_name}_results.txt"
             with open(results_path, "w") as f:
                 f.write(f"ENERGY NORMALIZATION OPTIMIZATION RESULTS\n")
@@ -358,26 +341,23 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
                 config = trial.user_attrs.get("config")
                 if config:
                     f.write(f"Optimization Strategy:\n")
-                    f.write(f"  Energy function: {config['energy_fn_name']}\n")
-                    f.write(f"  Objective: Minimize normalized energy\n\n")
-
+                    f.write(f"Energy function: {config['energy_fn_name']}\n")
+                    f.write(f"Objective: Minimize normalized energy\n\n")
                     f.write("Best parameters:\n")
-                    f.write(f"  n_embed: {config['n_embed']}\n")
-                    f.write(f"  block_size: {config['block_size']}\n")
-                    f.write(f"  num_heads: {config['num_heads']}\n")
-                    f.write(f"  head_dim: {config['n_embed'] // config['num_heads']}\n")
-                    f.write(f"  n_blocks: {config['n_blocks']}\n")
-                    f.write(f"  T: {config['T']}\n")
-                    f.write(f"  dropout: {config['dropout']}\n")
-                    f.write(f"  energy_fn: {config['energy_fn_name']}\n")
-                    f.write(f"  update_bias: {config['update_bias']}\n")
-                    f.write(f"  use_lateral: {config['use_lateral']}\n")
-                    f.write(f"  peak_lr: {config['peak_learning_rate']:.2e}\n")
-                    f.write(f"  warmup_steps: {config['warmup_steps']}\n")
-            
+                    f.write(f"n_embed: {config['n_embed']}\n")
+                    f.write(f"block_size: {config['block_size']}\n")
+                    f.write(f"num_heads: {config['num_heads']}\n")
+                    f.write(f"head_dim: {config['n_embed'] // config['num_heads']}\n")
+                    f.write(f"n_blocks: {config['n_blocks']}\n")
+                    f.write(f"T: {config['T']}\n")
+                    f.write(f"dropout: {config['dropout']}\n")
+                    f.write(f"energy_fn: {config['energy_fn_name']}\n")
+                    f.write(f"update_bias: {config['update_bias']}\n")
+                    f.write(f"use_lateral: {config['use_lateral']}\n")
+                    f.write(f"peak_lr: {config['peak_learning_rate']:.2e}\n")
+                    f.write(f"warmup_steps: {config['warmup_steps']}\n")
             logger.info(f"Results saved to {results_path}")
         return study
-        
     except KeyboardInterrupt:
         logger.info("Optimization interrupted")
         return study
@@ -386,5 +366,4 @@ if __name__ == "__main__":
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
-    
     study = run_tuning(n_trials= 30, study_name="bayesian_tuning")
