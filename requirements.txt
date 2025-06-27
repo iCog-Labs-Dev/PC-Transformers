@@ -29,3 +29,4 @@ bert-score==0.3.13
 optuna
 psutil==7.0.0
 inquirerpy
+flash_attn

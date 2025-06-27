@@ -208,7 +208,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
         scores = scores.masked_fill(~mask, float("-inf"))
         attn_weights = scores.softmax(dim=-1) # B, H, T, T
-            mu_heads = attn_weights @ Vh   # B, H, T, D
+        mu_heads = attn_weights @ Vh   # B, H, T, D
 
         dvl_grad=compute_DVL(mu_heads)
         dvl_norm = dvl_grad.norm().item()
