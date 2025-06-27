@@ -15,8 +15,8 @@ from torch.utils.data import DataLoader, Subset
 import logging
 import time
 import optuna
-import inquirer
-from inquirer.themes import GreenPassion
+from InquirerPy import inquirer as inquirerpy
+from functools import partial
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -149,33 +149,33 @@ def get_dynamic_model_config(trial, vocab_size):
 
 def select_objective():
     options = [
-        ("Cross-Entropy Loss (minimize)", "ce_loss"),
-        ("Perplexity (minimize)", "perplexity"),
-        ("Token Accuracy (maximize)", "token_accuracy"),
-        ("Energy (minimize)", "energy"),
+        "Cross-Entropy Loss (minimize)",
+        "Perplexity (minimize)",
+        "Token Accuracy (maximize)",
+        "Energy (minimize)",
     ]
-    question = [
-        inquirer.List(
-            "objective",
-            message="\033[1;36mSelect the objective metric for Bayesian tuning:\033[0m",
-            choices=[f"\033[1;33m{desc}\033[0m" for desc, _ in options],
-        )
-    ]
-    answer = inquirer.prompt(question, theme=GreenPassion())
-    # Remove color codes for matching
-    import re
-    selected = re.sub(r'\x1b\[[0-9;]*m', '', answer["objective"])
-    for desc, val in options:
-        if desc in selected:
-            return val
+    answer = inquirerpy.select(
+        message="Select the objective metric for Bayesian tuning:",
+        choices=options,
+        default=options[0],
+        pointer="→",
+        instruction="(Use arrow keys)",
+    ).execute()
+    mapping = {
+        "Cross-Entropy Loss (minimize)": "ce_loss",
+        "Perplexity (minimize)": "perplexity",
+        "Token Accuracy (maximize)": "token_accuracy",
+        "Energy (minimize)": "energy",
+    }
+    return mapping[answer]
 
-def objective(trial):
+def objective(trial, chosen_objective="ce_loss"):
     """Bayesian Objective function"""
     start_time = time.time()
     model = None
 
     try:
-        logger.info(f"Trial {trial.number}")
+        logger.info(f"Trial {trial.number} (objective: {chosen_objective})")
         cleanup_memory()
         vocab_size = tokenizer.get_vocab_size()
         config = get_dynamic_model_config(trial, vocab_size)
@@ -227,7 +227,22 @@ def objective(trial):
             trial.set_user_attr("val_energy", val_energy)
             trial.set_user_attr("val_token_acc", val_token_acc)
             trial.set_user_attr("val_perplexity", float(val_perplexity))
-            return val_loss   
+            logger.info(f"Returning metric for objective '{chosen_objective}'")
+            if chosen_objective == "ce_loss":
+                logger.info(f"Objective value (ce_loss): {val_loss}")
+                return val_loss   
+            elif chosen_objective == "perplexity":
+                logger.info(f"Objective value (perplexity): {val_perplexity}")
+                return val_perplexity
+            elif chosen_objective == "token_accuracy":
+                logger.info(f"Objective value (token_accuracy): {-val_token_acc}")
+                return -val_token_acc  # maximize accuracy by minimizing negative
+            elif chosen_objective == "energy":
+                logger.info(f"Objective value (energy): {val_energy}")
+                return val_energy
+            else:
+                logger.error(f"Unknown objective: {chosen_objective}")
+                raise ValueError(f"Unknown objective: {chosen_objective}")
         except Exception as e:
             logger.error(f"Evaluation failed: {str(e)}")
             import traceback
@@ -250,7 +265,8 @@ def objective(trial):
 
 def run_tuning(n_trials=30, study_name="bayesian_tuning", chosen_objective="ce_loss"):
     """Run clean dynamic hyperparameter tuning"""
-    
+    # Use a unique study name per metric
+    study_name = f"bayesian_tuning_{chosen_objective}"
     study = optuna.create_study(
         direction='minimize',
         study_name=study_name,
@@ -262,9 +278,9 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", chosen_objective="ce_l
             n_warmup_steps=3,
             interval_steps=1))
     
-    logger.info(f"Starting bayesian tuning with {n_trials} trials")
+    logger.info(f"Starting bayesian tuning with {n_trials} trials for objective: {chosen_objective}")
     try:
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+        study.optimize(partial(objective, chosen_objective=chosen_objective), n_trials=n_trials, show_progress_bar=False)
         
         # Results
         logger.info("Optimization completed!")
