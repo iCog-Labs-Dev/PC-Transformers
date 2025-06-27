@@ -17,6 +17,7 @@ import time
 import optuna
 from InquirerPy import inquirer as inquirerpy
 from functools import partial
+import argparse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -335,9 +336,16 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", chosen_objective="ce_l
         return study
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Bayesian Hyperparameter Tuning with Predictive Coding Transformer")
+    parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
+    args = parser.parse_args()
+
     chosen_objective = select_objective()
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
-    
+
+    # Set config flag for FlashAttention
+    GPTConfig.use_flash_attention = args.flash
+
     study = run_tuning(n_trials=5, study_name="bayesian_tuning", chosen_objective=chosen_objective)

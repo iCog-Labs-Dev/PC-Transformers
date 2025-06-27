@@ -26,6 +26,7 @@ class GPTConfig:
         num_epochs (int): Number of training epochs.
         use_lateral (bool): Whether to use lateral (recurrent) connections.
         energy_fn_name (str): Name of the energy function to use for error computation.
+        use_flash_attention (bool): Whether to use FlashAttention.
     """
     vocab_size: int
     block_size: int
@@ -44,4 +45,5 @@ class GPTConfig:
     num_epochs: int = 5
     use_lateral: bool = True
     energy_fn_name: str = "scaled_mse"
+    use_flash_attention: bool = False
     eos_token_id: int = None
