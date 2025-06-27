@@ -1,4 +1,5 @@
 import time
+import math
 import torch
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
@@ -68,12 +69,14 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
-        
+    avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
+ 
     elapsed = time.time() - start_time
     print(f"Evaluation completed in {elapsed:.2f} seconds")
     print(f"Total Batches Processed: {batch_idx + 1}")
     print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
-    return avg_energy, avg_ce_loss 
+
+    return avg_energy, avg_ce_loss, avg_perplexity
 
 def main():
     tokenizer = load_tokenizer()
