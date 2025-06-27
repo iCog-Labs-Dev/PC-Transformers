@@ -8,7 +8,7 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import train_loader
-from utils.model_utils import load_tokenizer, reset_pc_modules
+from utils.model_utils import load_tokenizer, reset_pc_modules, update_pc_learning_rate
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
@@ -19,8 +19,10 @@ This script trains a predictive coding transformer model on a dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
 """
 
-def train(model, dataloader, tokenizer):
+def train(model, dataloader, tokenizer, current_lr=None):
     model.train()
+    if current_lr is not None:
+        update_pc_learning_rate(model, current_lr)
     total_energy = 0.0
     total_ce_loss = 0.0
     batch_count = 0
@@ -97,7 +99,7 @@ def main():
     start_training_time = time.time()
     for epoch in range(config.num_epochs):
         print(f"Epoch {epoch+1} started", flush=True)
-        avg_energy, perplexity = train(model, train_loader, tokenizer)
+        avg_energy, perplexity = train(model, train_loader, tokenizer, current_lr=config.local_learning_rate)
         train_energies.append(avg_energy)
         perplexities.append(perplexity)
         print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)

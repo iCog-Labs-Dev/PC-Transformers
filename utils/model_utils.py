@@ -102,3 +102,15 @@ def decode_ids(tokenizer, ids, stop_at_eos = True):
     if stop_at_eos and "[EOS]" in text:
         text = text.split("[EOS]")[0].strip()
     return text
+
+def update_pc_learning_rate(model, new_lr):
+    """
+    Update the local learning rate for all PCLayer instances in the model.
+
+    Args:
+        model: The model containing predictive coding modules.
+        new_lr (float): The new learning rate to set.
+    """
+    for module in model.modules():
+        if hasattr(module, 'local_lr'):
+            module.local_lr = new_lr

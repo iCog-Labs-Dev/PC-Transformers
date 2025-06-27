@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, Subset
 import logging
 import time
 import optuna
+import numpy as np
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -109,7 +110,7 @@ def get_dynamic_model_config(trial, vocab_size):
                 logger.warning(f"Forcing num_heads=4 for n_embed={n_embed} (head_dim={n_embed//4})")
             else:
                 logger.warning(f"Skipping n_embed={n_embed} - cannot support minimum 4 heads")
-                return None
+                return None, None
         
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
     block_size_candidates = list(range(64, 513, 16))
@@ -144,7 +145,7 @@ def get_dynamic_model_config(trial, vocab_size):
         update_bias=update_bias,
         use_lateral=use_lateral,
         energy_fn_name=energy_fn_name
-    )
+    ), scaled_lr
 
 def objective(trial):
     """Bayesian Objective function"""
@@ -155,7 +156,8 @@ def objective(trial):
         logger.info(f"Trial {trial.number}")
         cleanup_memory()
         vocab_size = tokenizer.get_vocab_size()
-        config = get_dynamic_model_config(trial, vocab_size)
+        warmup_epochs = trial.suggest_int('warmup_epochs', 1, 5)
+        (config, target_lr) = get_dynamic_model_config(trial, vocab_size)
 
         if config is None:
             logger.warning(f"Trial {trial.number} skipped - no valid config with min 4 heads")
@@ -183,7 +185,15 @@ def objective(trial):
         
         try:
             model.train()
-            _, _ = train(model, train_loader, tokenizer)
+            num_epochs = 5
+            warmup_lrs = np.linspace(0.1 * target_lr, target_lr, warmup_epochs)
+            for epoch in range(num_epochs):
+                if epoch < warmup_epochs:
+                    current_lr = warmup_lrs[epoch]
+                else:
+                    current_lr = target_lr
+                logger.info(f"Epoch {epoch+1}/{num_epochs} | Warm-up LR: {current_lr:.6f}")
+                _, _ = train(model, train_loader, tokenizer, current_lr=current_lr)
         except Exception as e:
             logger.error(f"Training failed: {str(e)}")
             import traceback
