@@ -17,6 +17,7 @@ import optuna
 from functools import partial
 import argparse
 
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
