@@ -14,8 +14,10 @@ from torch.utils.data import DataLoader, Subset
 import logging
 import time
 import optuna
-optuna.logging.set_verbosity(optuna.logging.WARNING)
+from functools import partial
+import argparse
 
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -372,7 +374,15 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
         return study
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Bayesian Hyperparameter Tuning with Predictive Coding Transformer")
+    parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
+    args = parser.parse_args()
+    
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
+        
+    # Set config flag for FlashAttention
+    GPTConfig.use_flash_attention = args.flash
+        
     study = run_tuning(n_trials= 30, study_name="bayesian_tuning")

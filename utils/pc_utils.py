@@ -3,6 +3,15 @@ import torch.nn.functional as F
 import math
 from predictive_coding.config import GPTConfig
 
+try:
+    from flash_attn.flash_attn_interface import flash_attn_unpadded_qkvpacked_func
+    FLASH_AVAILABLE = True
+except ImportError:
+    FLASH_AVAILABLE = False
+    import warnings
+    warnings.warn("FlashAttention is not installed. Falling back to standard attention.")
+
+
 def compute_DVL(attn_v):
     B, H, T, D= attn_v.shape
     x= attn_v.transpose(0, 1).flatten(2, 3)
@@ -164,15 +173,43 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
         la= GPTConfig.la * math.sqrt(1.0 / head_dim)
 
-        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
-        K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-        V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-          
-        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #B,H,T,T
+        # Reshape Q, K, V for attention
+        # FlashAttention expects [B, S, nH, dH]
+        Q_ = Q.view(batch_size, seq_len, num_heads, head_dim)
+        K_ = K.view(batch_size, seq_len, num_heads, head_dim)
+        V_ = V.view(batch_size, seq_len, num_heads, head_dim)
+
+        use_flash = getattr(GPTConfig, 'use_flash_attention', False) and FLASH_AVAILABLE
+        mu_heads = None
+        flash_error = None
+        if use_flash:
+            try:
+                # Stack Q, K, V for FlashAttention: [B, S, 3, nH, dH]
+                qkv = torch.stack([Q_, K_, V_], dim=2)
+                orig_dtype = qkv.dtype
+                if qkv.dtype not in [torch.float16, torch.bfloat16]:
+                    qkv = qkv.to(torch.float16)
+                # FlashAttention assumes causal masking
+                attn_out = flash_attn_unpadded_qkvpacked_func(qkv, None, 0.0, causal=True)
+                attn_out = attn_out.to(orig_dtype)
+                # Output: [B, S, nH, dH] -> [B, nH, S, dH]
+                mu_heads = attn_out.permute(0, 2, 1, 3).contiguous()
+            except Exception as e:
+                flash_error = str(e)
+                print(f"[FlashAttention ERROR] Falling back to standard attention. Reason: {flash_error}")
+                use_flash = False
+        if not use_flash:
+            # Standard attention
+            # [B, S, nH, dH] -> [B, nH, S, dH]
+            Qh = Q_.permute(0, 2, 1, 3)
+            Kh = K_.permute(0, 2, 1, 3)
+            Vh = V_.permute(0, 2, 1, 3)
+            scores = Qh @ Kh.transpose(-2, -1) / math.sqrt(Qh.size(-1)) #B,H,T,T
+        
         mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
         scores = scores.masked_fill(~mask, float("-inf"))
         attn_weights = scores.softmax(dim=-1) # B, H, T, T
-        mu_heads = attn_weights @ V   # B, H, T, D
+        mu_heads = attn_weights @ Vh   # B, H, T, D
         dvl_grad=compute_DVL(mu_heads)
         dvl_norm = dvl_grad.norm().item()
         similarity = get_head_similarity(mu_heads)
