@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
-from Data_preprocessing.dataloader import train_loader
+from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -106,6 +106,7 @@ def main():
         eos_token_id = tokenizer.eos_token_id
     )
     model = PCTransformer(config)
+    train_loader, _, _ = get_loaders()
     train_energies = []
     perplexities = []
 

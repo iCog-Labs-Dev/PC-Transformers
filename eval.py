@@ -3,7 +3,7 @@ import torch
 import math
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
-from Data_preprocessing.dataloader import test_loader
+from Data_preprocessing.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 
@@ -100,7 +100,7 @@ def main():
 
     model_path = "checkpoints/pc_transformer.pt"
     model = load_model(model_path, config)
-
+    _, _, test_loader = get_loaders()
     # Max batches can be set to limit evaluation, or None for full dataset
     evaluate(model, test_loader, tokenizer, max_batches= None)
 
