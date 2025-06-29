@@ -3,7 +3,7 @@ import torch
 import math
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
-from Data_preprocessing.dataloader import test_loader
+from Data_preprocessing.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 
@@ -17,7 +17,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None):
     batch_count = 0
     total_ce_loss = 0.0
     pad_token_id = tokenizer.pad_token_id
-    vocab_size = tokenizer.vocab_size
+    vocab_size = len(tokenizer)
     
     if max_batches is None:
         print(f"Evaluating on the full test set...")
@@ -81,7 +81,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None):
 
 def main():
     tokenizer = load_tokenizer()
-    vocab_size = tokenizer.vocab_size
+    vocab_size = len(tokenizer)
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size=208,
@@ -100,7 +100,7 @@ def main():
 
     model_path = "checkpoints/pc_transformer.pt"
     model = load_model(model_path, config)
-
+    _, _, test_loader = get_loaders()
     # Max batches can be set to limit evaluation, or None for full dataset
     evaluate(model, test_loader, tokenizer, max_batches= None)
 

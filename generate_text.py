@@ -2,7 +2,7 @@ import torch
 from predictive_coding.config import GPTConfig
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids, compute_text_metrics
 import torch.nn.functional as F
-from Data_preprocessing.dataloader import test_loader
+from Data_preprocessing.dataloader import get_loaders
 
 """
 Usage: python generate_text.py
@@ -31,58 +31,65 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
                 
     return input_tensor[0] 
 
-tokenizer = load_tokenizer()
-vocab_size = tokenizer.vocab_size
-pad_token_id = tokenizer.pad_token_id
+def text_generation(model):
+    decoded_preds, decoded_targets = [], []
+    num_samples = min(5, input_ids.size(0))
+    prompt_len = 5
 
-config = GPTConfig(
-    vocab_size = vocab_size,
-    T=20,
-    local_learning_rate= 1.51e-05,
-    dropout= 0.07813827928828256,
-    n_embed= 208,
-    block_size=208,
-    is_holding_error=True,
-    num_heads=16,
-    n_blocks=6,
-    num_epochs=1,
-    update_bias=True,
-    energy_fn_name="scaled_mse",
-    eos_token_id = tokenizer.eos_token_id
-)
+    _, _, test_loader = get_loaders()
+    tokenizer = load_tokenizer()
+    pad_token_id = tokenizer.pad_token_id
 
-model_path = "checkpoints/pc_transformer.pt"
-model = load_model(model_path, config)
+    for batch_idx, batch in enumerate(test_loader):
+        input_ids = batch["input_ids"]
+        target_ids = batch["target_ids"]
+        break 
 
-for batch_idx, batch in enumerate(test_loader):
-    input_ids = batch["input_ids"]
-    target_ids = batch["target_ids"]
-    break 
+    for i in range(num_samples):
+        prompt_ids = input_ids[i][:prompt_len]
+        generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7)
 
-num_samples = min(5, input_ids.size(0))
-prompt_len = 5
-decoded_preds, decoded_targets = [], []
+        target_continuation = input_ids[i][prompt_len:]
+        target_continuation = target_continuation[target_continuation != pad_token_id].tolist()
 
-for i in range(num_samples):
-    prompt_ids = input_ids[i][:prompt_len]
-    generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7)
+        generated_continuation = generated_ids[prompt_len:].tolist()
 
-    target_continuation = target_ids[i][prompt_len:]
-    target_continuation = target_continuation[target_continuation != pad_token_id].tolist()
+        # Decode all
+        prompt_str = decode_ids(tokenizer, prompt_ids.tolist())
+        target_str = decode_ids(tokenizer, target_continuation, stop_at_eos=True)
+        generated_str = decode_ids(tokenizer, generated_continuation, stop_at_eos=True)
 
-    generated_continuation = generated_ids[prompt_len:].tolist()
+        decoded_preds.append(generated_str)
+        decoded_targets.append(target_str)
 
-    # Decode all
-    prompt_str = decode_ids(tokenizer, prompt_ids.tolist())
-    target_str = decode_ids(tokenizer, target_continuation, stop_at_eos=True)
-    predict_str = decode_ids(tokenizer, generated_continuation, stop_at_eos=True)
+        print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
+        print(f"[PROMPT ]: {prompt_str}")
+        print(f"[TARGET ]: {target_str}")
+        print(f"[PREDICT]: {generated_str}")
+    
+    return decoded_preds, decoded_targets
 
-    decoded_preds.append(predict_str)
-    decoded_targets.append(target_str)
+if __name__ == "__main__":
+    tokenizer = load_tokenizer()
+    vocab_size = len(tokenizer)
 
-    print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
-    print(f"[PROMPT ]: {prompt_str}")
-    print(f"[TARGET ]: {target_str}")
-    print(f"[PREDICT]: {predict_str}")
+    config = GPTConfig(
+        vocab_size = vocab_size,
+        block_size=208,
+        n_embed= 208,
+        dropout= 0.07813827928828256,
+        local_learning_rate= 1.51e-05,
+        T=20,
+        is_holding_error=True,
+        num_heads=16,
+        n_blocks=6,
+        num_epochs=1,
+        update_bias=True,
+        energy_fn_name="scaled_mse",
+        eos_token_id = tokenizer.eos_token_id
+    )
 
-compute_text_metrics(decoded_preds, decoded_targets)
+    model_path = "checkpoints/pc_transformer.pt"
+    model = load_model(model_path, config)
+    decoded_preds, decoded_targets = text_generation(model)
+    compute_text_metrics(decoded_preds, decoded_targets)

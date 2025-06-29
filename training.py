@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
-from Data_preprocessing.dataloader import train_loader
+from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -26,7 +26,7 @@ def train(model, dataloader, tokenizer, config, global_step):
     total_ce_loss = 0.0
     batch_count = 0
     pad_token_id = tokenizer.pad_token_id
-    vocab_size = tokenizer.vocab_size
+    vocab_size = len(tokenizer)
 
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"]
@@ -86,7 +86,7 @@ def train(model, dataloader, tokenizer, config, global_step):
 
 def main():
     tokenizer = load_tokenizer()
-    vocab_size = tokenizer.vocab_size
+    vocab_size = len(tokenizer)
 
     config = GPTConfig(
         vocab_size = vocab_size,
@@ -107,6 +107,7 @@ def main():
         eos_token_id = tokenizer.eos_token_id
     )
     model = PCTransformer(config)
+    train_loader, _, _ = get_loaders()
     train_energies = []
     perplexities = []
 
