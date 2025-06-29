@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 """
 predictive_coding.config
@@ -31,12 +32,12 @@ class GPTConfig:
     """
     vocab_size: int
     block_size: int
-    peak_learning_rate: float = 7.31e-04
-    warmup_steps: int= 58
+    local_learning_rate: float
+    peak_learning_rate: Optional[float] = None
+    warmup_steps: Optional[int] = None
     la: float=0.5
     n_embed: int =208
     dropout: float = 0.1
-    local_learning_rate: float = 0.0
     T: int = 10
     is_holding_error: bool = False
     update_bias: bool = True

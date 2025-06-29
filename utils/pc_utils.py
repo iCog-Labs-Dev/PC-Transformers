@@ -158,7 +158,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     return x, mu
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         q_proj = proj_layers.get("q_proj", None)
         k_proj = proj_layers.get("k_proj", None)
@@ -170,9 +170,8 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         V= v_proj(x)
         batch_size, seq_len, embed_dim=target.shape
         
-        num_heads = GPTConfig.num_heads
-        head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
-        la= GPTConfig.la * math.sqrt(1.0 / head_dim)
+        head_dim = n_embed // num_heads 
+        la= la * math.sqrt(1.0 / head_dim)
 
         Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
         K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
