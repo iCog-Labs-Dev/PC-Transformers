@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import math
+import gc
 from predictive_coding.config import GPTConfig
 
 def compute_DVL(attn_v):
@@ -294,3 +295,10 @@ def ids_to_one_hot(input_ids, vocab_size):
         input_ids = torch.clamp(input_ids, max=vocab_size-1)
     
     return F.one_hot(input_ids, num_classes=vocab_size).float()
+
+def cleanup_memory():
+    """Comprehensive memory cleanup"""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
