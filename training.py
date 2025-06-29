@@ -90,20 +90,20 @@ def main():
 
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size= 320, 
-        peak_learning_rate= 1.51e-04,
-        warmup_steps= 94,
-        n_embed=464,
-        dropout= 0.2572947974079954,
+        block_size= 208, 
+        peak_learning_rate= 1.51e-05,
+        warmup_steps= 15,
+        n_embed=208,
+        dropout= 0.07813827928828256,
         local_learning_rate= 0.0,
-        T= 8,
+        T= 20,
         is_holding_error = True,
         num_heads=16,
         n_blocks=6,
-        num_epochs= 100,
-        update_bias= False,
+        num_epochs= 50,
+        update_bias= True,
         use_lateral = True,
-        energy_fn_name="mse",
+        energy_fn_name="scaled_mse",
         eos_token_id = tokenizer.eos_token_id
     )
     model = PCTransformer(config)

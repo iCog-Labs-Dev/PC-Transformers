@@ -36,7 +36,7 @@ class GPTConfig:
     peak_learning_rate: Optional[float] = None
     warmup_steps: Optional[int] = None
     la: float=0.5
-    n_embed: int =464
+    n_embed: int =208
     dropout: float = 0.1
     T: int = 10
     is_holding_error: bool = False
@@ -46,5 +46,5 @@ class GPTConfig:
     batch_size: int = 8
     num_epochs: int = 5
     use_lateral: bool = True
-    energy_fn_name: str = "scaled_mse"
+    energy_fn_name: str = "mse"
     eos_token_id: int = None

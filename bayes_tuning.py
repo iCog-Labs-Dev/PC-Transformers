@@ -31,7 +31,7 @@ def get_optimal_data_sizes():
     if torch.cuda.is_available():
         gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         if gpu_gb >= 8:
-            return 3000, 600
+            return 20000, 5000
         elif gpu_gb >= 4:
             return 2000, 400 
         else:
@@ -153,16 +153,16 @@ def get_dynamic_model_config(trial, vocab_size):
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,
+        peak_learning_rate=scaled_lr,
+        warmup_steps=warmup_steps,
         n_embed=n_embed,
         dropout=trial.suggest_float('dropout', 0.05, 0.3),
         local_learning_rate=0.0, 
-        peak_learning_rate=scaled_lr,
-        warmup_steps=warmup_steps,
         T=T,
         is_holding_error=True,
         num_heads=num_heads,
         n_blocks=n_blocks,
-        num_epochs=1,
+        num_epochs=5,
         update_bias=update_bias,
         use_lateral=use_lateral,
         energy_fn_name=energy_fn_name
@@ -219,7 +219,7 @@ def objective(trial):
         try:
             model.eval()
             max_val_batches = min(10, len(valid_loader))
-            avg_energy, val_loss = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, compute_metrics=False)
+            avg_energy, val_loss, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches)
             normalized_energy = normalize_energy(avg_energy, config.energy_fn_name)
 
             trial_time = time.time() - start_time

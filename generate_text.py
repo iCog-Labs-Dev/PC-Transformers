@@ -1,6 +1,6 @@
 import torch
 from predictive_coding.config import GPTConfig
-from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids
+from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids, compute_text_metrics
 import torch.nn.functional as F
 from Data_preprocessing.dataloader import test_loader
 
@@ -37,18 +37,18 @@ pad_token_id = tokenizer.pad_token_id
 
 config = GPTConfig(
     vocab_size = vocab_size,
-    block_size=320,
-    local_learning_rate= 1.51e-04,
-    n_embed=464,
-    dropout=0.2572947974079954,
-    T=8,
+    T=20,
+    local_learning_rate= 1.51e-05,
+    dropout= 0.07813827928828256,
+    n_embed= 208,
+    block_size=208,
     is_holding_error=True,
     num_heads=16,
     n_blocks=6,
     num_epochs=1,
-    update_bias=False,
-    energy_fn_name="mse",
-    eos_token_id = tokenizer.token_to_id("[EOS]")
+    update_bias=True,
+    energy_fn_name="scaled_mse",
+    eos_token_id = tokenizer.eos_token_id
 )
 
 model_path = "checkpoints/pc_transformer.pt"
@@ -59,9 +59,9 @@ for batch_idx, batch in enumerate(test_loader):
     target_ids = batch["target_ids"]
     break 
 
-num_samples = 5
+num_samples = min(5, input_ids.size(0))
 prompt_len = 5
-i = 64
+decoded_preds, decoded_targets = [], []
 
 for i in range(num_samples):
     prompt_ids = input_ids[i][:prompt_len]
@@ -77,7 +77,12 @@ for i in range(num_samples):
     target_str = decode_ids(tokenizer, target_continuation, stop_at_eos=True)
     predict_str = decode_ids(tokenizer, generated_continuation, stop_at_eos=True)
 
+    decoded_preds.append(predict_str)
+    decoded_targets.append(target_str)
+
     print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
     print(f"[PROMPT ]: {prompt_str}")
     print(f"[TARGET ]: {target_str}")
     print(f"[PREDICT]: {predict_str}")
+
+compute_text_metrics(decoded_preds, decoded_targets)
