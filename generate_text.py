@@ -71,7 +71,7 @@ def text_generation(model):
 
 if __name__ == "__main__":
     tokenizer = load_tokenizer()
-    vocab_size = tokenizer.vocab_size
+    vocab_size = len(tokenizer)
 
     config = GPTConfig(
         vocab_size = vocab_size,

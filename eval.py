@@ -17,7 +17,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None):
     batch_count = 0
     total_ce_loss = 0.0
     pad_token_id = tokenizer.pad_token_id
-    vocab_size = tokenizer.vocab_size
+    vocab_size = len(tokenizer)
     
     if max_batches is None:
         print(f"Evaluating on the full test set...")
@@ -81,7 +81,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None):
 
 def main():
     tokenizer = load_tokenizer()
-    vocab_size = tokenizer.vocab_size
+    vocab_size = len(tokenizer)
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size=208,

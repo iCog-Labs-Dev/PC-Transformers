@@ -23,7 +23,7 @@ def load_tokenizer():
     special_tokens = {"pad_token": "[PAD]", "eos_token": "[EOS]"}
     tokenizer.add_special_tokens(special_tokens)
     
-    Config.VOCAB_SIZE =tokenizer.vocab_size + len(special_tokens)
+    Config.VOCAB_SIZE = len(tokenizer) 
     Config.PAD_ID = tokenizer.pad_token_id
     Config.EOS_ID = tokenizer.eos_token_id
     return tokenizer

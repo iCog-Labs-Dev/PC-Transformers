@@ -17,7 +17,7 @@ def objective(trial):
     
     try:
         tokenizer = load_tokenizer()
-        vocab_size = tokenizer.get_vocab_size()
+        vocab_size = len(tokenizer)
         config = get_dynamic_model_config(trial, vocab_size)
         if config is None:
             return float("inf")
