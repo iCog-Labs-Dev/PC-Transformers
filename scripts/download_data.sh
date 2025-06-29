@@ -16,5 +16,12 @@ gdown --id "$FILE_ID" -O "$OUTPUT_DIR/$ZIP_NAME"
 echo "Extracting files to $OUTPUT_DIR..."
 unzip -o "$OUTPUT_DIR/$ZIP_NAME" -d "$OUTPUT_DIR"
 
+if [ -d "$OUTPUT_DIR/opwb/opwb" ]; then
+    echo "Flattening nested folder structure..."
+    mv "$OUTPUT_DIR/opwb/opwb/"* "$OUTPUT_DIR/opwb/"
+    rmdir "$OUTPUT_DIR/opwb/opwb"
+fi
+
+echo "Cleaning up zip..."
 rm "$OUTPUT_DIR/$ZIP_NAME"
 echo "Dataset ready at $OUTPUT_DIR/opwb/"
