@@ -1,2 +1,0 @@
-*.txt filter=lfs diff=lfs merge=lfs -text
-Data_preprocessing/Data/opwb/*.txt filter=lfs diff=lfs merge=lfs -text
