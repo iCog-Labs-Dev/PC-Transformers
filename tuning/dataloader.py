@@ -16,7 +16,7 @@ def get_optimal_data_sizes():
 def create_subset_loaders(batch_size):
     """Create appropriately sized data loaders"""
     tokenizer = load_tokenizer()
-    pad_token_id = tokenizer.token_to_id("[PAD]")
+    pad_token_id = tokenizer.pad_token_id
     train_loader, valid_loader, _ = get_loaders()
 
     train_size, valid_size = get_optimal_data_sizes()
