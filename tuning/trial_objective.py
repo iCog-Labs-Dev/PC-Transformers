@@ -31,7 +31,7 @@ def objective(trial):
             return float("inf")
 
         model.train()
-        train(model, train_loader, tokenizer, global_step = 0)
+        train(model, train_loader, tokenizer, config, global_step = 0)
         reset_pc_modules(model)
 
         model.eval()
