@@ -9,8 +9,7 @@ from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
-from matplotlib import pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from visualization import plot_metrics
 
 """
 Usage: python training.py
@@ -19,7 +18,7 @@ This script trains a predictive coding transformer model on a dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
 """
 
-def train(model, dataloader, tokenizer, global_step):
+def train(model, dataloader, tokenizer, global_step, device):
     model.train()
     total_energy = 0.0
     total_ce_loss = 0.0
@@ -28,8 +27,8 @@ def train(model, dataloader, tokenizer, global_step):
     vocab_size = tokenizer.get_vocab_size()
 
     for batch_idx, batch in enumerate(dataloader):
-        input_ids = batch["input_ids"]
-        target_ids = batch["target_ids"]
+        input_ids = batch["input_ids"].to(device)
+        target_ids = batch["target_ids"].to(device)
         
         if global_step < GPTConfig.warmup_steps:
             lr = GPTConfig.local_learning_rate + global_step / GPTConfig.warmup_steps * (
@@ -84,6 +83,12 @@ def train(model, dataloader, tokenizer, global_step):
     return avg_energy, avg_perplexity, global_step
 
 def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+
     tokenizer = load_tokenizer()
     vocab_size = tokenizer.get_vocab_size()
 
@@ -99,52 +104,82 @@ def main():
         is_holding_error = True,
         num_heads=8,
         n_blocks=4,
-        num_epochs= 1,
+        num_epochs= 2,
         update_bias=True,
         use_lateral = True,
         energy_fn_name="scaled_mse",
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
     model = PCTransformer(config)
-    train_loader,_, _ = get_loaders()
-    train_energies = []
-    perplexities = []
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model, device_ids=list(range(torch.cuda.device_count())))
+    
+    model = model.to(device)
 
-    print("========== Training started ==========", flush=True) 
-    start_training_time = time.time()
+    if hasattr(model, 'module'): 
+        model.module.register_all_lateral_weights()
+    else:
+        model.register_all_lateral_weights()
+
+    train_loader, valid_loader, _ = get_loaders()
+
+    print("========== Training started ==========") 
+    start_time = time.time()
     global_step = 0
+    
+    train_energies = []
+    val_energies = []
+
     for epoch in range(config.num_epochs):
-        print(f"Epoch {epoch+1} started", flush=True)
-        avg_energy, perplexity, global_step = train(model, train_loader, tokenizer, global_step)
-        train_energies.append(avg_energy)
-        perplexities.append(perplexity)
-        print(f"Epoch {epoch+1} | Avg Energy: {avg_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
-    total_training_time = time.time() - start_training_time
-    print(f"Total Training Time: {total_training_time:.2f} seconds", flush=True)
-    print("========== Training completed ==========", flush=True)
+        print(f"Epoch {epoch+1}/{config.num_epochs}")
+        model.train()
+        train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, global_step, device)
+        train_energies.append(train_energy)
+        
+        model.eval()
+        val_energy, val_perplexity, global_step = train(model, valid_loader, tokenizer, global_step, device)
+        val_energies.append(val_energy)
+        
+        print(f"Epoch {epoch+1}/{config.num_epochs} | "
+        f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
+        f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
 
-    # Saving trained model
-    save_path = "checkpoints/pc_transformer.pt"
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    if os.path.exists(save_path):
-        os.remove(save_path)
-    torch.save({"model_state": model.state_dict()}, save_path)
-    print("Model saved.")
 
-    # Plotting average energy vs. epoch
-    epochs = list(range(1, len(train_energies) + 1))
-    plt.figure(figsize=(10, 6))
-    plt.plot(epochs, train_energies, marker='o', linestyle='-', color='b', label='Average Batch Energy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Average Batch Energy')
-    plt.title('Average Batch Energy vs. Epoch')
-    plt.grid(True)
-    plt.legend()
-    # Force x-axis to show only whole numbers
-    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
-    plt.tight_layout()
-    plt.savefig('assets/energy_plot.png')
-    plt.show()
+        if (epoch + 1) % 5 == 0:
+                os.makedirs("checkpoints", exist_ok=True)
+                
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
+                    'train_energy': train_energy,
+                    'val_energy': val_energy,
+                    'train_perplexity': train_perplexity,
+                    'val_perplexity': val_perplexity
+                }
+                
+                # Save checkpoint
+                checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
+                torch.save(checkpoint, checkpoint_path)
+                print(f"Saved checkpoint to {checkpoint_path}")
+                
+    # Save visualization
+    plot_metrics(train_energies, val_energies)
+    
+    # Save final model
+    final_checkpoint = {
+        'epoch': config.num_epochs,
+        'model_state_dict': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
+        'train_energy': train_energy,
+        'val_energy': val_energy,
+        'train_perplexity': train_perplexity,
+        'val_perplexity': val_perplexity
+    }
+    torch.save(final_checkpoint, 'checkpoints/final_model.pt')
+    
+    total_time = (time.time() - start_time) / 3600 
+    print(f"\nTraining completed in {total_time:.2f} hours")
+    print("Final model saved to: checkpoints/final_model.pt")
+    print("========== Training completed ==========")
 
 if __name__ == "__main__":
     main()

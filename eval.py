@@ -9,7 +9,14 @@ from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 
 """Usage: python eval.py"""
 
-def evaluate(model, dataloader, tokenizer, max_batches=None):
+def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    model = model.to(device)
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+
     start_time = time.time()
     model.eval()
     total_energy = 0.0
@@ -26,8 +33,8 @@ def evaluate(model, dataloader, tokenizer, max_batches=None):
         if max_batches is not None and batch_idx >= max_batches:
             break
         
-        input_ids = batch["input_ids"]
-        targets = batch["target_ids"]
+        input_ids = batch["input_ids"].to(device)
+        targets = batch["target_ids"].to(device)
 
         logits = model(targets, input_ids)
         ce_loss = F.cross_entropy(
@@ -57,14 +64,17 @@ def evaluate(model, dataloader, tokenizer, max_batches=None):
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
  
-    elapsed = time.time() - start_time
-    print(f"Evaluation completed in {elapsed:.2f} seconds")
+    elapsed = (time.time() - start_time) / 3600
+    print(f"Evaluation completed in {elapsed:.2f} hours")
     print(f"Total Batches Processed: {batch_idx}")
     print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
 
     return avg_energy, avg_ce_loss, avg_perplexity
 
 def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     tokenizer = load_tokenizer()
     vocab_size = tokenizer.get_vocab_size()
     config = GPTConfig(
@@ -83,12 +93,12 @@ def main():
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
 
-    model_path = "checkpoints/pc_transformer.pt"
+    model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     _, _, test_loader = get_loaders()
 
     # Max batches can be set to limit evaluation, or None for full dataset
-    evaluate(model, test_loader, tokenizer, max_batches= 1)
+    evaluate(model, test_loader, tokenizer, max_batches = 1, device = device)
 
 if __name__ == "__main__":
     main()
