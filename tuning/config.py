@@ -35,7 +35,7 @@ def get_dynamic_model_config(trial, vocab_size):
         is_holding_error=True,
         num_heads=num_heads,
         n_blocks=n_blocks,
-        num_epochs=5,
+        num_epochs=3,
         update_bias=update_bias,
         use_lateral=True,
         energy_fn_name=energy_fn_name
