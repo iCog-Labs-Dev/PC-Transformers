@@ -17,8 +17,19 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 """Usage:  python bayes_tuning.py """
 
+def setup_device():
+    """Setup device and check for CUDA availability."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        logger.info(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+    else:
+        logger.info("Using CPU")
+    return device
+
 def run_tuning(n_trials=30, study_name="bayesian_tuning"):
     """Run clean dynamic hyperparameter tuning"""
+    device = setup_device()
+
     study = optuna.create_study(
         direction='minimize',
         study_name=study_name,
@@ -39,7 +50,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning"):
     logger.info(f"Trials Log: {trials_path}")
 
     try:
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+        study.optimize(lambda trial: objective(trial, device), n_trials=n_trials, show_progress_bar=False)
         logger.info("Bayesian tuning completed!")
         
         if study.best_trial:
@@ -57,5 +68,6 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
     
+    device = setup_device()
     train_loader, valid_loader,_ = get_loaders()
     run_tuning(n_trials= 30, study_name="bayesian_tuning")

@@ -98,7 +98,7 @@ def main():
     _, _, test_loader = get_loaders()
 
     # Max batches can be set to limit evaluation, or None for full dataset
-    evaluate(model, test_loader, tokenizer, max_batches = 1, device = device)
+    evaluate(model, test_loader, tokenizer, max_batches = None, device = device)
 
 if __name__ == "__main__":
     main()
