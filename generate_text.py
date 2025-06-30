@@ -11,9 +11,15 @@ This script generates text using a trained predictive coding transformer model.
 It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
 """
 
-def generate_text(model, config, input_ids, max_new_tokens, temperature):
+def generate_text(model, config, input_ids, max_new_tokens, temperature, device = None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    model = model.to(device)
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
     model.eval()
-    input_tensor = input_ids.unsqueeze(0)
+    input_tensor = input_ids.unsqueeze(0).to(device)
 
     for _ in range(max_new_tokens):
         if input_tensor.size(1) > config.block_size:
@@ -31,7 +37,14 @@ def generate_text(model, config, input_ids, max_new_tokens, temperature):
                 
     return input_tensor[0] 
 
-def text_generation(model):
+def text_generation(model, config, device = None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    model = model.to(device)
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+    
     decoded_preds = []
     decoded_targets = []
     num_samples = 5
@@ -42,12 +55,11 @@ def text_generation(model):
     pad_token_id = tokenizer.token_to_id("[PAD]")
     
     for batch_idx, batch in enumerate(test_loader):
-        input_ids = batch["input_ids"]
-        break 
+        input_ids = batch["input_ids"].to(device) 
 
-    for i in range(num_samples):
+    for i in range(min(num_samples, input_ids.size(0))): 
         prompt_ids = input_ids[i][:prompt_len]
-        generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7)
+        generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7, device = device)
 
         target_continuation = input_ids[i][prompt_len:]
         target_continuation = target_continuation[target_continuation != pad_token_id].tolist()
@@ -70,6 +82,9 @@ def text_generation(model):
     return decoded_preds, decoded_targets
 
 if __name__ == "__main__":
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     tokenizer = load_tokenizer()
     vocab_size = tokenizer.get_vocab_size()
 
@@ -89,7 +104,8 @@ if __name__ == "__main__":
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
 
-    model_path = "checkpoints/pc_transformer.pt"
+    model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
-    decoded_preds, decoded_targets = text_generation(model)
-    compute_text_metrics(decoded_preds, decoded_targets)
+    decoded_preds, decoded_targets = text_generation(model, config, device)
+    if decoded_preds and decoded_targets:
+        compute_text_metrics(decoded_preds, decoded_targets)

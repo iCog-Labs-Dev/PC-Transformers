@@ -39,7 +39,7 @@ def load_tokenizer():
     Returns:
         Tokenizer: An instance of the loaded tokenizer.
     """
-    tokenizer_path = os.path.join(Config.TOKENIZER_DIR, "tokenizer.json")
+    tokenizer_path = os.path.join(Config.tokenizer_dir, "tokenizer.json")
     return Tokenizer.from_file(tokenizer_path)
 
 def load_model(model_path, config):
