@@ -18,9 +18,9 @@ def get_loaders():
     train_dataset, valid_dataset, test_dataset = get_datasets()
     train_loader = DataLoader(train_dataset, batch_size=Config.BATCH_SIZE, shuffle=True, 
                               collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
-    valid_loader = DataLoader(valid_dataset, batch_size=Config.BATCH_SIZE, shuffle = True,
+    valid_loader = DataLoader(valid_dataset, batch_size=Config.BATCH_SIZE, shuffle = False,
                               collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
-    test_loader = DataLoader(test_dataset, batch_size=Config.BATCH_SIZE, shuffle = True,
+    test_loader = DataLoader(test_dataset, batch_size=Config.BATCH_SIZE, shuffle = False,
                              collate_fn=lambda batch: pad_collate_fn(batch, pad_token_id))
 
     return train_loader, valid_loader, test_loader
