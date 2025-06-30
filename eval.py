@@ -1,22 +1,28 @@
 import time
+import math
 import torch
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
-from Data_preprocessing.dataloader import test_loader
+from Data_preprocessing.dataloader import get_loaders
 import torch.nn.functional as F
-from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, compute_text_metrics, decode_ids
+from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 
 """Usage: python eval.py"""
 
-def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=True):
+def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    model = model.to(device)
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+
     start_time = time.time()
     model.eval()
     total_energy = 0.0
     batch_count = 0
     total_ce_loss = 0.0
     pad_token_id = tokenizer.token_to_id("[PAD]")
-
-    decoded_targets, decoded_predictions = [], []
     
     if max_batches is None:
         print(f"Evaluating on the full test set...")
@@ -27,8 +33,8 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
         if max_batches is not None and batch_idx >= max_batches:
             break
         
-        input_ids = batch["input_ids"]
-        targets = batch["target_ids"]
+        input_ids = batch["input_ids"].to(device)
+        targets = batch["target_ids"].to(device)
 
         logits = model(targets, input_ids)
         ce_loss = F.cross_entropy(
@@ -52,30 +58,23 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, compute_metrics=Tru
         if (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
 
-        if compute_metrics:
-            preds = torch.argmax(logits, dim=-1)
-            mask = targets != pad_token_id
-            for i in range(preds.size(0)):
-                pred_str = decode_ids(tokenizer, preds[i][mask[i]].tolist(), stop_at_eos=True)
-                tgt_str = decode_ids(tokenizer, targets[i][mask[i]].tolist(), stop_at_eos=True)
-                decoded_predictions.append(pred_str)
-                decoded_targets.append(tgt_str)
-        
         reset_pc_modules(model)
-
-    if compute_metrics and decoded_predictions and decoded_targets:
-        compute_text_metrics(decoded_predictions, decoded_targets)
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
-        
-    elapsed = time.time() - start_time
-    print(f"Evaluation completed in {elapsed:.2f} seconds")
-    print(f"Total Batches Processed: {batch_idx + 1}")
+    avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
+ 
+    elapsed = (time.time() - start_time) / 3600
+    print(f"Evaluation completed in {elapsed:.2f} hours")
+    print(f"Total Batches Processed: {batch_idx}")
     print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
-    return avg_energy, avg_ce_loss 
+
+    return avg_energy, avg_ce_loss, avg_perplexity
 
 def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     tokenizer = load_tokenizer()
     vocab_size = tokenizer.get_vocab_size()
     config = GPTConfig(
@@ -94,11 +93,12 @@ def main():
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
 
-    model_path = "checkpoints/pc_transformer.pt"
+    model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
+    _, _, test_loader = get_loaders()
 
     # Max batches can be set to limit evaluation, or None for full dataset
-    evaluate(model, test_loader, tokenizer, max_batches= None, compute_metrics=True)
+    evaluate(model, test_loader, tokenizer, max_batches = None, device = device)
 
 if __name__ == "__main__":
     main()
