@@ -173,17 +173,18 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
         K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
         V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-          
-        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #B,H,T,T
-        mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device))
+                  
+        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) # B, H, T, T
+        mask = torch.tril(torch.ones_like(scores, dtype=torch.bool, device=device))
         scores = scores.masked_fill(~mask, float("-inf"))
-        attn_weights = scores.softmax(dim=-1) # B, H, T, T
+        attn_weights = scores.softmax(dim=-1)  # B, H, T, T
         mu_heads = attn_weights @ V   # B, H, T, D
         
         dvl_grad=compute_DVL(mu_heads)
         if dvl_grad is not None:
             dvl_grad = dvl_grad.to(device) 
-        dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
+
+        dvl_norm = dvl_grad.norm().item() 
         similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
