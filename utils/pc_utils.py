@@ -133,7 +133,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
         if requires_update:
             anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
+            W_latent = W_latents[layer_type]
+            if W_latent.device != x.device:
+                W_latents[layer_type] = W_latents[layer_type].to(x.device)
+            W_latent = W_latents[layer_type]
+            W_latent.data.add_(local_lr * anti_hebbian_latent)
     
     else:
         x= x + local_lr * error 
@@ -209,8 +213,12 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             x = x + local_lr * delta_x
 
             if requires_update:
-               anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-               W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
+                anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+                W_latent = W_latents[layer_type]
+                if W_latent.device != x.device:
+                    W_latents[layer_type] = W_latents[layer_type].to(x.device)
+                W_latent = W_latents[layer_type]
+                W_latent.add_(local_lr * anti_hebbian_latent)
         
         else:
             x= x+ local_lr * error
