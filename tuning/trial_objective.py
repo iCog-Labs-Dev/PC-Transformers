@@ -1,5 +1,5 @@
 import torch
-import torchl.nn as nn 
+import torch.nn as nn 
 import time
 from training import train
 from eval import evaluate
