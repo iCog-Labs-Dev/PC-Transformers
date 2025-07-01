@@ -6,13 +6,14 @@ from predictive_coding.config import GPTConfig
 
 def compute_DVL(attn_v):
     B, H, T, D= attn_v.shape
+    device = attn_v.device
     x= attn_v.transpose(0, 1).flatten(2, 3)
     x=F.normalize(x, p=2, dim=-1)
     s_m=torch.bmm(x, x.transpose(1, 2))
     N = s_m.size(1)
-    mask = ~torch.eye(N, device=x.device).bool()
-    s_m= s_m[:, mask].mean(dim=-1)
-    identity = torch.eye(H, device=s_m.device)
+    mask = ~torch.eye(N, device=device, dtype=torch.bool)
+    s_m = s_m[:, mask].mean(dim=-1)
+    identity = torch.eye(H, device=device)
     identity = identity.unsqueeze(0).expand(H, -1, -1) 
     corr=  s_m - identity
     dvl=(corr** 2).mean()
@@ -21,7 +22,7 @@ def compute_DVL(attn_v):
         dvl_grad= torch.autograd.grad(dvl, attn_v, retain_graph= True,)[0]
     except Exception as e:
         print(f" Error computing diversity gradient: {e}")
-        dvl_grad=torch.zeros_like(attn_v)
+        dvl_grad=torch.zeros_like(attn_v, device=device)
     return dvl_grad
 
 def get_head_similarity(mu_heads):
@@ -35,8 +36,8 @@ def get_head_similarity(mu_heads):
 
     return corr.detach().cpu()
     
-def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
-    return torch.randn(batch_size, seq_len, embedding_size)
+def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
+    return torch.randn(batch_size, seq_len, embedding_size, device = device)
 
 def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update, mu_word_cache=None, mu_pos_cache=None):
     """
@@ -111,6 +112,9 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     Returns:
         tuple: (updated activity tensor, predicted output tensor)
     """
+    device = x.device
+    layer = layer.to(device)
+
     mu = layer(x)
     if layer_type == "fc1":
         mu = F.gelu(mu)
@@ -122,7 +126,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         error_proj = error  
 
     if use_lateral and layer_type in W_latents:
-        W_latent = W_latents[layer_type]
+        W_latent = W_latents[layer_type].to(device) 
         x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
         delta_x = error_proj + x_latent
         x = x + local_lr * delta_x
@@ -151,6 +155,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
 def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance):
         assert proj_layers is not None, "proj_layers dict is required for attention"
+        device = x.device
         q_proj = proj_layers.get("q_proj", None)
         k_proj = proj_layers.get("k_proj", None)
         v_proj = proj_layers.get("v_proj", None)
@@ -170,12 +175,15 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
           
         scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #B,H,T,T
-        mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
+        mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device))
         scores = scores.masked_fill(~mask, float("-inf"))
         attn_weights = scores.softmax(dim=-1) # B, H, T, T
         mu_heads = attn_weights @ V   # B, H, T, D
+        
         dvl_grad=compute_DVL(mu_heads)
-        dvl_norm = dvl_grad.norm().item()
+        if dvl_grad is not None:
+            dvl_grad = dvl_grad.to(device) 
+        dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
         similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
@@ -194,7 +202,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             setattr(layer_instance, '_head_similarity_max', similarity.max().item())
         
         if use_lateral and layer_type in W_latents:
-            W_latent = W_latents[layer_type]
+            W_latent = W_latents[layer_type].to(device) 
             x_latent = x @ W_latent
             delta_x = error + x_latent
             x = x + local_lr * delta_x
@@ -263,6 +271,10 @@ def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_er
     Returns:
         tuple: (energy value, list of error statistics)
     """
+    device = mu.device
+    target = target.to(device)
+    error = error.to(device)
+    
     energy = energy_fn(mu, target,energy_fn_name).mean().item() if is_holding_error else None
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
@@ -278,7 +290,8 @@ def ids_to_one_hot(input_ids, vocab_size):
         torch.Tensor: One-hot encoded tensor of shape (B, S, vocab_size).
     """
     """input_id from [B, S] to [B, S, V]"""
-    return F.one_hot(input_ids, num_classes=vocab_size).float()
+    device = input_ids.device
+    return F.one_hot(input_ids, num_classes=vocab_size).float().to(device)
 
 def cleanup_memory():
     """Comprehensive memory cleanup"""

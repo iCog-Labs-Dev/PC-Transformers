@@ -24,9 +24,22 @@ class PCTransformer(nn.Module):
         """
         super().__init__()
         self.config = config
-        self.embedding = Embedding_Layer(config)
-        self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
-        self.output = OutputLayer(config)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.embedding = Embedding_Layer(config).to(self.device)
+        self.blocks = nn.ModuleList([TransformerBlock(config).to(self.device) for _ in range(config.n_blocks)])
+        self.output = OutputLayer(config).to(self.device)
+
+    def to(self, device=None, **kwargs):
+        """This method overrides the default to ensure all submodules are moved to the same device."""
+        if device is None:
+            return super().to(**kwargs)
+        
+        self.device = torch.device(device)
+        self = super().to(device, **kwargs)
+        for module in self.modules():
+            if hasattr(module, 'device'):
+                module.device = self.device
+        return self
 
     def register_all_lateral_weights(self):
         """
@@ -40,6 +53,12 @@ class PCTransformer(nn.Module):
             block.mlp.pc_layer2.register_lateral("linear", block.mlp.fc2.in_features)
         self.output.pc_layer.register_lateral("linear", self.output.output.in_features)
 
+        for module in self.modules():
+            if hasattr(module, 'W_latents'):
+                for key in module.W_latents:
+                    if module.W_latents[key] is not None:
+                        module.W_latents[key] = module.W_latents[key].to(self.device)
+
     def forward(self, target_ids: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for the PCTransformer.
@@ -52,9 +71,10 @@ class PCTransformer(nn.Module):
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
         """
         B, S = input_ids.shape
+        device = input_ids.device
         vocab_size = self.output.config.vocab_size
-        target_logits = ids_to_one_hot(target_ids, vocab_size)
-        position_ids = torch.arange(S).unsqueeze(0).expand(B, S)
+        target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
+        position_ids = torch.arange(S, device=device).unsqueeze(0).expand(B, S)
 
         self.embedding.pc_layer.init_x(
             batch_size=B,
@@ -62,7 +82,8 @@ class PCTransformer(nn.Module):
             layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
             layer_type="embed",
             input_ids=input_ids,
-            position_ids=position_ids
+            position_ids=position_ids,
+            device=device
         )
 
         for block in self.blocks:
@@ -70,31 +91,36 @@ class PCTransformer(nn.Module):
                 batch_size=B,
                 seq_len=S,
                 proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
-                layer_type="attn"
+                layer_type="attn",
+                device=device
             )
             block.attn.pc_output.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.attn.output,
-                layer_type="linear"
+                layer_type="linear",
+                device=device
             )
             block.mlp.pc_layer1.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.mlp.fc1,
-                layer_type="fc1"
+                layer_type="fc1",
+                device=device
             )
             block.mlp.pc_layer2.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.mlp.fc2,
-                layer_type="linear"
+                layer_type="linear",
+                device=device
             )
         self.output.pc_layer.init_x(
             batch_size=B,
             seq_len=S,
             layer=self.output.output,
-            layer_type="linear"
+            layer_type="linear",
+            device=device
         )
 
         for t in range(self.config.T):
