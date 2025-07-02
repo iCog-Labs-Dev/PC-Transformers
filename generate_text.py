@@ -17,7 +17,6 @@ local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
 def generate_text(model, config, input_ids, max_new_tokens, temperature, device = None):
-    model = model.to(device)
     model.eval()
     input_tensor = input_ids.unsqueeze(0).to(device)
 
@@ -102,6 +101,7 @@ def main():
 
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
+    model = model.to(device)
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     if local_rank == 0:
