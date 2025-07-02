@@ -32,11 +32,25 @@ def objective(trial, device = None):
         
         tokenizer = load_tokenizer()
         vocab_size = tokenizer.get_vocab_size()
-        config = get_dynamic_model_config(trial, vocab_size)
-        if config is None:
-            return float("inf")
+        
+        if dist.is_initialized():
+            if dist.get_rank() == 0:
+                params = get_dynamic_model_config(trial, vocab_size)
+                if params is None:
+                    trial.set_system_attr("shared_config", None)
+                else:
+                    trial.set_system_attr("shared_config", params.__dict__)
+            dist.barrier()
+            shared_params = trial.system_attrs.get("shared_config", None)
+            if shared_params is None:
+                return float("inf")
+            config = update_global_config(shared_params)
+        else:
+            config = get_dynamic_model_config(trial, vocab_size)
+            if config is None:
+                return float("inf")
+            update_global_config(config)
 
-        update_global_config(config)
         model = PCTransformer(config).to(device)   
         if dist.is_initialized():
             model = DDP(model, device_ids=[device.index], output_device=device.index)
@@ -87,5 +101,3 @@ def objective(trial, device = None):
             reset_pc_modules(model)
             del model
         cleanup_memory()
-        if dist.is_initialized():
-            dist.destroy_process_group() 
