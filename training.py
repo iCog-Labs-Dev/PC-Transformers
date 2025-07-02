@@ -198,8 +198,8 @@ def main():
         }
         torch.save(final_checkpoint, 'checkpoints/final_model.pt')
     
-        total_time = (time.time() - start_time) / 3600 
-        print(f"\nTraining completed in {total_time:.2f} hours")
+        total_time = time.time() - start_time
+        print(f"\nTraining completed in {total_time:.2f} seconds")
         print("Final model saved to: checkpoints/final_model.pt")
         print("========== Training completed ==========")
     

@@ -16,18 +16,17 @@ device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cp
 
 def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):        
     model = model.to(device)
-
-    start_time = time.time()
     model.eval()
     total_energy = 0.0
     batch_count = 0
     total_ce_loss = 0.0
     pad_token_id = tokenizer.token_to_id("[PAD]")
     
-    if max_batches is None:
-        print(f"Evaluating on the full test set...")
-    else:
-        print(f"Evaluating on up to {max_batches} batches...")
+    if local_rank == 0:
+        if max_batches is None:
+            print(f"Evaluating on the full test set...")
+        else:
+            print(f"Evaluating on up to {max_batches} batches...")
         
     for batch_idx, batch in enumerate(dataloader):
         if max_batches is not None and batch_idx >= max_batches:
@@ -64,9 +63,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
  
-    elapsed = (time.time() - start_time) / 3600
     if local_rank == 0:
-        print(f"Evaluation completed in {elapsed:.2f} hours")
         print(f"Total Batches Processed: {batch_idx}")
         print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
 
@@ -100,7 +97,12 @@ def main():
     _, _, test_loader = get_loaders(distributed=True)
 
     # Max batches can be set to limit evaluation, or None for full dataset
+    start_time = time.time()
     evaluate(model, test_loader, tokenizer, max_batches = None, device = device)
+    elapsed = time.time() - start_time
+    if local_rank == 0:
+        print(f"Evaluation completed in {elapsed:.2f} seconds")
+        
     dist.barrier()
     dist.destroy_process_group()
 

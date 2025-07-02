@@ -81,8 +81,7 @@ def objective(trial, device = None):
         reset_pc_modules(model)
 
         model.eval()
-        max_val_batches = min(10, len(valid_loader))
-        avg_energy, val_loss, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=max_val_batches, device=device)
+        avg_energy, val_loss, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches= None, device=device)
         
         normalized_energy = normalize_energy(avg_energy, config.energy_fn_name)
         combined_energy = normalized_energy + val_loss
