@@ -56,12 +56,13 @@ def objective(trial, device = None):
                 config_dict = None
 
             config_dict = broadcast_config(config_dict, device)
-            config = update_global_config(config_dict)
+            config = type('Config', (), config_dict) 
+            update_global_config(config_dict)
         else:
             config = get_dynamic_model_config(trial, vocab_size)
             if config is None:
                 return float("inf")
-            update_global_config(config)
+            update_global_config(config.__dict__)
         
         model = PCTransformer(config).to(device)   
         if dist.is_initialized():
