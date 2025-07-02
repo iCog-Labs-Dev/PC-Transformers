@@ -25,18 +25,6 @@ def setup_ddp():
     torch.cuda.set_device(local_rank)
     return local_rank
 
-def check_parameters_sync(model):
-    """Verify that all parameters are synchronized across processes."""
-    for name, param in model.named_parameters():
-        tensor = param.data
-        tensor_list = [torch.zeros_like(tensor) for _ in range(dist.get_world_size())]
-        dist.all_gather(tensor_list, tensor)
-        for t in tensor_list[1:]:
-            if not torch.allclose(tensor_list[0], t, atol=1e-5):
-                print(f"Parameter {name} is not synchronized across processes")
-                return False
-    return True
-    
 def train(model, dataloader, tokenizer, global_step, device):
     model.train()
     total_energy = 0.0
@@ -133,13 +121,6 @@ def main():
                 find_unused_parameters=True)
 
     model.module.register_all_lateral_weights()
-
-    if dist.is_initialized() and dist.get_rank() == 0:
-        print("Verifying parameter synchronization across processes...")
-        if check_parameters_sync(model):
-            print("All parameters are synchronized across processes")
-        else:
-            print("Parameters are not synchronized across processes")
 
     train_loader, valid_loader, _ = get_loaders(distributed=True)
 
