@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn 
 import time
+import os
 from training import train
 from eval import evaluate
 from utils.pc_utils import cleanup_memory
@@ -20,7 +21,13 @@ def objective(trial, device = None):
     print(f"\nStarting Trial {trial.number}")
     
     try:
-        if device is None:
+        if "RANK" in os.environ and torch.cuda.is_available():
+            if not dist.is_initialized():
+                dist.init_process_group(backend="nccl")
+            local_rank = int(os.environ["LOCAL_RANK"])
+            device = torch.device(f"cuda:{local_rank}")
+            torch.cuda.set_device(local_rank)
+        else:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         tokenizer = load_tokenizer()
@@ -31,10 +38,11 @@ def objective(trial, device = None):
 
         update_global_config(config)
         model = PCTransformer(config).to(device)   
-        model = DDP(model, device_ids=[device.index], output_device=device.index)
+        if dist.is_initialized():
+            model = DDP(model, device_ids=[device.index], output_device=device.index)
 
         batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
-        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed = True)
+        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed=dist.is_initialized())
 
         if len(train_loader) == 0 or len(valid_loader) == 0:
             return float("inf")
@@ -78,6 +86,6 @@ def objective(trial, device = None):
         if model:
             reset_pc_modules(model)
             del model
-        if dist.is_initialized():
-            dist.destroy_process_group()
         cleanup_memory()
+        if dist.is_initialized():
+            dist.destroy_process_group() 
