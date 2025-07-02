@@ -10,6 +10,7 @@ from utils.model_utils import reset_pc_modules, load_tokenizer
 from tuning.config import get_dynamic_model_config, update_global_config, normalize_energy
 from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
 from tuning.tuning_logs import log_trial_to_detailed_log, log_trial_to_summary
+from predictive_coding.config import GPTConfig
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -36,19 +37,14 @@ def objective(trial, device = None):
         if dist.is_initialized():
             if dist.get_rank() == 0:
                 params = get_dynamic_model_config(trial, vocab_size)
-                if params is None:
-                    trial.set_system_attr("shared_config", None)
-                else:
-                    trial.set_system_attr("shared_config", params.__dict__)
+                trial.set_system_attr("shared_config", params.__dict__ if params else None)
+
             dist.barrier()
-            shared_params = trial.system_attrs.get("shared_config", None)
+            shared_params = trial._storage.get_trial_system_attrs(trial._trial_id).get("shared_config", None)
             if shared_params is None:
                 return float("inf")
-            config = update_global_config(shared_params)
-        else:
-            config = get_dynamic_model_config(trial, vocab_size)
-            if config is None:
-                return float("inf")
+            
+            config = GPTConfig(**shared_params)
             update_global_config(config)
 
         model = PCTransformer(config).to(device)   
