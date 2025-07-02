@@ -23,7 +23,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
     study = optuna.create_study(
         direction='minimize',
         study_name=study_name,
-        storage=f'sqlite:///{study_name}.db',
+        storage=f'sqlite:///tuning/{study_name}.db',
         load_if_exists=True,
         sampler=optuna.samplers.TPESampler(seed=42),
         pruner=optuna.pruners.MedianPruner(
@@ -48,7 +48,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         if local_rank == 0 and study.best_trial:
             trial = study.best_trial
             logger.info(f"Best trial: {trial.number}. Best combined energy: {trial.value:.5f}")
-            write_final_results(f"{study_name}_results.txt", trial)
+            write_final_results(f"tuning/{study_name}_results.txt", trial)
         return study
     
     except KeyboardInterrupt:

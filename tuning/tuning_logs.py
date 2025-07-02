@@ -1,7 +1,7 @@
 def initialize_logs(study_name: str):
     """Create and initialize summary and trial log files."""
-    summary_path = f"{study_name}_summary.txt"
-    trials_path = f"{study_name}_trials.txt"
+    summary_path = f"tuning/{study_name}_summary.txt"
+    trials_path = f"tuning/{study_name}_trials.txt"
 
     with open(summary_path, "w") as f:
         f.write(f"BAYESIAN TUNING SUMMARY - {study_name}\n")
