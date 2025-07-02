@@ -105,11 +105,11 @@ def main():
         n_embed=64,
         dropout=0.1,
         local_learning_rate= 0.0,
-        T= 1,
+        T= 3,
         is_holding_error = True,
         num_heads=8,
         n_blocks=4,
-        num_epochs= 2,
+        num_epochs= 5,
         update_bias=True,
         use_lateral = True,
         energy_fn_name="scaled_mse",
@@ -123,8 +123,10 @@ def main():
     model.module.register_all_lateral_weights()
 
     train_loader, valid_loader, _ = get_loaders(distributed=True)
-
-    print("========== Training started ==========") 
+    
+    if rank == 0:
+        print("========== Training started ==========") 
+    
     start_time = time.time()
     global_step = 0
     
@@ -168,7 +170,7 @@ def main():
                 
     if rank == 0:
         plot_metrics(train_energies, val_energies)
-    
+        os.makedirs("checkpoints", exist_ok=True)
         final_checkpoint = {
             'epoch': config.num_epochs,
             'model_state_dict': model.module.state_dict(),
