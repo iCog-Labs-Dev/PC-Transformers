@@ -1,6 +1,7 @@
 import torch
 import time
 import os
+import pickle
 from training import train
 from eval import evaluate
 from utils.pc_utils import cleanup_memory
@@ -11,6 +12,19 @@ from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
 from tuning.tuning_logs import log_trial_to_detailed_log, log_trial_to_summary
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+def broadcast_config(config_dict, device):
+    """Broadcast config from rank 0 to all other ranks"""
+    obj_bytes = pickle.dumps(config_dict)
+    obj_tensor = torch.tensor(list(obj_bytes), dtype=torch.uint8, device=device)
+    length = torch.tensor([len(obj_tensor)], device=device)
+
+    dist.broadcast(length, src=0)
+    if dist.get_rank() != 0:
+        obj_tensor = torch.empty(length.item(), dtype=torch.uint8, device=device)
+
+    dist.broadcast(obj_tensor, src=0)
+    return pickle.loads(bytes(obj_tensor.tolist()))
 
 def objective(trial, device = None):
     """Bayesian Objective function"""
@@ -31,11 +45,24 @@ def objective(trial, device = None):
         
         tokenizer = load_tokenizer()
         vocab_size = tokenizer.get_vocab_size()
-        config = get_dynamic_model_config(trial, vocab_size)
-        if config is None:
-            return float("inf")
+        
+        if dist.is_initialized():
+            if dist.get_rank() == 0:
+                config = get_dynamic_model_config(trial, vocab_size)
+                if config is None:
+                    return float("inf")
+                config_dict = config.__dict__
+            else:
+                config_dict = None
 
-        update_global_config(config)
+            config_dict = broadcast_config(config_dict, device)
+            config = update_global_config(config_dict)
+        else:
+            config = get_dynamic_model_config(trial, vocab_size)
+            if config is None:
+                return float("inf")
+            update_global_config(config)
+        
         model = PCTransformer(config).to(device)   
         if dist.is_initialized():
             model = DDP(model, device_ids=[device.index], output_device=device.index)
