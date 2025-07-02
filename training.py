@@ -94,9 +94,6 @@ def main():
     device = torch.device(f"cuda:{local_rank}")
     print(f"Using device: {device} (local rank {local_rank})")
 
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
-
     tokenizer = load_tokenizer()
     vocab_size = tokenizer.get_vocab_size()
 

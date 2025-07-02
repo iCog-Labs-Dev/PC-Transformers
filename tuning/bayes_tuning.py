@@ -19,10 +19,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 """Usage:  python bayes_tuning.py """
 
 def setup_ddp():
-    dist.init_process_group(backend="nccl")
-    local_rank = int(os.getenv("LOCAL_RANK", 0))
-    torch.cuda.set_device(local_rank)
-    return local_rank
+    if torch.cuda.is_available() and "RANK" in os.environ:
+        dist.init_process_group(backend="nccl")
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+        return local_rank
+    else:
+        return -1
 
 def cleanup_ddp():
     dist.destroy_process_group()
@@ -30,7 +33,7 @@ def cleanup_ddp():
 def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None):
     """Run clean dynamic hyperparameter tuning"""
     local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{local_rank}" if local_rank >= 0 else "cpu")
     
     study = optuna.create_study(
         direction='minimize',
