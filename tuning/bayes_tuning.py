@@ -32,9 +32,6 @@ def cleanup_ddp():
 
 def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None):
     """Run clean dynamic hyperparameter tuning"""
-    local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}" if local_rank >= 0 else "cpu")
-    
     study = optuna.create_study(
         direction='minimize',
         study_name=study_name,
