@@ -10,12 +10,11 @@ from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
-"""Usage: python eval.py"""
+"""Usage: torchrun --nproc-per-node=2 eval.py"""
 local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
 def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):        
-    model = model.to(device)
     model.eval()
     total_energy = 0.0
     batch_count = 0
@@ -93,6 +92,7 @@ def main():
 
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
+    model = model.to(device)
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
     _, _, test_loader = get_loaders(distributed=True)
 

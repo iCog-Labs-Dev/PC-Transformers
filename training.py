@@ -13,12 +13,7 @@ from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
 from visualization import plot_metrics
 
-"""
-Usage: python training.py
-
-This script trains a predictive coding transformer model on a dataset.
-It tracks and plots the average predictive coding energy per epoch and saves the trained model.
-"""
+"""Usage: torchrun --nproc-per-node=2 training.py"""
 def setup_ddp():
     dist.init_process_group(backend="nccl")
     local_rank = int(os.environ["LOCAL_RANK"])
@@ -133,7 +128,7 @@ def main():
 
     if rank == 0:
         print("========== Training started ==========") 
-        
+
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
