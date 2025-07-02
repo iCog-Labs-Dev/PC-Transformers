@@ -37,7 +37,7 @@ def objective(trial, device = None):
     try:
         if "RANK" in os.environ and torch.cuda.is_available():
             if not dist.is_initialized():
-                dist.init_process_group(backend="nccl")
+                dist.init_process_group(backend="gloo")
             local_rank = int(os.environ["LOCAL_RANK"])
             device = torch.device(f"cuda:{local_rank}")
             torch.cuda.set_device(local_rank)
@@ -115,5 +115,3 @@ def objective(trial, device = None):
             reset_pc_modules(model)
             del model
         cleanup_memory()
-        if dist.is_initialized():
-            dist.destroy_process_group() 
