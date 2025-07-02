@@ -73,7 +73,7 @@ def text_generation(model, config, device = None):
                 print(f"[PROMPT ]: {prompt_str}")
                 print(f"[TARGET ]: {target_str}")
                 print(f"[PREDICT]: {generated_str}")
-
+            break
     return decoded_preds, decoded_targets
 
 def main():
