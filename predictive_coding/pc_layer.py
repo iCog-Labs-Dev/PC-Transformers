@@ -56,8 +56,12 @@ class PCLayer(nn.Module):
             layer_type (str): The type of layer (e.g., 'attn', 'fc1', 'linear').
             size (int): The size of the square lateral weight matrix.
         """
+        if not hasattr(self, 'W_latents'):
+            self.W_latents = {}
+
         if layer_type not in self.W_latents:
-            W = torch.empty(size, size)
+            device = next(self.parameters()).device if list(self.parameters()) else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            W = torch.empty(size, size, device = device)
             nn.init.xavier_uniform_(W)
             self.W_latents[layer_type] = nn.Parameter(W)
 
