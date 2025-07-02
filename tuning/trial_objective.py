@@ -94,8 +94,8 @@ def objective(trial, device = None):
         trial.set_user_attr("combined_energy", combined_energy)
         trial.set_user_attr("trial_time", trial_time)
 
-        log_trial_to_summary("bayesian_tuning_summary.txt", trial)
-        log_trial_to_detailed_log("bayesian_tuning_trials.txt", trial, config, trial_time, val_loss, avg_energy, normalized_energy, combined_energy)
+        log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
+        log_trial_to_detailed_log("tuning/bayesian_tuning_trials.txt", trial, config, trial_time, val_loss, avg_energy, normalized_energy, combined_energy)
 
         return combined_energy
     
