@@ -124,16 +124,16 @@ def main():
 
     train_loader, valid_loader, _ = get_loaders(distributed=True)
     
-    if rank == 0:
-        print("========== Training started ==========") 
-    
     start_time = time.time()
     global_step = 0
-    
     train_energies = []
     val_energies = []
 
     rank = dist.get_rank() if dist.is_initialized() else 0
+
+    if rank == 0:
+        print("========== Training started ==========") 
+        
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
