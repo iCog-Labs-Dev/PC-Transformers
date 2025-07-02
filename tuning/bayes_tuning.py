@@ -34,7 +34,9 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
                 interval_steps=1
             )
         )
-    dist.barrier()
+    if dist.is_initialized():
+        dist.barrier()
+        
     study = optuna.load_study(
         study_name=study_name,
         storage=storage_url
