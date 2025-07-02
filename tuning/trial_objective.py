@@ -56,8 +56,9 @@ def objective(trial, device = None):
                 config_dict = None
 
             config_dict = broadcast_config(config_dict, device)
-            config = type('Config', (), config_dict) 
-            update_global_config(config_dict)
+            config = GPTConfig(**config_dict)
+            update_global_config(config.__dict__)
+
         else:
             config = get_dynamic_model_config(trial, vocab_size)
             if config is None:
@@ -86,7 +87,7 @@ def objective(trial, device = None):
         combined_energy = normalized_energy + val_loss
         trial_time = (time.time() - start_time) / 3600 
         
-        trial.set_user_attr("config", config.__dict__)
+        trial.set_user_attr("config", dict(config.__dict__))
         trial.set_user_attr("ce_loss", val_loss)
         trial.set_user_attr("energy", avg_energy)
         trial.set_user_attr("normalized_energy", normalized_energy)

@@ -55,7 +55,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):
         total_energy += batch_energy
         batch_count += 1
 
-        if (batch_idx + 1) % 10 == 0:
+        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
 
         reset_pc_modules(model)
