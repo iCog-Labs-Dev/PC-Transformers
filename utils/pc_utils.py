@@ -18,13 +18,13 @@ def compute_DVL(attn_v, requires_update):
     identity = identity.unsqueeze(0).expand(H, -1, -1) 
     corr=  s_m - identity
     dvl=(corr** 2).mean()
+    dvl_grad = torch.zeros_like(attn_v, device=device)
 
     try:
         if requires_update:
-            dvl_grad= torch.autograd.grad(dvl, attn_v, retain_graph= True,)[0]
+            dvl_grad= torch.autograd.grad(dvl, attn_v, retain_graph= True)[0]
     except Exception as e:
         print(f" Error computing diversity gradient: {e}")
-        dvl_grad=torch.zeros_like(attn_v, device=device)
     return dvl_grad
 
 def get_head_similarity(mu_heads):
