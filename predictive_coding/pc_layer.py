@@ -168,17 +168,20 @@ class PCLayer(nn.Module):
             input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
             position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
         """
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            x_word = layer["word"].weight[input_ids].to(device) 
-            x_pos = layer["pos"].weight[position_ids].to(device) 
+            x_word = layer["word"].weight[input_ids]
+            x_pos = layer["pos"].weight[position_ids]
             self._x_cache["embed"] = (x_word, x_pos)
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
             H_out = proj_layers["v_proj"].weight.shape[0] 
             self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
-            
+
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
                 

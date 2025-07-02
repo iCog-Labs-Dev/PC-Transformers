@@ -9,6 +9,8 @@ from utils.model_utils import reset_pc_modules, load_tokenizer
 from tuning.config import get_dynamic_model_config, update_global_config, normalize_energy
 from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
 from tuning.tuning_logs import log_trial_to_detailed_log, log_trial_to_summary
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 def objective(trial, device = None):
     """Bayesian Objective function"""
@@ -29,13 +31,10 @@ def objective(trial, device = None):
 
         update_global_config(config)
         model = PCTransformer(config).to(device)   
+        model = DDP(model, device_ids=[device.index], output_device=device.index)
 
-        if torch.cuda.device_count() > 1:
-            model = nn.DataParallel(model)
-            print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
-               
         batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
-        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size)
+        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed = True)
 
         if len(train_loader) == 0 or len(valid_loader) == 0:
             return float("inf")
@@ -79,4 +78,6 @@ def objective(trial, device = None):
         if model:
             reset_pc_modules(model)
             del model
+        if dist.is_initialized():
+            dist.destroy_process_group()
         cleanup_memory()

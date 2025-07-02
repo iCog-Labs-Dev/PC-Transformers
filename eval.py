@@ -1,21 +1,21 @@
 import time
 import math
 import torch
+import os
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
 
 """Usage: python eval.py"""
+local_rank = int(os.getenv("LOCAL_RANK", 0))
+device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
-def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):        
     model = model.to(device)
-    if torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
 
     start_time = time.time()
     model.eval()
@@ -65,15 +65,16 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
  
     elapsed = (time.time() - start_time) / 3600
-    print(f"Evaluation completed in {elapsed:.2f} hours")
-    print(f"Total Batches Processed: {batch_idx}")
-    print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
+    if local_rank == 0:
+        print(f"Evaluation completed in {elapsed:.2f} hours")
+        print(f"Total Batches Processed: {batch_idx}")
+        print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
 
     return avg_energy, avg_ce_loss, avg_perplexity
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    dist.init_process_group(backend="nccl")
+    print(f"[Rank {local_rank}] Using device: {device}")
 
     tokenizer = load_tokenizer()
     vocab_size = tokenizer.get_vocab_size()
@@ -95,10 +96,13 @@ def main():
 
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
-    _, _, test_loader = get_loaders()
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    _, _, test_loader = get_loaders(distributed=True)
 
     # Max batches can be set to limit evaluation, or None for full dataset
     evaluate(model, test_loader, tokenizer, max_batches = None, device = device)
+    dist.barrier()
+    dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()

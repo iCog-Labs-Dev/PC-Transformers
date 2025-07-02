@@ -4,22 +4,23 @@ import math
 import gc
 from predictive_coding.config import GPTConfig
 
-def compute_DVL(attn_v):
+def compute_DVL(attn_v, requires_update):
     B, H, T, D= attn_v.shape
     device = attn_v.device
     x= attn_v.transpose(0, 1).flatten(2, 3)
     x=F.normalize(x, p=2, dim=-1)
     s_m=torch.bmm(x, x.transpose(1, 2))
     N = s_m.size(1)
-    mask = ~torch.eye(N, device=device, dtype=torch.bool)
+    mask = ~torch.eye(N, dtype=torch.bool, device=attn_v.device)
     s_m = s_m[:, mask].mean(dim=-1)
-    identity = torch.eye(H, device=device)
+    identity = torch.eye(H, device=attn_v.device)
     identity = identity.unsqueeze(0).expand(H, -1, -1) 
     corr=  s_m - identity
     dvl=(corr** 2).mean()
 
     try:
-        dvl_grad= torch.autograd.grad(dvl, attn_v, retain_graph= True,)[0]
+        if requires_update:
+            dvl_grad= torch.autograd.grad(dvl, attn_v, retain_graph= True,)[0]
     except Exception as e:
         print(f" Error computing diversity gradient: {e}")
         dvl_grad=torch.zeros_like(attn_v, device=device)
@@ -113,8 +114,6 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         tuple: (updated activity tensor, predicted output tensor)
     """
     device = x.device
-    layer = layer.to(device)
-
     mu = layer(x)
     if layer_type == "fc1":
         mu = F.gelu(mu)
@@ -133,9 +132,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
         if requires_update:
             anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latent = W_latents[layer_type]
-            if W_latent.device != x.device:
-                W_latents[layer_type] = W_latents[layer_type].to(x.device)
+            W_latents[layer_type] = W_latents[layer_type].to(x.device)
             W_latent = W_latents[layer_type]
             W_latent.data.add_(local_lr * anti_hebbian_latent)
     
@@ -184,7 +181,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         attn_weights = scores.softmax(dim=-1)  # B, H, T, T
         mu_heads = attn_weights @ V   # B, H, T, D
         
-        dvl_grad=compute_DVL(mu_heads)
+        dvl_grad=compute_DVL(mu_heads, requires_update)
         if dvl_grad is not None:
             dvl_grad = dvl_grad.to(device) 
 
@@ -214,9 +211,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
 
             if requires_update:
                 anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-                W_latent = W_latents[layer_type]
-                if W_latent.device != x.device:
-                    W_latents[layer_type] = W_latents[layer_type].to(x.device)
+                W_latents[layer_type] = W_latents[layer_type].to(x.device)
                 W_latent = W_latents[layer_type]
                 W_latent.add_(local_lr * anti_hebbian_latent)
         

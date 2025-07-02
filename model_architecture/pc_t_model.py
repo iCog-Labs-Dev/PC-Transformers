@@ -24,22 +24,9 @@ class PCTransformer(nn.Module):
         """
         super().__init__()
         self.config = config
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.embedding = Embedding_Layer(config).to(self.device)
-        self.blocks = nn.ModuleList([TransformerBlock(config).to(self.device) for _ in range(config.n_blocks)])
-        self.output = OutputLayer(config).to(self.device)
-
-    def to(self, device=None, **kwargs):
-        """This method overrides the default to ensure all submodules are moved to the same device."""
-        if device is None:
-            return super().to(**kwargs)
-        
-        self.device = torch.device(device)
-        self = super().to(device, **kwargs)
-        for module in self.modules():
-            if hasattr(module, 'device'):
-                module.device = self.device
-        return self
+        self.embedding = Embedding_Layer(config)
+        self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
+        self.output = OutputLayer(config)
 
     def register_all_lateral_weights(self):
         """
@@ -57,7 +44,7 @@ class PCTransformer(nn.Module):
             if hasattr(module, 'W_latents'):
                 for key in module.W_latents:
                     if module.W_latents[key] is not None:
-                        module.W_latents[key] = module.W_latents[key].to(self.device)
+                        module.W_latents[key] = module.W_latents[key].to(next(self.parameters()).device)
 
     def forward(self, target_ids: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
         """
@@ -70,6 +57,14 @@ class PCTransformer(nn.Module):
         Returns:
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
         """
+        for module in self.modules():
+            if hasattr(module, "clear_energy"):
+                module.clear_energy()
+            
+            if hasattr(module, "clear_errors"):
+                module.clear_errors()
+
+        assert input_ids.ndim == 2, "Expected input_ids shape [B, S]"
         B, S = input_ids.shape
         device = input_ids.device
         vocab_size = self.output.config.vocab_size
@@ -202,7 +197,10 @@ class PCTransformer(nn.Module):
 
             # Wait for all concurrent inference steps to complete
             for future in futures:
-                torch.jit.wait(future)
+                try:
+                    torch.jit.wait(future)
+                except Exception as e:
+                    print(f"Error in parallel inference step: {e}")
 
         output_x = self.output.pc_layer.get_x("linear")
         logits = output_x @ self.output.output.weight.T + self.output.output.bias

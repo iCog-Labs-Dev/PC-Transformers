@@ -1,9 +1,11 @@
-import os
 import torch
 import os
+import torch.nn as nn
 import math
 import time
 import torch.nn.functional as F
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
@@ -17,6 +19,11 @@ Usage: python training.py
 This script trains a predictive coding transformer model on a dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
 """
+def setup_ddp():
+    dist.init_process_group(backend="nccl")
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    return local_rank
 
 def train(model, dataloader, tokenizer, global_step, device):
     model.train()
@@ -83,8 +90,9 @@ def train(model, dataloader, tokenizer, global_step, device):
     return avg_energy, avg_perplexity, global_step
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    local_rank = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}")
+    print(f"Using device: {device} (local rank {local_rank})")
 
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
@@ -110,18 +118,12 @@ def main():
         energy_fn_name="scaled_mse",
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
-    model = PCTransformer(config)
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model, device_ids=list(range(torch.cuda.device_count())))
-    
-    model = model.to(device)
+    model = PCTransformer(config).to(device)
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    if hasattr(model, 'module'): 
-        model.module.register_all_lateral_weights()
-    else:
-        model.register_all_lateral_weights()
+    model.module.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders()
+    train_loader, valid_loader, _ = get_loaders(distributed=True)
 
     print("========== Training started ==========") 
     start_time = time.time()
@@ -130,8 +132,14 @@ def main():
     train_energies = []
     val_energies = []
 
+    rank = dist.get_rank() if dist.is_initialized() else 0
     for epoch in range(config.num_epochs):
-        print(f"Epoch {epoch+1}/{config.num_epochs}")
+        if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
+            train_loader.sampler.set_epoch(epoch)
+
+        if rank == 0:
+            print(f"Epoch {epoch+1}/{config.num_epochs}")
+
         model.train()
         train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, global_step, device)
         train_energies.append(train_energy)
@@ -140,46 +148,43 @@ def main():
         val_energy, val_perplexity, global_step = train(model, valid_loader, tokenizer, global_step, device)
         val_energies.append(val_energy)
         
-        print(f"Epoch {epoch+1}/{config.num_epochs} | "
-        f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-        f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
+        if rank == 0:
+            print(f"Epoch {epoch+1}/{config.num_epochs} | "
+            f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
+            f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
 
-
-        if (epoch + 1) % 5 == 0:
-                os.makedirs("checkpoints", exist_ok=True)
+            if (epoch + 1) % 5 == 0:
+                    os.makedirs("checkpoints", exist_ok=True)
+                    checkpoint = {
+                        'epoch': epoch,
+                        'model_state_dict': model.module.state_dict(),
+                        'train_energy': train_energy,
+                        'val_energy': val_energy,
+                        'train_perplexity': train_perplexity,
+                        'val_perplexity': val_perplexity
+                    }
+                    checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
+                    torch.save(checkpoint, checkpoint_path)
+                    print(f"Saved checkpoint to {checkpoint_path}")
                 
-                checkpoint = {
-                    'epoch': epoch,
-                    'model_state_dict': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
-                    'train_energy': train_energy,
-                    'val_energy': val_energy,
-                    'train_perplexity': train_perplexity,
-                    'val_perplexity': val_perplexity
-                }
-                
-                # Save checkpoint
-                checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
-                torch.save(checkpoint, checkpoint_path)
-                print(f"Saved checkpoint to {checkpoint_path}")
-                
-    # Save visualization
-    plot_metrics(train_energies, val_energies)
+    if rank == 0:
+        plot_metrics(train_energies, val_energies)
     
-    # Save final model
-    final_checkpoint = {
-        'epoch': config.num_epochs,
-        'model_state_dict': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
-        'train_energy': train_energy,
-        'val_energy': val_energy,
-        'train_perplexity': train_perplexity,
-        'val_perplexity': val_perplexity
-    }
-    torch.save(final_checkpoint, 'checkpoints/final_model.pt')
+        final_checkpoint = {
+            'epoch': config.num_epochs,
+            'model_state_dict': model.module.state_dict(),
+            'train_energy': train_energy,
+            'val_energy': val_energy,
+            'train_perplexity': train_perplexity,
+            'val_perplexity': val_perplexity
+        }
+        torch.save(final_checkpoint, 'checkpoints/final_model.pt')
     
-    total_time = (time.time() - start_time) / 3600 
-    print(f"\nTraining completed in {total_time:.2f} hours")
-    print("Final model saved to: checkpoints/final_model.pt")
-    print("========== Training completed ==========")
-
+        total_time = (time.time() - start_time) / 3600 
+        print(f"\nTraining completed in {total_time:.2f} hours")
+        print("Final model saved to: checkpoints/final_model.pt")
+        print("========== Training completed ==========")
+    
+    dist.destroy_process_group()
 if __name__ == "__main__":
     main()
