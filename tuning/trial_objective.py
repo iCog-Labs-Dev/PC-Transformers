@@ -6,6 +6,7 @@ from training import train
 from eval import evaluate
 from utils.pc_utils import cleanup_memory
 from model_architecture.pc_t_model import PCTransformer
+from predictive_coding.config import GPTConfig
 from utils.model_utils import reset_pc_modules, load_tokenizer
 from tuning.config import get_dynamic_model_config, update_global_config, normalize_energy
 from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
