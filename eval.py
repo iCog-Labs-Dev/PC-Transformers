@@ -76,17 +76,17 @@ def main():
     vocab_size = tokenizer.get_vocab_size()
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size=256,
-        n_embed=64,
-        dropout=0.1,
-        local_learning_rate= 1e-5,
-        T=20,
+        block_size=80,
+        n_embed=656,
+        dropout= 0.09984621100041206,
+        local_learning_rate= 0.0005567991677869024,
+        T=7,
         is_holding_error=True,
-        num_heads=8,
+        num_heads=16,
         n_blocks=4,
         num_epochs=1,
-        update_bias=True,
-        energy_fn_name="scaled_mse", 
+        update_bias=False,
+        energy_fn_name="mse", 
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
 
