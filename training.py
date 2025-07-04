@@ -116,6 +116,7 @@ def main():
         eos_token_id = tokenizer.eos_token_id
     )
     model = PCTransformer(config).to(device)
+    print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
     model = DDP(model, device_ids=[local_rank], 
                 output_device=local_rank, 
                 find_unused_parameters=True)
