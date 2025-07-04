@@ -76,7 +76,7 @@ if __name__ == "__main__":
         local_rank = -1
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_loader, valid_loader,_ = get_loaders((local_rank >= 0))
+    train_loader, valid_loader,_ = get_loaders(distributed=(local_rank >= 0))
     run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device)
 
     if dist.is_initialized():

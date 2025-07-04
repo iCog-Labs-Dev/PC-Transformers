@@ -36,15 +36,6 @@ def objective(trial, device = None):
     print(f"\nStarting Trial {trial.number}")
     
     try:
-        if "RANK" in os.environ and torch.cuda.is_available():
-            if not dist.is_initialized():
-                dist.init_process_group(backend="gloo")
-            local_rank = int(os.environ["LOCAL_RANK"])
-            device = torch.device(f"cuda:{local_rank}")
-            torch.cuda.set_device(local_rank)
-        else:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
         tokenizer = load_tokenizer()
         vocab_size = len(tokenizer)
 
@@ -67,7 +58,10 @@ def objective(trial, device = None):
                 return float("inf")
             update_global_config(config.__dict__)
 
-        model = PCTransformer(config).to(device)                   
+        model = PCTransformer(config).to(device)  
+        if dist.is_initialized():
+            model = DDP(model, device_ids=[device.index], output_device=device.index)
+                 
         batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
         train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed=dist.is_initialized())
 
