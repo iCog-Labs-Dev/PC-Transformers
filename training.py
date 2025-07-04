@@ -116,7 +116,6 @@ def main():
         eos_token_id = tokenizer.eos_token_id
     )
     model = PCTransformer(config).to(device)
-    print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
     model = DDP(model, device_ids=[local_rank], 
                 output_device=local_rank, 
                 find_unused_parameters=True)
@@ -133,7 +132,8 @@ def main():
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
         print("========== Training started ==========", flush=True) 
-
+        print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
+        
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
