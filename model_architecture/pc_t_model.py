@@ -34,11 +34,11 @@ class PCTransformer(nn.Module):
         This enables lateral (recurrent) connections for local learning in each layer.
         """
         for block in self.blocks:
-            block.attn.pc_qkv.register_lateral("attn", block.attn.q.in_features)
-            block.attn.pc_output.register_lateral("linear", block.attn.output.in_features)
-            block.mlp.pc_layer1.register_lateral("fc1", block.mlp.fc1.in_features)
-            block.mlp.pc_layer2.register_lateral("linear", block.mlp.fc2.in_features)
-        self.output.pc_layer.register_lateral("linear", self.output.output.in_features)
+            block.attn.pc_qkv.register_lateral("attn", block.attn.q.in_features, device=block.attn.q.weight.device)
+            block.attn.pc_output.register_lateral("linear", block.attn.output.in_features, device=block.attn.output.weight.device)
+            block.mlp.pc_layer1.register_lateral("fc1", block.mlp.fc1.in_features, device=block.mlp.fc1.weight.device)
+            block.mlp.pc_layer2.register_lateral("linear", block.mlp.fc2.in_features, device=block.mlp.fc2.weight.device)
+        self.output.pc_layer.register_lateral("linear", self.output.output.in_features, device=self.output.output.weight.device)
 
     def forward(self, target_ids: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
         """
@@ -54,7 +54,7 @@ class PCTransformer(nn.Module):
         B, S = input_ids.shape
         vocab_size = self.output.config.vocab_size
         target_logits = ids_to_one_hot(target_ids, vocab_size)
-        position_ids = torch.arange(S).unsqueeze(0).expand(B, S)
+        position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
         self.embedding.pc_layer.init_x(
             batch_size=B,

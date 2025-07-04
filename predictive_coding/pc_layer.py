@@ -48,16 +48,19 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._errors = []
 
-    def register_lateral(self, layer_type: str, size: int):
+    def register_lateral(self, layer_type: str, size: int, device=None):
         """
         Register a lateral (recurrent) weight matrix for a given layer type.
 
         Args:
             layer_type (str): The type of layer (e.g., 'attn', 'fc1', 'linear').
             size (int): The size of the square lateral weight matrix.
+            device (torch.device, optional): The device to create the weight on.
         """
+        if device is None:
+            device = torch.device('cpu')
         if layer_type not in self.W_latents:
-            W = torch.empty(size, size)
+            W = torch.empty(size, size, device=device)
             nn.init.xavier_uniform_(W)
             self.W_latents[layer_type] = nn.Parameter(W)
 
@@ -169,25 +172,27 @@ class PCLayer(nn.Module):
         """
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            x_word = layer["word"].weight[input_ids] 
-            x_pos = layer["pos"].weight[position_ids] 
+            x_word = layer["word"].weight[input_ids]
+            x_pos = layer["pos"].weight[position_ids]
             self._x_cache["embed"] = (x_word, x_pos)
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
-            H_out = proj_layers["v_proj"].weight.shape[0] 
-            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out)
+            H_out = proj_layers["v_proj"].weight.shape[0]
+            device = proj_layers["v_proj"].weight.device
+            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device=device)
             
             if self.use_lateral:
-                self.register_lateral(layer_type, H_in)
+                self.register_lateral(layer_type, H_in, device=proj_layers["q_proj"].weight.device)
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
-            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim)
+            device = layer.weight.device
+            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device=device)
             H_in = layer.weight.shape[1]
 
             if self.use_lateral:
-                self.register_lateral(layer_type, H_in)
+                self.register_lateral(layer_type, H_in, device=layer.weight.device)
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         """

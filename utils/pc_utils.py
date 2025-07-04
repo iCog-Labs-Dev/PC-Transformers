@@ -35,8 +35,8 @@ def get_head_similarity(mu_heads):
 
     return corr.detach().cpu()
     
-def x_init(batch_size: int, seq_len: int, embedding_size: int) -> torch.Tensor:
-    return torch.randn(batch_size, seq_len, embedding_size)
+def x_init(batch_size: int, seq_len: int, embedding_size: int, device=None) -> torch.Tensor:
+    return torch.randn(batch_size, seq_len, embedding_size, device=device)
 
 def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update, mu_word_cache=None, mu_pos_cache=None):
     """
