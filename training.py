@@ -142,11 +142,11 @@ def main():
             print(f"Epoch {epoch+1}/{config.num_epochs}")
         
         model.train()
-        train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, global_step, device)
+        train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, config, global_step, device)
         train_energies.append(train_energy)
         
         model.eval()
-        val_energy, val_perplexity, global_step = train(model, valid_loader, tokenizer, global_step, device)
+        val_energy, val_perplexity, global_step = train(model, valid_loader, tokenizer, config, global_step, device)
         val_energies.append(val_energy)
 
         if rank == 0:
