@@ -9,3 +9,4 @@ class Config:
     DATA_DIR = os.path.join(BASE_DIR, "Data") 
     TOKENIZER_DIR = os.path.join(BASE_DIR, "tokenizer", "outputs")  
     BATCH_SIZE = 8
+    num_workers = 8

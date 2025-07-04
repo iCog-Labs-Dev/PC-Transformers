@@ -42,20 +42,25 @@ def get_dynamic_model_config(trial, vocab_size):
     )
 
 def update_global_config(config):
-    """Update global GPTConfig to match trial config - CRITICAL for shape consistency"""
-    GPTConfig.num_heads = config.num_heads
-    GPTConfig.n_embed = config.n_embed
-    GPTConfig.block_size = config.block_size
-    GPTConfig.vocab_size = config.vocab_size
-    GPTConfig.dropout = config.dropout
-    GPTConfig.local_learning_rate = config.local_learning_rate
-    GPTConfig.peak_learning_rate = config.peak_learning_rate
-    GPTConfig.warmup_steps = config.warmup_steps
-    GPTConfig.T = config.T
-    GPTConfig.n_blocks = config.n_blocks
-    GPTConfig.update_bias = config.update_bias
-    GPTConfig.use_lateral = config.use_lateral
-    GPTConfig.energy_fn_name = config.energy_fn_name
+    """Update global GPTConfig"""
+    config_keys = [
+        'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
+        'dropout', 'local_learning_rate', 'peak_learning_rate', 'warmup_steps',
+        'update_bias', 'energy_fn_name', 'use_lateral',
+        'T', 'is_holding_error'
+    ]
+    
+    for key in config_keys:
+        try:
+            if isinstance(config, dict):
+                if key in config:
+                    setattr(GPTConfig, key, config[key])
+            elif hasattr(config, key):
+                setattr(GPTConfig, key, getattr(config, key))
+        except Exception as e:
+            logger.warning(f"Failed to update config key '{key}': {e}")
+            continue
+
 
 def normalize_energy(energy_value, energy_fn_name):
     """ Normalize energy values to comparable scales across different energy functions."""
