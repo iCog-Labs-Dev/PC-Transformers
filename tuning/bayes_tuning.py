@@ -68,7 +68,7 @@ if __name__ == "__main__":
 
     if "RANK" in os.environ and torch.cuda.is_available():
         import torch.distributed as dist
-        dist.init_process_group(backend="nccl")
+        dist.init_process_group(backend="gloo")
         local_rank = int(os.environ["LOCAL_RANK"])
         device = torch.device(f"cuda:{local_rank}")
         torch.cuda.set_device(local_rank)
