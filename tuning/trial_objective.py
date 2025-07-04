@@ -39,14 +39,13 @@ def objective(trial, device = None):
         if device is None:
             if "LOCAL_RANK" in os.environ and torch.cuda.is_available():
                 local_rank = int(os.environ["LOCAL_RANK"])
-                torch.cuda.set_device(local_rank)
                 device = torch.device(f"cuda:{local_rank}")
+                torch.cuda.set_device(device)
             else:
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        if device.type == "cuda" and device.index is None:
-            device = torch.device("cuda:0")
-            torch.cuda.set_device(0)
+                if device.type == "cuda" :
+                    torch.cuda.set_device(0)
+                    device = torch.device("cuda:0")
             
         tokenizer = load_tokenizer()
         vocab_size = len(tokenizer)
@@ -72,8 +71,10 @@ def objective(trial, device = None):
 
         model = PCTransformer(config).to(device)  
         if dist.is_initialized():
-            model = DDP(model, device_ids=[device.index], output_device=device.index)
-                 
+            model = DDP(model, 
+                      device_ids=[device.index] if device.type == "cuda" and hasattr(device, 'index') and device.index is not None else None,
+                      output_device=device if device.type == "cuda" else None)     
+        
         batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
         train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed=dist.is_initialized())
 
