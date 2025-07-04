@@ -14,7 +14,7 @@ echo "Downloading dataset..."
 gdown --id "$FILE_ID" -O "$OUTPUT_DIR/$ZIP_NAME"
 
 echo "Extracting files to $OUTPUT_DIR..."
-unzip -o "$OUTPUT_DIR/$ZIP_NAME" -d "$OUTPUT_DIR"
+python3 -c "import zipfile; zipfile.ZipFile('$OUTPUT_DIR/$ZIP_NAME').extractall('$OUTPUT_DIR')"
 
 if [ -d "$OUTPUT_DIR/opwb/opwb" ]; then
     echo "Flattening nested folder structure..."
