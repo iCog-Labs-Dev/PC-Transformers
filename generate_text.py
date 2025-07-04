@@ -1,19 +1,23 @@
 import torch
+import os
 from predictive_coding.config import GPTConfig
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids, compute_text_metrics
 import torch.nn.functional as F
 from Data_preprocessing.dataloader import get_loaders
-
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
 """
 Usage: python generate_text.py
 
 This script generates text using a trained predictive coding transformer model.
 It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
 """
+local_rank = int(os.getenv("LOCAL_RANK", 0))
+device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
-def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
+def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0, device = None):
     model.eval()
-    input_tensor = input_ids.unsqueeze(0)
+    input_tensor = input_ids.unsqueeze(0).to(device)
 
     for _ in range(max_new_tokens):
         if input_tensor.size(1) > config.block_size:
@@ -31,45 +35,47 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0):
                 
     return input_tensor[0] 
 
-def text_generation(model):
+def text_generation(model, config, device = None):
     decoded_preds, decoded_targets = [], []
     num_samples = min(5, input_ids.size(0))
     prompt_len = 5
 
-    _, _, test_loader = get_loaders()
+    _, _, test_loader = get_loaders(distributed=True)
     tokenizer = load_tokenizer()
     pad_token_id = tokenizer.pad_token_id
 
     for batch_idx, batch in enumerate(test_loader):
-        input_ids = batch["input_ids"]
-        target_ids = batch["target_ids"]
-        break 
+        input_ids = batch["input_ids"].to(device) 
 
-    for i in range(num_samples):
-        prompt_ids = input_ids[i][:prompt_len]
-        generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7)
+        for i in range(num_samples):
+            prompt_ids = input_ids[i][:prompt_len]
+            generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7, device = device)
 
-        target_continuation = input_ids[i][prompt_len:]
-        target_continuation = target_continuation[target_continuation != pad_token_id].tolist()
+            target_continuation = input_ids[i][prompt_len:]
+            target_continuation = target_continuation[target_continuation != pad_token_id].tolist()
 
-        generated_continuation = generated_ids[prompt_len:].tolist()
+            generated_continuation = generated_ids[prompt_len:].tolist()
 
-        # Decode all
-        prompt_str = decode_ids(tokenizer, prompt_ids.tolist())
-        target_str = decode_ids(tokenizer, target_continuation, stop_at_eos=True)
-        generated_str = decode_ids(tokenizer, generated_continuation, stop_at_eos=True)
+            # Decode all
+            prompt_str = decode_ids(tokenizer, prompt_ids.tolist())
+            target_str = decode_ids(tokenizer, target_continuation, stop_at_eos=True)
+            generated_str = decode_ids(tokenizer, generated_continuation, stop_at_eos=True)
 
-        decoded_preds.append(generated_str)
-        decoded_targets.append(target_str)
+            decoded_preds.append(generated_str)
+            decoded_targets.append(target_str)
 
-        print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
-        print(f"[PROMPT ]: {prompt_str}")
-        print(f"[TARGET ]: {target_str}")
-        print(f"[PREDICT]: {generated_str}")
-    
+            if local_rank == 0:
+                print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
+                print(f"[PROMPT ]: {prompt_str}")
+                print(f"[TARGET ]: {target_str}")
+                print(f"[PREDICT]: {generated_str}")
+            break
     return decoded_preds, decoded_targets
 
-if __name__ == "__main__":
+def main():
+    dist.init_process_group(backend="nccl")
+    print(f"[Rank {local_rank}] Using device: {device}")
+
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
 
@@ -89,7 +95,18 @@ if __name__ == "__main__":
         eos_token_id = tokenizer.eos_token_id
     )
 
-    model_path = "checkpoints/pc_transformer.pt"
+    model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
-    decoded_preds, decoded_targets = text_generation(model)
-    compute_text_metrics(decoded_preds, decoded_targets)
+    model = model.to(device)
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+
+    if local_rank == 0:
+        decoded_preds, decoded_targets = text_generation(model, config, device)
+        if decoded_preds and decoded_targets and local_rank == 0:
+            compute_text_metrics(decoded_preds, decoded_targets)
+    
+    dist.barrier()
+    dist.destroy_process_group()
+
+if __name__ == "__main__":
+    main()
