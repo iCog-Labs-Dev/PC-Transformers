@@ -36,6 +36,18 @@ def objective(trial, device = None):
     print(f"\nStarting Trial {trial.number}")
     
     try:
+        if device is None:
+            if "LOCAL_RANK" in os.environ and torch.cuda.is_available():
+                local_rank = int(os.environ["LOCAL_RANK"])
+                torch.cuda.set_device(local_rank)
+                device = torch.device(f"cuda:{local_rank}")
+            else:
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        if device.type == "cuda" and device.index is None:
+            device = torch.device("cuda:0")
+            torch.cuda.set_device(0)
+            
         tokenizer = load_tokenizer()
         vocab_size = len(tokenizer)
 

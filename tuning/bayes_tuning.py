@@ -48,7 +48,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
     logger.info(f"Trials Log: {trials_path}")
 
     try:
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=(local_rank == 0))
+        study.optimize(lambda trial: objective(trial, device=device), n_trials=n_trials, show_progress_bar=(local_rank == 0))
         logger.info("Bayesian tuning completed!")
         
         if local_rank == 0 and study.best_trial:
