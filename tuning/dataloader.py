@@ -13,7 +13,7 @@ def get_optimal_data_sizes():
         mem_gb = psutil.virtual_memory().total / (1024**3)
         return (1500, 300) if mem_gb >= 16 else (800, 160)
 
-def create_subset_loaders(batch_size):
+def create_subset_loaders(batch_size, distributed=True):
     """Create appropriately sized data loaders"""
     tokenizer = load_tokenizer()
     pad_token_id = tokenizer.token_to_id("[PAD]")

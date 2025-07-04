@@ -56,8 +56,12 @@ class PCLayer(nn.Module):
             layer_type (str): The type of layer (e.g., 'attn', 'fc1', 'linear').
             size (int): The size of the square lateral weight matrix.
         """
+        if not hasattr(self, 'W_latents'):
+            self.W_latents = {}
+
         if layer_type not in self.W_latents:
-            W = torch.empty(size, size)
+            device = next(self.parameters()).device if list(self.parameters()) else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            W = torch.empty(size, size, device = device)
             nn.init.xavier_uniform_(W)
             self.W_latents[layer_type] = nn.Parameter(W)
 
@@ -154,6 +158,7 @@ class PCLayer(nn.Module):
         layer_type: str = "linear",
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        device: torch.device = None,
     ):
         """
         Initialize the layer's state variables and store them in x_cache.
@@ -167,27 +172,35 @@ class PCLayer(nn.Module):
             input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
             position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
         """
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            x_word = layer["word"].weight[input_ids] 
-            x_pos = layer["pos"].weight[position_ids] 
+            x_word = layer["word"].weight[input_ids]
+            x_pos = layer["pos"].weight[position_ids]
             self._x_cache["embed"] = (x_word, x_pos)
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
             H_out = proj_layers["v_proj"].weight.shape[0] 
-            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out)
-            
+            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
+
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
+                
+                if layer_type in self.W_latents:
+                    self.W_latents[layer_type] = self.W_latents[layer_type].to(device)
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
-            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim)
+            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
             H_in = layer.weight.shape[1]
 
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
+
+                
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         """
