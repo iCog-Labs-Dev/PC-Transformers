@@ -167,6 +167,7 @@ class PCLayer(nn.Module):
         layer_type: str = "linear",
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        device: torch.device = None,
     ):
         """
         Initialize the layer's state variables and store them in x_cache.
