@@ -50,16 +50,16 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
     try:
         study.optimize(lambda trial: objective(trial, device=device), n_trials=n_trials, show_progress_bar=(local_rank == 0))
         logger.info("Bayesian tuning completed!")
-        
-        if local_rank == 0 and study.best_trial:
-            trial = study.best_trial
-            logger.info(f"Best trial: {trial.number}. Best combined energy: {trial.value:.5f}")
-            write_final_results(f"{study_name}_results.txt", trial)
-        return study
     
     except KeyboardInterrupt:
         logger.warning(f"[Rank {local_rank}] Tuning interrupted")
-        return study
+
+    finally:
+        if local_rank == 0 and study.best_trial:
+                trial = study.best_trial
+                logger.info(f"Best trial: {trial.number}. Best combined energy: {trial.value:.5f}")
+                write_final_results(f"tuning/{study_name}_results.txt", trial)
+    return study
 
 if __name__ == "__main__":
     torch.manual_seed(42)
