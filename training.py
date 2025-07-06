@@ -100,7 +100,7 @@ def main():
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size= 448, 
-        peak_learning_rate= 2e-4,
+        peak_learning_rate= 2e-5,
         warmup_steps= 217,
         n_embed=592,
         dropout= 0.24684719512514441,
