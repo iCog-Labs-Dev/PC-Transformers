@@ -6,7 +6,7 @@ try:
 except ImportError:
     FLASH_AVAILABLE = False
     import warnings
-    warnings.warn("FlashAttention is not installed. Falling back to standard attention.")
+    warnings.warn("FlashAttention is not installed. Falling back to standard attention.")   
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
