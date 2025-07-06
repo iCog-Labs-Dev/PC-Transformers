@@ -109,7 +109,7 @@ def main():
         is_holding_error = True,
         num_heads=16,
         n_blocks=6,
-        num_epochs= 50,
+        num_epochs= 30,
         update_bias= True,
         use_lateral = True,
         energy_fn_name="scaled_mse",
