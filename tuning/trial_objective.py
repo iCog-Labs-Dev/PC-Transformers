@@ -36,16 +36,14 @@ def objective(trial, device = None):
     print(f"\nStarting Trial {trial.number}")
     
     try:
-        if device is None:
-            if "LOCAL_RANK" in os.environ and torch.cuda.is_available():
-                local_rank = int(os.environ["LOCAL_RANK"])
-                device = torch.device(f"cuda:{local_rank}")
-                torch.cuda.set_device(device)
-            else:
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                if device.type == "cuda" :
-                    torch.cuda.set_device(0)
-                    device = torch.device("cuda:0")
+        if "RANK" in os.environ and torch.cuda.is_available():
+            if not dist.is_initialized():
+                dist.init_process_group(backend="gloo")
+            local_rank = int(os.environ["LOCAL_RANK"])
+            device = torch.device(f"cuda:{local_rank}")
+            torch.cuda.set_device(local_rank)
+        else:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             
         tokenizer = load_tokenizer()
         vocab_size = len(tokenizer)
@@ -71,10 +69,8 @@ def objective(trial, device = None):
 
         model = PCTransformer(config).to(device)  
         if dist.is_initialized():
-            model = DDP(model, 
-                      device_ids=[device.index] if device.type == "cuda" and hasattr(device, 'index') and device.index is not None else None,
-                      output_device=device if device.type == "cuda" else None)     
-        
+            model = DDP(model, device_ids=[device.index], output_device=device.index)
+
         batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
         train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed=dist.is_initialized())
 
@@ -99,8 +95,8 @@ def objective(trial, device = None):
         trial.set_user_attr("combined_energy", combined_energy)
         trial.set_user_attr("trial_time", trial_time)
 
-        log_trial_to_summary("bayesian_tuning_summary.txt", trial)
-        log_trial_to_detailed_log("bayesian_tuning_trials.txt", trial, config, trial_time, val_loss, avg_energy, normalized_energy, combined_energy)
+        log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
+        log_trial_to_detailed_log("tuning/bayesian_tuning_trials.txt", trial, config, trial_time, val_loss, avg_energy, normalized_energy, combined_energy)
 
         return combined_energy
     
@@ -112,7 +108,7 @@ def objective(trial, device = None):
         trial.set_user_attr("combined_energy", "N/A")
         trial.set_user_attr("trial_time", (time.time() - start_time) / 3600)
 
-        log_trial_to_summary("bayesian_tuning_summary.txt", trial)
+        log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
         return float("inf")
     
     finally:
