@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 """
 predictive_coding.config
@@ -17,6 +18,8 @@ class GPTConfig:
         n_embed (int): Embedding dimension size.
         dropout (float): Dropout probability.
         local_learning_rate (float): Local learning rate for predictive coding layers.
+        peak_learning_rate (float): Peak learning rate for learning rate scheduling.
+        warmup_steps (int): Number of warmup steps for learning rate scheduling.
         T (int): Number of inference steps for predictive coding.
         is_holding_error (bool): Whether to accumulate and store errors.
         update_bias (bool): Whether to update bias terms during learning.
@@ -30,16 +33,19 @@ class GPTConfig:
     """
     vocab_size: int
     block_size: int
+    local_learning_rate: float
+    peak_learning_rate: Optional[float] = None
+    warmup_steps: Optional[int] = None
     peak_learning_rate: float = 1.29e-04
     warmup_steps: int= 58
     la: float=0.5
-    n_embed: int =64
+    n_embed: int =208
     dropout: float = 0.1
     local_learning_rate: float = 0
     T: int = 10
     is_holding_error: bool = False
     update_bias: bool = True
-    num_heads: int = 2
+    num_heads: int = 16
     n_blocks: int = 4
     batch_size: int = 8
     num_epochs: int = 5

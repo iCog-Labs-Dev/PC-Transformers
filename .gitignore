@@ -11,3 +11,4 @@ data_preprocessing/
 .venv/
 *.egg-info/
 checkpoints/
+Data_preprocessing/Data/opwb/

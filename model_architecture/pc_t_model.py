@@ -40,21 +40,43 @@ class PCTransformer(nn.Module):
             block.mlp.pc_layer2.register_lateral("linear", block.mlp.fc2.in_features)
         self.output.pc_layer.register_lateral("linear", self.output.output.in_features)
 
-    def forward(self, target_ids: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
+        for module in self.modules():
+            if hasattr(module, 'W_latents'):
+                for key in module.W_latents:
+                    if module.W_latents[key] is not None:
+                        module.W_latents[key] = module.W_latents[key].to(next(self.parameters()).device)
+
+    def forward(self, target_ids, input_ids):
         """
-        Forward pass for the PCTransformer.
+        Forward pass of the PCTransformer model.
 
         Args:
-            target_ids (torch.Tensor): Tensor of shape (B, T), containing ground truth token IDs.
-            input_ids (torch.Tensor): Tensor of shape (B, T), containing input token IDs.
+            target_ids (torch.Tensor): Target token IDs of shape (B, T).
+            input_ids (torch.Tensor): Input token IDs of shape (B, T).
 
         Returns:
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
         """
+        for module in self.modules():
+            if hasattr(module, "clear_energy"):
+                module.clear_energy()
+            
+            if hasattr(module, "clear_errors"):
+                module.clear_errors()
+
         B, S = input_ids.shape
+        device = input_ids.device
         vocab_size = self.output.config.vocab_size
-        target_logits = ids_to_one_hot(target_ids, vocab_size)
-        position_ids = torch.arange(S).unsqueeze(0).expand(B, S)
+        
+        # Clip input_ids and target_ids to valid range before using them
+        if input_ids.max() >= vocab_size:
+            input_ids = torch.clamp(input_ids, max=vocab_size-1)
+        
+        if target_ids.max() >= vocab_size:
+            target_ids = torch.clamp(target_ids, max=vocab_size-1)
+        
+        target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
+        position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
         self.embedding.pc_layer.init_x(
             batch_size=B,
@@ -62,7 +84,8 @@ class PCTransformer(nn.Module):
             layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
             layer_type="embed",
             input_ids=input_ids,
-            position_ids=position_ids
+            position_ids=position_ids,
+            device=device
         )
 
         for block in self.blocks:
@@ -70,31 +93,36 @@ class PCTransformer(nn.Module):
                 batch_size=B,
                 seq_len=S,
                 proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
-                layer_type="attn"
+                layer_type="attn",
+                device=device
             )
             block.attn.pc_output.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.attn.output,
-                layer_type="linear"
+                layer_type="linear",
+                device=device
             )
             block.mlp.pc_layer1.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.mlp.fc1,
-                layer_type="fc1"
+                layer_type="fc1",
+                device=device
             )
             block.mlp.pc_layer2.init_x(
                 batch_size=B,
                 seq_len=S,
                 layer=block.mlp.fc2,
-                layer_type="linear"
+                layer_type="linear",
+                device=device
             )
         self.output.pc_layer.init_x(
             batch_size=B,
             seq_len=S,
             layer=self.output.output,
-            layer_type="linear"
+            layer_type="linear",
+            device=device
         )
 
         for t in range(self.config.T):
@@ -176,7 +204,10 @@ class PCTransformer(nn.Module):
 
             # Wait for all concurrent inference steps to complete
             for future in futures:
-                torch.jit.wait(future)
+                try:
+                    torch.jit.wait(future)
+                except Exception as e:
+                    print(f"Error in parallel inference step: {e}")
 
         output_x = self.output.pc_layer.get_x("linear")
         logits = output_x @ self.output.output.weight.T + self.output.output.bias
