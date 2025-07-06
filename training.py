@@ -79,7 +79,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         batch_count += 1
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         
-        if dist.get_rank() == 0 and (batch_idx + 1) % 100 == 0:
+        if dist.get_rank() == 0 and (batch_idx + 1) % 50 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
