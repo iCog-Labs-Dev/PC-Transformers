@@ -91,8 +91,8 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
 def main():
     local_rank = setup_ddp()
-    # device = torch.device(f"cuda:{local_rank}")
-    # print(f"Using device: {device} (local rank {local_rank})")
+    device = torch.device(f"cuda:{local_rank}")
+    print(f"Using device: {device} (local rank {local_rank})")
 
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
