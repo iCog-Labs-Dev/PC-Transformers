@@ -186,7 +186,8 @@ class PCTransformer(nn.Module):
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=self.training
+                    requires_update=self.training,
+                    flash= getattr(self.config, 'use_flash_attention', False)
                 ))
 
 
