@@ -3,8 +3,8 @@ from predictive_coding.config import GPTConfig
 
 logger = logging.getLogger(__name__)
 
-def get_dynamic_model_config(trial, vocab_size, flash=False):
-    """Get model configuration with dynamic parameter combinations, including flash attention flag."""
+def get_dynamic_model_config(trial, vocab_size):
+    """Get model configuration with dynamic parameter combinations"""
     n_embed = trial.suggest_int("n_embed", 64, 768, step=16)
 
     valid_heads = [h for h in range(4, min(16, n_embed // 12) + 1) if n_embed % h == 0 and 12 <= n_embed // h <= 128]
@@ -38,8 +38,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         num_epochs=3,
         update_bias=update_bias,
         use_lateral=True,
-        energy_fn_name=energy_fn_name,
-        use_flash_attention=flash
+        energy_fn_name=energy_fn_name
     )
 
 def update_global_config(config):
