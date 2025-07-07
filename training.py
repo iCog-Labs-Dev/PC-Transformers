@@ -34,6 +34,9 @@ def train(model, dataloader, tokenizer, global_step, device):
         target_ids = batch["target_ids"].to(device)
         total_tokens += (target_ids != pad_token_id).sum().item()
 
+        if dist.get_rank() == 0:
+            print(f"Total tokens processed this epoch: {total_tokens}")
+
         if global_step < GPTConfig.warmup_steps:
             lr = GPTConfig.local_learning_rate + global_step / GPTConfig.warmup_steps * (
                 GPTConfig.peak_learning_rate - GPTConfig.local_learning_rate)
@@ -80,9 +83,6 @@ def train(model, dataloader, tokenizer, global_step, device):
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
-    
-    if dist.get_rank() == 0:
-        print(f"Total tokens processed this epoch: {total_tokens}")
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
