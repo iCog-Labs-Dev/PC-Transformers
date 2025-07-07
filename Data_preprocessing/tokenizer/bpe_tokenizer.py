@@ -73,6 +73,9 @@ class BPETokenizer:
             print(f"Tokenized IDs already exist for {subset_name} at {output_path}, skipping.")
             return
 
+        total_tokens = sum(len(seq) for seq in tokenized)
+        print(f"Total tokens in {subset_name}: {total_tokens}")
+
         with open(output_path, "wb") as f:
             pickle.dump(tokenized, f)
 
