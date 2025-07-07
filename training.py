@@ -79,8 +79,8 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         batch_count += 1
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         
-        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f} | LR: {lr:.6f}", flush=True)
+        if dist.get_rank() == 0 and (batch_idx + 1) % 50 == 0:
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
         reset_pc_modules(model)
 
@@ -100,17 +100,17 @@ def main():
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size= 448, 
-        peak_learning_rate= 0.0011518645667816644,
+        peak_learning_rate= 2e-5,
         warmup_steps= 217,
         n_embed=592,
         dropout= 0.24684719512514441,
         local_learning_rate= 0.0,
-        T= 4,
+        T= 10,
         is_holding_error = True,
         num_heads=16,
-        n_blocks=3,
-        num_epochs= 50,
-        update_bias= False,
+        n_blocks=6,
+        num_epochs= 20,
+        update_bias= True,
         use_lateral = True,
         energy_fn_name="scaled_mse",
         eos_token_id = tokenizer.eos_token_id
