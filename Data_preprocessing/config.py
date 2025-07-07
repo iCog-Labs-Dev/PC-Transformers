@@ -10,5 +10,5 @@ class Config:
     tokenizer_dir = os.path.join(base_dir, "tokenizer", "outputs")  
    
     # Training
-    batch_size = 8
+    batch_size = 32
     num_workers = 8
