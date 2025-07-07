@@ -128,7 +128,8 @@ def main():
 
     if rank == 0:
         print("========== Training started ==========") 
-
+        print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
+        
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
