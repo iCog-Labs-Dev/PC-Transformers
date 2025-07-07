@@ -44,7 +44,7 @@ def apply_standard_attention(q, k, v, mask=True):
     """
     with autocast(device_type=device, dtype=torch.float16):
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (q.size(-1) ** 0.5)
-        if mask is not None:
+        if mask:
             attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
         attn_weights = torch.softmax(attn_scores, dim=-1)
         attn_output = torch.matmul(attn_weights, v)
