@@ -33,7 +33,7 @@ def apply_flash_attention(q, k, v, mask=None):
     # Output: [B, T, num_heads, head_dim] -> [B, num_heads, T, head_dim]
     return attn_out.permute(0, 2, 1, 3).contiguous()
 
-def apply_standard_attention(q, k, v, mask=None):
+def apply_standard_attention(q, k, v, mask=True):
     """
     Standard scaled dot-product attention with masking and mixed precision.
     Args:
