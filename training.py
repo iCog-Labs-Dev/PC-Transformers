@@ -22,6 +22,7 @@ def setup_ddp():
 
 def train(model, dataloader, tokenizer, global_step, device):
     model.train()
+    total_tokens = 0
     total_energy = 0.0
     total_ce_loss = 0.0
     batch_count = 0
@@ -31,7 +32,8 @@ def train(model, dataloader, tokenizer, global_step, device):
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
-        
+        total_tokens += (target_ids != pad_token_id).sum().item()
+
         if global_step < GPTConfig.warmup_steps:
             lr = GPTConfig.local_learning_rate + global_step / GPTConfig.warmup_steps * (
                 GPTConfig.peak_learning_rate - GPTConfig.local_learning_rate)
@@ -78,6 +80,9 @@ def train(model, dataloader, tokenizer, global_step, device):
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
+    
+    if dist.get_rank() == 0:
+        print(f"Total tokens processed this epoch: {total_tokens}")
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
@@ -129,7 +134,7 @@ def main():
     if rank == 0:
         print("========== Training started ==========") 
         print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
-        
+
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
