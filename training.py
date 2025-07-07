@@ -22,7 +22,6 @@ def setup_ddp():
 
 def train(model, dataloader, tokenizer, global_step, device):
     model.train()
-    total_tokens = 0
     total_energy = 0.0
     total_ce_loss = 0.0
     batch_count = 0
@@ -32,10 +31,6 @@ def train(model, dataloader, tokenizer, global_step, device):
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
-        total_tokens += (target_ids != pad_token_id).sum().item()
-
-        if dist.get_rank() == 0:
-            print(f"Total tokens processed this epoch: {total_tokens}")
 
         if global_step < GPTConfig.warmup_steps:
             lr = GPTConfig.local_learning_rate + global_step / GPTConfig.warmup_steps * (
