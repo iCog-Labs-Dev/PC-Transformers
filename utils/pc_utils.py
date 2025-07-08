@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-import gc
 from predictive_coding.config import GPTConfig
+from typing import Tuple
 
 def compute_DVL(attn_v, requires_update):
     B, H, T, D= attn_v.shape
@@ -303,10 +303,3 @@ def ids_to_one_hot(input_ids, vocab_size):
     """input_id from [B, S] to [B, S, V]"""
     device = input_ids.device
     return F.one_hot(input_ids, num_classes=vocab_size).float().to(device)
-
-def cleanup_memory():
-    """Comprehensive memory cleanup"""
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
