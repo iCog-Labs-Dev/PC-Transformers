@@ -7,7 +7,7 @@ import optuna
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from Data_preprocessing.dataloader import get_loaders
+from utils.device_utils import setup_device
 from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
@@ -22,18 +22,22 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
     if local_rank == 0:
-        _ = optuna.create_study(
-            direction='minimize',
-            study_name=study_name,
-            storage=storage_url,
-            load_if_exists=True,
-            sampler=optuna.samplers.TPESampler(seed=42),
-            pruner=optuna.pruners.MedianPruner(
-                n_startup_trials=5,
-                n_warmup_steps=3,
-                interval_steps=1
+        try:
+            _ = optuna.create_study(
+                direction='minimize',
+                study_name=study_name,
+                storage=storage_url,
+                load_if_exists=True,
+                sampler=optuna.samplers.TPESampler(seed=42),
+                pruner=optuna.pruners.MedianPruner(
+                    n_startup_trials=5,
+                    n_warmup_steps=3,
+                    interval_steps=1
+                )
             )
-        )
+        except Exception as e:
+            logger.warning(f"Study creation skipped because the file already exists: {e}")
+            
     if dist.is_initialized():
         dist.barrier()
         
@@ -48,15 +52,18 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
     logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
 
     try:
-        study.optimize(lambda trial: objective(trial, device), n_trials=n_trials, show_progress_bar=(local_rank == 0))
-        logger.info(f"[Rank {local_rank}] Tuning completed.")
-        
-        if local_rank == 0 and study.best_trial:
+        if local_rank == 0:
+            study.optimize(lambda trial: objective(trial, device), n_trials=n_trials, show_progress_bar= True)
+            logger.info(f"[Rank {local_rank}] Tuning completed.")
+            
+        if study.best_trial:
             trial = study.best_trial
             logger.info(f"Best trial: {trial.number}. Best value: {trial.value:.5f}")
             write_final_results(f"tuning/{study_name}_results.txt", trial)
+        else:
+            dist.barrier()   
         return study
-    
+     
     except KeyboardInterrupt:
         logger.warning(f"[Rank {local_rank}] Tuning interrupted")
         return study
@@ -66,18 +73,12 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
     
-    if "RANK" in os.environ and torch.cuda.is_available():
-        import torch.distributed as dist
+    local_rank, device, use_ddp = setup_device()
+    
+    if use_ddp:
         dist.init_process_group(backend="nccl")
-        local_rank = int(os.environ["LOCAL_RANK"])
-        device = torch.device(f"cuda:{local_rank}")
-        torch.cuda.set_device(local_rank)
-    else:
-        local_rank = -1
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_loader, valid_loader,_ = get_loaders((local_rank >= 0))
     run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device)
 
-    if dist.is_initialized():
+    if use_ddp:
         dist.destroy_process_group()

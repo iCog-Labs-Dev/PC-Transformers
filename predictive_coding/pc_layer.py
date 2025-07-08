@@ -173,8 +173,8 @@ class PCLayer(nn.Module):
             position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
         """
         if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+            raise ValueError("Device must be explicitly provided to init_x().")
+        
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
             x_word = layer["word"].weight[input_ids]
