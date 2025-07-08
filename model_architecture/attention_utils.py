@@ -33,7 +33,7 @@ def apply_flash_attention(q, k, v, mask=None):
     # Output: [B, T, num_heads, head_dim] -> [B, num_heads, T, head_dim]
     return attn_out.permute(0, 2, 1, 3).contiguous()
 
-def apply_standard_attention(q, k, v, mask=True):
+def apply_standard_attention(q, k, v, mask=None):
     """
     Standard scaled dot-product attention with masking and mixed precision.
     Args:
@@ -44,7 +44,7 @@ def apply_standard_attention(q, k, v, mask=True):
     """
     with autocast(device_type=device, dtype=torch.float16):
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (q.size(-1) ** 0.5)
-        if mask:
+        if mask is not None:
             attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
         attn_weights = torch.softmax(attn_scores, dim=-1)
         attn_output = torch.matmul(attn_weights, v)
