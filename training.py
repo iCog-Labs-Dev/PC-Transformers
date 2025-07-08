@@ -11,14 +11,10 @@ from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
+from utils.device_utils import setup_device
 from visualization import plot_metrics
 
 """Usage: torchrun --nproc-per-node=2 training.py"""
-def setup_ddp():
-    dist.init_process_group(backend="nccl")
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    return local_rank
 
 def train(model, dataloader, tokenizer, global_step, device):
     model.train()
@@ -74,7 +70,7 @@ def train(model, dataloader, tokenizer, global_step, device):
         batch_count += 1
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         
-        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
+        if dist.is_initialized() and dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
@@ -85,8 +81,7 @@ def train(model, dataloader, tokenizer, global_step, device):
     return avg_energy, avg_perplexity, global_step
 
 def main():
-    local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}")
+    local_rank, device, use_ddp = setup_device()
     print(f"Using device: {device} (local rank {local_rank})")
 
     tokenizer = load_tokenizer()
@@ -111,13 +106,14 @@ def main():
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
     model = PCTransformer(config).to(device)
-    model = DDP(model, device_ids=[local_rank], 
-                output_device=local_rank, 
-                find_unused_parameters=True)
+    if use_ddp:
+        model = DDP(model, device_ids=[local_rank], 
+                    output_device=local_rank, 
+                    find_unused_parameters=True)
 
-    model.module.register_all_lateral_weights()
+        model.module.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders(distributed=True)
+    train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
     
     start_time = time.time()
     global_step = 0
@@ -182,6 +178,7 @@ def main():
         print("Final model saved to: checkpoints/final_model.pt")
         print("========== Training completed ==========")
     
-    dist.destroy_process_group()
+    if use_ddp:
+        dist.destroy_process_group()
 if __name__ == "__main__":
     main()
