@@ -11,6 +11,7 @@ from Data_preprocessing.dataloader import get_loaders
 from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
+import argparse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -18,10 +19,10 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 """Usage:  python bayes_tuning.py """
 
-def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None):
+def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False):
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
-    if local_rank == 0:
+    if local_rank == 0 or local_rank == -1:
         _ = optuna.create_study(
             direction='minimize',
             study_name=study_name,
@@ -48,7 +49,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
     logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
 
     try:
-        study.optimize(lambda trial: objective(trial, device), n_trials=n_trials, show_progress_bar=(local_rank == 0))
+        study.optimize(lambda trial: objective(trial, device, flash), n_trials=n_trials, show_progress_bar=(local_rank == 0))
         logger.info(f"[Rank {local_rank}] Bayesian tuning completed!")
     
         if local_rank == 0 and study.best_trial:
@@ -62,10 +63,14 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         return study
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Bayesian Hyperparameter Tuning with Predictive Coding Transformer")
+    parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
+    args = parser.parse_args()
+    
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
-
+        
     if "RANK" in os.environ and torch.cuda.is_available():
         import torch.distributed as dist
         dist.init_process_group(backend="nccl")
@@ -76,8 +81,11 @@ if __name__ == "__main__":
         local_rank = -1
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Set config flag for FlashAttention
+    use_flash_attention = args.flash
+    
     train_loader, valid_loader,_ = get_loaders((local_rank >= 0))
-    run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device)
+    run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=use_flash_attention)
 
     if dist.is_initialized():
         dist.destroy_process_group()

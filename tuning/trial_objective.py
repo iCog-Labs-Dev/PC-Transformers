@@ -28,7 +28,7 @@ def broadcast_config(config_dict, device):
     dist.broadcast(obj_tensor, src=0)
     return pickle.loads(bytes(obj_tensor.tolist()))
 
-def objective(trial, device = None):
+def objective(trial, device = None, flash=False):
     """Bayesian Objective function"""
     start_time = time.time()
     model = None
@@ -50,7 +50,7 @@ def objective(trial, device = None):
 
         if dist.is_initialized():
             if dist.get_rank() == 0:
-                config = get_dynamic_model_config(trial, vocab_size)
+                config = get_dynamic_model_config(trial, vocab_size, flash=flash)
                 if config is None:
                     return float("inf")
                 config_dict = config.__dict__
@@ -62,7 +62,7 @@ def objective(trial, device = None):
             update_global_config(config.__dict__)
         
         else:
-            config = get_dynamic_model_config(trial, vocab_size)
+            config = get_dynamic_model_config(trial, vocab_size, flash=flash)
             if config is None:
                 return float("inf")
             update_global_config(config.__dict__)
