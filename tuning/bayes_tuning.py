@@ -56,12 +56,14 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
             study.optimize(lambda trial: objective(trial, device), n_trials=n_trials, show_progress_bar= True)
             logger.info(f"[Rank {local_rank}] Tuning completed.")
             
-        if study.best_trial:
-            trial = study.best_trial
-            logger.info(f"Best trial: {trial.number}. Best value: {trial.value:.5f}")
-            write_final_results(f"tuning/{study_name}_results.txt", trial)
-        else:
-            dist.barrier()   
+            if len(study.trials) > 0:
+                trial = study.best_trial
+                logger.info(f"Best trial: {trial.number}. Best value: {trial.value:.5f}")
+                write_final_results(f"tuning/{study_name}_results.txt", trial)
+            else:
+                logger.warning("[Rank 0] No completed trials to report.")
+            
+        dist.barrier()   
         return study
      
     except KeyboardInterrupt:
