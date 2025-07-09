@@ -17,16 +17,22 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
-    obj_bytes = pickle.dumps(config_dict)
-    print(f"[Rank {dist.get_rank()}] Broadcasting config of size {len(obj_bytes)} bytes") 
-    obj_tensor = torch.frombuffer(obj_bytes, dtype=torch.uint8).to(device)
-    length = torch.tensor([len(obj_tensor)], device=device)
+    if dist.get_rank() == 0:
+        obj_bytes = pickle.dumps(config_dict)
+        print(f"[Rank {dist.get_rank()}] Broadcasting config of size {len(obj_bytes)} bytes")
+        length = torch.tensor([len(obj_bytes)], device=device)
+    else:
+        length = torch.tensor([0], device=device)
 
     dist.broadcast(length, src=0)
+
     if dist.get_rank() != 0:
         obj_tensor = torch.empty(length.item(), dtype=torch.uint8, device=device)
+    else:
+        obj_tensor = torch.tensor(list(obj_bytes), dtype=torch.uint8, device=device)
 
     dist.broadcast(obj_tensor, src=0)
+    
     return pickle.loads(bytes(obj_tensor.tolist()))
 
 def objective(trial, device = None):
