@@ -10,19 +10,9 @@ import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
+from utils.device_utils import setup_ddp
 
 """Usage: python eval.py"""
-
-def setup_ddp():
-    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
-        dist.init_process_group(backend=backend)
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        if torch.cuda.is_available():
-            torch.cuda.set_device(local_rank)
-        return local_rank, True
-    else:
-        return 0, False
 
 local_rank = 0
 device = torch.device("cpu")
