@@ -19,7 +19,7 @@ def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
     obj_bytes = pickle.dumps(config_dict)
     print(f"[Rank {dist.get_rank()}] Broadcasting config of size {len(obj_bytes)} bytes") 
-    obj_tensor = torch.tensor(list(obj_bytes), dtype=torch.uint8, device=device)
+    obj_tensor = torch.frombuffer(obj_bytes, dtype=torch.uint8).to(device)
     length = torch.tensor([len(obj_tensor)], device=device)
 
     dist.broadcast(length, src=0)
