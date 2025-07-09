@@ -36,12 +36,9 @@ class GPTConfig:
     local_learning_rate: float
     peak_learning_rate: Optional[float] = None
     warmup_steps: Optional[int] = None
-    peak_learning_rate: float = 1.29e-04
-    warmup_steps: int= 58
     la: float=0.5
     n_embed: int =208
     dropout: float = 0.1
-    local_learning_rate: float = 0
     T: int = 10
     is_holding_error: bool = False
     update_bias: bool = True
