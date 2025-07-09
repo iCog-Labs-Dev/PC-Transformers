@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from typing import Tuple
 import gc
-from predictive_coding.config import GPTConfig
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 
 def compute_DVL(attn_v, requires_update):
@@ -41,6 +41,36 @@ def get_head_similarity(mu_heads):
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     return torch.randn(batch_size, seq_len, embedding_size, device = device)
+
+def compute_error_from_energy(mu: torch.Tensor, target: torch.Tensor, energy_fn_name: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    if energy_fn_name == "mse":
+        error = target - mu
+        energy = 0.5 * (error ** 2).mean()
+
+    elif energy_fn_name == "scaled_mse":
+        scale = 1.0 / (target.var(dim=-1, keepdim=True) + 1e-5)
+        error = scale * (target - mu)
+        energy = 0.5 * (scale * error ** 2).mean()
+
+    elif energy_fn_name == "l1":
+        error = torch.sign(target - mu)
+        energy = error.abs().mean()
+
+    elif energy_fn_name == "cosine":
+        mu_norm = mu / (mu.norm(dim=-1, keepdim=True) + 1e-8)
+        target_norm = target / (target.norm(dim=-1, keepdim=True) + 1e-8)
+        error = target_norm - mu_norm
+        energy = (1 - F.cosine_similarity(mu, target, dim=-1)).mean()
+
+    elif energy_fn_name == "kld":
+        mu_soft = F.softmax(mu, dim=-1)
+        target_soft = F.softmax(target, dim=-1)
+        error = target_soft - mu_soft
+        energy = F.kl_div(mu_soft.log(), target_soft, reduction="batchmean")
+    else:
+        raise ValueError(f"Unsupported energy function: {energy_fn_name}")
+    
+    return error, energy
 
 def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update, mu_word_cache=None, mu_pos_cache=None):
     """
@@ -88,7 +118,7 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
         return mu, mu_word, mu_pos
 
-    error = target - mu
+    error, _ = compute_error_from_energy(mu, target, energy_fn_name)
     update = torch.clamp(error, -clamp_value, clamp_value)
     if requires_update: 
         with torch.no_grad():
@@ -134,7 +164,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     if layer_type == "fc1":
         mu = F.gelu(mu)
 
-    error = target - mu
+    error, _ = compute_error_from_energy(mu, target, energy_fn_name)
     if layer.weight.shape[0] != layer.weight.shape[1]:
         error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
     else:
@@ -199,7 +229,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
-        error = target - mu  # B, T, D
+        error, _ = compute_error_from_energy(mu, target, energy_fn_name)
         if dvl_grad is not None:
             B, T, H, D = dvl_grad.shape
             dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
@@ -238,33 +268,6 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
         return x, mu
-    
-ENERGY_FUNCTIONS = {
-    "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,
-    "mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1),
-    "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
-    "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
-    "kld": lambda mu, x: torch.clamp(F.kl_div(
-        mu.log_softmax(dim=-1),
-        x.softmax(dim=-1),
-        reduction='batchmean'
-    ), min=0.0, max=100.0)
-}
-
-def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
-    """
-    Compute the energy (error) between predicted and target activity using the specified function.
-
-    Args:
-        mu (torch.Tensor): Predicted activity.
-        x (torch.Tensor): Target activity.
-        energy_fn_name (str): Name of energy function ('scaled_mse', 'mse', 'l1', 'cosine', 'kld').
-    Returns:
-        torch.Tensor: Computed energy value.
-    """
-    if energy_fn_name not in ENERGY_FUNCTIONS:
-        raise ValueError(f"Unknown energy function: {energy_fn_name}. Choose from {list(ENERGY_FUNCTIONS.keys())}")
-    return ENERGY_FUNCTIONS[energy_fn_name](mu, x)
 
 def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error = False):
     """
@@ -285,7 +288,9 @@ def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_er
     target = target.to(device)
     error = error.to(device)
 
-    energy = energy_fn(mu, target,energy_fn_name).mean().item() if is_holding_error else None
+    _, energy = compute_error_from_energy(mu, target, energy_fn_name)
+    energy = energy.item() if is_holding_error else None
+    
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     
