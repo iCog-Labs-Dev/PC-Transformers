@@ -12,8 +12,14 @@ Usage: python generate_text.py
 This script generates text using a trained predictive coding transformer model.
 It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
 """
-local_rank = int(os.getenv("LOCAL_RANK", 0))
-device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+
+def get_device_and_rank():
+    if torch.cuda.is_available():
+        local_rank = int(os.getenv("LOCAL_RANK", 0))
+        device = torch.device(f"cuda:{local_rank}")
+        return device, local_rank
+    else:
+        return torch.device("cpu"), 0
 
 def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0, device = None):
     model.eval()
@@ -37,7 +43,6 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0, 
 
 def text_generation(model, config, device = None):
     decoded_preds, decoded_targets = [], []
-    num_samples = min(5, input_ids.size(0))
     prompt_len = 5
 
     _, _, test_loader = get_loaders(distributed=True)
@@ -46,6 +51,7 @@ def text_generation(model, config, device = None):
 
     for batch_idx, batch in enumerate(test_loader):
         input_ids = batch["input_ids"].to(device) 
+        num_samples = min(5, input_ids.size(0))
 
         for i in range(num_samples):
             prompt_ids = input_ids[i][:prompt_len]
@@ -73,8 +79,14 @@ def text_generation(model, config, device = None):
     return decoded_preds, decoded_targets
 
 def main():
-    dist.init_process_group(backend="nccl")
-    print(f"[Rank {local_rank}] Using device: {device}")
+    device, local_rank = get_device_and_rank()
+    use_ddp = torch.cuda.is_available() and "RANK" in os.environ and "WORLD_SIZE" in os.environ
+
+    if use_ddp:
+        dist.init_process_group(backend="nccl")
+        print(f"[Rank {local_rank}] Using device: {device} (DDP enabled)")
+    else:
+        print(f"[CPU/SINGLE GPU] Using device: {device} (DDP disabled)")
 
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
@@ -98,15 +110,17 @@ def main():
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     model = model.to(device)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    if use_ddp:
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    if local_rank == 0:
+    if (not use_ddp) or (local_rank == 0):
         decoded_preds, decoded_targets = text_generation(model, config, device)
-        if decoded_preds and decoded_targets and local_rank == 0:
+        if decoded_preds and decoded_targets and ((not use_ddp) or (local_rank == 0)):
             compute_text_metrics(decoded_preds, decoded_targets)
     
-    dist.barrier()
-    dist.destroy_process_group()
+    if use_ddp:
+        dist.barrier()
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()

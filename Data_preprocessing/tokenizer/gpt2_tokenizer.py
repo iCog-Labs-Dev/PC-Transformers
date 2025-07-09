@@ -68,14 +68,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
     args = parser.parse_args()
-
-    # Set dataset in config
-    from Data_preprocessing.config import Config
-    Config.DATASET_NAME = args.dataset
-    print(f"Using dataset: {Config.DATASET_NAME}")
+    print(f"Using dataset: {args.dataset}")
 
     print("Starting tokenizer script...")  
-    tokenizer_wrapper = GPT2TokenizerWrapper()  
+    tokenizer_wrapper = GPT2TokenizerWrapper(args.dataset)  
     print("Tokenizer initialized.")  
 
     for subset_name in ["train", "valid", "test"]:
@@ -84,3 +80,4 @@ if __name__ == "__main__":
 
     tokenizer_wrapper.save_tokenizer()
     print("Tokenizer script completed.")  
+    

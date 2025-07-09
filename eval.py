@@ -13,10 +13,21 @@ import torch.distributed as dist
 
 """Usage: python eval.py"""
 
-local_rank = int(os.getenv("LOCAL_RANK", 0))
-device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+def setup_ddp():
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        dist.init_process_group(backend=backend)
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+        return local_rank, True
+    else:
+        return 0, False
 
-def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
+local_rank = 0
+device = torch.device("cpu")
+
+def evaluate(model, dataloader, tokenizer, max_batches=None, device=None, rank=0):
     model.eval()
     total_energy = 0.0
     batch_count = 0
@@ -24,7 +35,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
     pad_token_id = tokenizer.pad_token_id
     vocab_size = len(tokenizer)
     
-    if local_rank == 0:
+    if rank == 0:
         if max_batches is None:
             print(f"Evaluating on the full test set...")
         else:
@@ -37,7 +48,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         input_ids = batch["input_ids"].to(device)
         targets = batch["target_ids"].to(device)
 
-        if local_rank == 0:
+        if rank == 0:
             if (targets == pad_token_id).sum() == 0:
                 print(f"No pad tokens detected in batch {batch_idx + 1}, check padding behavior.")
 
@@ -69,7 +80,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         total_energy += batch_energy
         batch_count += 1
 
-        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
+        if rank == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
 
         reset_pc_modules(model)
@@ -78,14 +89,16 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
 
-    if local_rank == 0:
+    if rank == 0:
         print(f"Total Batches Processed: {batch_idx + 1}")
         print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
 
     return avg_energy, avg_ce_loss, avg_perplexity
 
+
 def main():
-    dist.init_process_group(backend="nccl")
+    local_rank, is_distributed = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     print(f"[Rank {local_rank}] Using device: {device}")
 
     tokenizer = load_tokenizer()
@@ -109,18 +122,22 @@ def main():
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     model = model.to(device)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-    _, _, test_loader = get_loaders(distributed = True)
+    if is_distributed:
+        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None,
+                    output_device=local_rank if torch.cuda.is_available() else None)
+    _, _, test_loader = get_loaders(distributed = is_distributed)
 
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()
-    evaluate(model, test_loader, tokenizer, max_batches= None, device=device)
+    rank = dist.get_rank() if is_distributed and dist.is_initialized() else 0
+    evaluate(model, test_loader, tokenizer, max_batches=None, device=device, rank=rank)
     elapsed = time.time() - start_time
-    if local_rank == 0:
+    if rank == 0:
         print(f"Evaluation completed in {elapsed:.2f} seconds")
-        
-    dist.barrier()
-    dist.destroy_process_group()
+
+    if is_distributed:
+        dist.barrier()
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()
