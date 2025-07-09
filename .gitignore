@@ -14,4 +14,4 @@ checkpoints/
 Data_preprocessing/Data/opwb/
 tests/
 *.ini
-.github
+.github/
