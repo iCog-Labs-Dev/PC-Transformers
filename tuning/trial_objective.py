@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn 
 import time
-import math
 import pickle
 from training import train
 from eval import evaluate
@@ -18,33 +17,16 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
-    if dist.get_rank() == 0:
-        obj_bytes = pickle.dumps(config_dict)
-        print(f"[Rank {dist.get_rank()}] Broadcasting config of size {len(obj_bytes)} bytes")
-        length = torch.tensor([len(obj_bytes)], device=device)
-    else:
-        length = torch.tensor([0], device=device)
+    obj_bytes = pickle.dumps(config_dict)
+    obj_tensor = torch.tensor(list(obj_bytes), dtype=torch.uint8, device=device)
+    length = torch.tensor([len(obj_tensor)], device=device)
 
     dist.broadcast(length, src=0)
-
     if dist.get_rank() != 0:
         obj_tensor = torch.empty(length.item(), dtype=torch.uint8, device=device)
-    else:
-        obj_tensor = torch.tensor(list(obj_bytes), dtype=torch.uint8, device=device)
 
     dist.broadcast(obj_tensor, src=0)
-    
     return pickle.loads(bytes(obj_tensor.tolist()))
-
-def sanitize_config_types(cfg):
-    int_keys = ["block_size", "n_embed", "num_heads", "n_blocks", "batch_size", "num_epochs", "eos_token_id", "vocab_size", "T", "warmup_steps"]
-    for k in int_keys:
-        if k in cfg:
-            val = cfg[k]
-            if not isinstance(val, (int, float)) or not math.isfinite(val):
-                raise ValueError(f"Config key {k} has invalid value: {val}")
-            cfg[k] = int(val)
-    return cfg
 
 def objective(trial, device = None):
     """Bayesian Objective function"""
@@ -61,18 +43,14 @@ def objective(trial, device = None):
         if not dist.is_initialized() or dist.get_rank() == 0:
             config = get_dynamic_model_config(trial, vocab_size)
             if config is None:
-                print(f"[Rank {dist.get_rank() if dist.is_initialized() else 0}] Invalid config generated. Skipping trial.")
                 return float("inf")
-            print(f"[Rank 0] Config Generated: {config.__dict__}") 
-            config_dict = {k: v for k, v in config.__dict__.items() if isinstance(v, (int, float, str, bool))}
-
+            config_dict = config.__dict__
         else:
             config_dict = None
 
         if dist.is_initialized():
             config_dict = broadcast_config(config_dict, device)
         
-        config_dict = sanitize_config_types(config_dict)
         config = GPTConfig(**config_dict)
         update_global_config(config.__dict__)
         
