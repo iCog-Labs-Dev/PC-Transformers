@@ -1,11 +1,12 @@
 import time
 import math
+import torch
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
-from utils.device_utils import setup_device  
+from utils.device_utils import setup_device, cleanup_memory
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
@@ -52,10 +53,17 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):
         batch_count += 1
 
         if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}")
+            if device.type == "cuda":
+                print(f"    [Memory] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
+                    f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB")
 
         reset_pc_modules(model)
-
+        cleanup_memory()
+        if device.type == "cuda" and dist.get_rank() == 0:
+            print(f"    [After Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
+                f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB", flush=True)
+            
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
@@ -85,7 +93,7 @@ def main():
         n_blocks=4,
         num_epochs=1,
         update_bias=False,
-        energy_fn_name="mse", 
+        energy_fn_name="kld", 
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
 

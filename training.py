@@ -11,7 +11,7 @@ from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
-from utils.device_utils import setup_device
+from utils.device_utils import setup_device, cleanup_memory
 from visualization import plot_metrics
 
 """Usage: torchrun --nproc-per-node=2 training.py"""
@@ -71,9 +71,17 @@ def train(model, dataloader, tokenizer, global_step, device):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         
         if dist.is_initialized() and dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+            if device.type == "cuda":
+                print(f"    [Memory] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
+                    f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB")
 
         reset_pc_modules(model)
+        cleanup_memory()
+        if device.type == "cuda" and dist.get_rank() == 0:
+            print(f"    [After Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
+                f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB", flush=True)
+
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
@@ -102,7 +110,7 @@ def main():
         num_epochs= 30,
         update_bias=False,
         use_lateral = True,
-        energy_fn_name="mse",
+        energy_fn_name="kld",
         eos_token_id = tokenizer.token_to_id("[EOS]")
     )
     model = PCTransformer(config).to(device)
