@@ -39,7 +39,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
             logger.warning(f"Study creation skipped because the file already exists: {e}")
             
     if dist.is_initialized():
-        dist.barrier()
+        dist.barrier(device_ids=[local_rank])
         
     study = optuna.load_study(
         study_name=study_name,
@@ -63,7 +63,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
             else:
                 logger.warning("[Rank 0] No completed trials to report.")
             
-        dist.barrier()   
+        dist.barrier(device_ids=[local_rank])   
         return study
      
     except KeyboardInterrupt:
@@ -78,7 +78,8 @@ if __name__ == "__main__":
     local_rank, device, use_ddp = setup_device()
     
     if use_ddp and not dist.is_initialized():
-        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend="nccl", rank=local_rank)
 
     run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device)
 
