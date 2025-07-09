@@ -15,14 +15,15 @@ def get_dynamic_model_config(trial, vocab_size):
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
     block_size = trial.suggest_int("block_size", 64, 512, step=16)
     n_blocks = trial.suggest_int('n_blocks', 1, 6)
-    T = trial.suggest_int('T', 4, 20, log=True)
+    T = trial.suggest_int('T', 4, 20)
     dropout = trial.suggest_float("dropout", 0.05, 0.3)
     base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
     warmup_steps = trial.suggest_int('warmup_steps', 100, 500)
     energy_fn_name = ['kld', 'mse', 'scaled_mse'][trial.suggest_int('energy_idx', 0, 2)]
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
-    
+    scaled_lr = max(min(scaled_lr, 1e-2), 1e-6) 
+
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,

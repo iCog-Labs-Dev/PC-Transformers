@@ -46,6 +46,7 @@ def objective(trial, device = None):
         if not dist.is_initialized() or dist.get_rank() == 0:
             config = get_dynamic_model_config(trial, vocab_size)
             if config is None:
+                print(f"[Rank {dist.get_rank() if dist.is_initialized() else 0}] Invalid config generated. Skipping trial.")
                 return float("inf")
             config_dict = config.__dict__
         else:
