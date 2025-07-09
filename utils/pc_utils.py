@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 import gc
 from predictive_coding.config import GPTConfig
+from utils.attention_utils import apply_flash_attention, apply_standard_attention
 
 def compute_DVL(attn_v, requires_update):
     B, H, T, D= attn_v.shape
@@ -167,7 +168,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     return x, mu
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, flash=False):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
         q_proj = proj_layers.get("q_proj", None)
@@ -178,25 +179,22 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         Q= q_proj(x)
         K= k_proj(x)
         V= v_proj(x)
-        batch_size, seq_len, embed_dim=target.shape
-        
-        head_dim = n_embed // num_heads 
-        la= la * math.sqrt(1.0 / head_dim)
+        batch_size, seq_len, embed_dim = target.shape
+        head_dim = n_embed // num_heads
+        la = la * math.sqrt(1.0 / head_dim)
 
-        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
+        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
         K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
         V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-          
-        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #B,H,T,T
-        mask = torch.tril(torch.ones_like(scores, dtype=torch.bool, device=device))
-        scores = scores.masked_fill(~mask, float("-inf"))
-        attn_weights = scores.softmax(dim=-1) # B, H, T, T
-        mu_heads = attn_weights @ V   # B, H, T, D
 
-        dvl_grad=compute_DVL(mu_heads, requires_update)
+        if flash:
+            mu_heads = apply_flash_attention(Q, K, V)
+        else:
+            mu_heads = apply_standard_attention(Q, K, V)
+
+        dvl_grad = compute_DVL(mu_heads, requires_update)
         if dvl_grad is not None:
-            dvl_grad = dvl_grad.to(device) 
-
+            dvl_grad = dvl_grad.to(device)
         dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
         similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)

@@ -82,6 +82,7 @@ class PCLayer(nn.Module):
         t=0,
         T=1,
         requires_update: bool = True,
+        flash: bool = False,
     ):
         """
         Perform a single predictive coding inference step for the layer.
@@ -96,6 +97,7 @@ class PCLayer(nn.Module):
             t (int): Current inference step.
             T (int): Total number of inference steps.
             requires_update (bool): Whether to update weights.
+            flash (bool): Whether to use flash attention (if available).
 
         Returns:
             torch.Tensor or tuple: Updated activity tensor(s) for the layer.
@@ -137,7 +139,7 @@ class PCLayer(nn.Module):
             # local_lr, clamp_value, use_lateral, is_holding_error, energy_fn
             x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
                               self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la)
+                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, flash=flash)
         else:
             x, mu = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
                                self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
