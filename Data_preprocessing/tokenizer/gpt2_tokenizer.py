@@ -2,6 +2,7 @@ import os
 import pickle
 from transformers import GPT2Tokenizer
 from Data_preprocessing.config import Config
+import argparse 
 
 class GPT2TokenizerWrapper:
     def __init__(self, dataset_name=Config.DATASET_NAME):
@@ -64,6 +65,15 @@ class GPT2TokenizerWrapper:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
+    args = parser.parse_args()
+
+    # Set dataset in config
+    from Data_preprocessing.config import Config
+    Config.DATASET_NAME = args.dataset
+    print(f"Using dataset: {Config.DATASET_NAME}")
+
     print("Starting tokenizer script...")  
     tokenizer_wrapper = GPT2TokenizerWrapper()  
     print("Tokenizer initialized.")  

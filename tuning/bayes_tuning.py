@@ -65,8 +65,14 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Bayesian Hyperparameter Tuning with Predictive Coding Transformer")
     parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
+    parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
     args = parser.parse_args()
-    
+
+    # Set dataset in config
+    from Data_preprocessing.config import Config
+    Config.DATASET_NAME = args.dataset
+    print(f"Using dataset: {Config.DATASET_NAME}")
+
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
