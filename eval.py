@@ -73,14 +73,15 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None):
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
  
     if not dist.is_initialized() or dist.get_rank() == 0:
-        print(f"Total Batches Processed: {batch_idx}")
+        print(f"Total Batches Processed: {batch_idx + 1}")
         print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f}")
 
     return avg_energy, avg_ce_loss, avg_perplexity
 
 def main():
-    if use_ddp:
+    if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
+
     print(f"[Rank {local_rank}] Using device: {device}")
 
     tokenizer = load_tokenizer()
@@ -116,7 +117,7 @@ def main():
     if not dist.is_initialized() or dist.get_rank() == 0:
         print(f"Evaluation completed in {elapsed:.2f} seconds")
 
-    if use_ddp:    
+    if use_ddp and dist.is_initialized():   
         dist.barrier()
         dist.destroy_process_group()
 

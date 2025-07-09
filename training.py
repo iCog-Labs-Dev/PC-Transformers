@@ -12,6 +12,7 @@ from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
 from utils.device_utils import setup_device, cleanup_memory
+from eval import evaluate
 from visualization import plot_metrics
 
 """Usage: torchrun --nproc-per-node=2 training.py"""
@@ -95,6 +96,9 @@ def main():
     local_rank, device, use_ddp = setup_device()
     print(f"Using device: {device} (local rank {local_rank})")
 
+    if use_ddp and not dist.is_initialized():
+        dist.init_process_group(backend="nccl")
+
     tokenizer = load_tokenizer()
     vocab_size = tokenizer.get_vocab_size()
 
@@ -149,7 +153,7 @@ def main():
         train_energies.append(train_energy)
         
         model.eval()
-        val_energy, val_perplexity, global_step = train(model, valid_loader, tokenizer, global_step, device)
+        val_energy, val_ce_loss, val_perplexity = evaluate(model, valid_loader, tokenizer, device=device)
         val_energies.append(val_energy)
         
         if rank == 0:
@@ -189,7 +193,7 @@ def main():
         print("Final model saved to: checkpoints/final_model.pt")
         print("========== Training completed ==========")
     
-    if use_ddp:
+    if use_ddp and dist.is_initialized():
         dist.destroy_process_group()
 if __name__ == "__main__":
     main()

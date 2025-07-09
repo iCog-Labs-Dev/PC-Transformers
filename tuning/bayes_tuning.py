@@ -75,10 +75,10 @@ if __name__ == "__main__":
     
     local_rank, device, use_ddp = setup_device()
     
-    if use_ddp:
+    if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
     run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device)
 
-    if use_ddp:
+    if use_ddp and dist.is_initialized():
         dist.destroy_process_group()

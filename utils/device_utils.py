@@ -10,9 +10,8 @@ def cleanup_memory():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
-def setup_device(backend = "nccl"):
+def setup_device():
     if "WORLD_SIZE" in os.environ and torch.cuda.is_available():
-        dist.init_process_group(backend)
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         torch.cuda.set_device(local_rank)
         device = torch.device(f"cuda:{local_rank}")

@@ -77,8 +77,9 @@ def text_generation(model, config, device = None):
     return decoded_preds, decoded_targets
 
 def main():
-    if use_ddp:
+    if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
+
     print(f"[Rank {local_rank}] Using device: {device}")
 
     tokenizer = load_tokenizer()
@@ -111,7 +112,7 @@ def main():
         if decoded_preds and decoded_targets and local_rank == 0:
             compute_text_metrics(decoded_preds, decoded_targets)
 
-    if use_ddp:
+    if use_ddp and dist.is_initialized():
         dist.barrier()
         dist.destroy_process_group()
 
