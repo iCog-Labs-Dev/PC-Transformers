@@ -12,6 +12,8 @@ from utils.model_utils import load_tokenizer, reset_pc_modules
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import argparse
+from utils.device_utils import setup_ddp
 
 """
 Usage: python training.py
@@ -19,12 +21,6 @@ Usage: python training.py
 This script trains a predictive coding transformer model on a dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
 """
-
-def setup_ddp():
-    dist.init_process_group(backend="nccl")
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    return local_rank
 
 def train(model, dataloader, tokenizer, config, global_step, device):
     model.train()
@@ -79,7 +75,8 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         batch_count += 1
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
-        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        if rank == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
@@ -90,8 +87,17 @@ def train(model, dataloader, tokenizer, config, global_step, device):
     return avg_energy, avg_perplexity, global_step
 
 def main():
-    local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
+    args = parser.parse_args()
+
+    # Set dataset in config
+    from Data_preprocessing.config import Config
+    Config.DATASET_NAME = args.dataset
+    print(f"Using dataset: {Config.DATASET_NAME}")
+
+    local_rank, is_distributed = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} (local rank {local_rank})")
 
     tokenizer = load_tokenizer()
@@ -116,20 +122,22 @@ def main():
         eos_token_id = tokenizer.eos_token_id
     )
     model = PCTransformer(config).to(device)
-    model = DDP(model, device_ids=[local_rank], 
-                output_device=local_rank, 
-                find_unused_parameters=True)
-    
-    model.module.register_all_lateral_weights()
+    if is_distributed:
+        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None, 
+                    output_device=local_rank if torch.cuda.is_available() else None, 
+                    find_unused_parameters=True)
+        model.module.register_all_lateral_weights()
+    else:
+        model.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders(distributed=True)
+    train_loader, valid_loader, _ = get_loaders(distributed=is_distributed)
     
     start_time = time.time()
     global_step = 0
     train_energies = []
     val_energies = []
     
-    rank = dist.get_rank() if dist.is_initialized() else 0
+    rank = dist.get_rank() if is_distributed and dist.is_initialized() else 0
     if rank == 0:
         print("========== Training started ==========", flush=True) 
         print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
@@ -158,7 +166,7 @@ def main():
                     os.makedirs("checkpoints", exist_ok=True)
                     checkpoint = {
                         'epoch': epoch,
-                        'model_state_dict': model.module.state_dict(),
+                        'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),
                         'train_energy': train_energy,
                         'val_energy': val_energy,
                         'train_perplexity': train_perplexity,
@@ -174,7 +182,7 @@ def main():
         os.makedirs("checkpoints", exist_ok=True)
         final_checkpoint = {
             'epoch': config.num_epochs,
-            'model_state_dict': model.module.state_dict(),
+            'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),
             'train_energy': train_energy,
             'val_energy': val_energy,
             'train_perplexity': train_perplexity,
@@ -187,7 +195,8 @@ def main():
         print("Final model saved to: checkpoints/final_model.pt")
         print("========== Training completed ==========")
     
-    dist.destroy_process_group()
+    if is_distributed:
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()
