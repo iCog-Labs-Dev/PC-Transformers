@@ -41,9 +41,10 @@ def get_dynamic_batch_size(n_embed, block_size):
     """Calculate optimal batch size based on model size"""
     if torch.cuda.is_available():
         memory = torch.cuda.get_device_properties(0).total_memory
-        usable_mem = memory - 1.5 * (1024**3) 
-        sequence_mem = block_size * n_embed * 4
-        return max(4, min(24, int(usable_mem / (sequence_mem * 3000))))
+        usable_mem = float(memory) - 1.5 * (1024**3) 
+        sequence_mem = float(block_size) * float(n_embed) * 4.0
+        batch_size = int(usable_mem / (sequence_mem * 3000.0))
+        return max(4, min(24, batch_size))
     else:
         return max(4, min(12, 8))
 

@@ -14,7 +14,7 @@ def get_dynamic_model_config(trial, vocab_size):
         return None
         
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
-    block_size = trial.suggest_int("block_size", 64, 512, step=16)
+    block_size = trial.suggest_int("block_size", 64, 384, step=32)
     n_blocks = trial.suggest_int('n_blocks', 1, 6)
     T = trial.suggest_int('T', 4, 20)
     dropout = trial.suggest_float("dropout", 0.05, 0.3)
