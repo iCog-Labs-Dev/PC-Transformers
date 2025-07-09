@@ -7,7 +7,6 @@ except ImportError:
     FLASH_AVAILABLE = False
     import warnings
     warnings.warn("FlashAttention is not installed. Falling back to standard attention.")
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def apply_flash_attention(q, k, v, mask=None):

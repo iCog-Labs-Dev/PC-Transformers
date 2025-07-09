@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 import gc
 from predictive_coding.config import GPTConfig
-from model_architecture.attention_utils import apply_flash_attention, apply_standard_attention
+from utils.attention_utils import apply_flash_attention, apply_standard_attention
 
 def compute_DVL(attn_v, requires_update):
     B, H, T, D= attn_v.shape
