@@ -44,8 +44,8 @@ def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0, 
 def text_generation(model, config, device = None):
     decoded_preds, decoded_targets = [], []
     prompt_len = 5
-
-    _, _, test_loader = get_loaders(distributed=True)
+    is_distributed = torch.cuda.is_available() and "RANK" in os.environ and "WORLD_SIZE" in os.environ
+    _, _, test_loader = get_loaders(distributed=is_distributed)
     tokenizer = load_tokenizer()
     pad_token_id = tokenizer.pad_token_id
 
@@ -70,6 +70,8 @@ def text_generation(model, config, device = None):
             decoded_preds.append(generated_str)
             decoded_targets.append(target_str)
 
+            _, local_rank = get_device_and_rank()
+            
             if local_rank == 0:
                 print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
                 print(f"[PROMPT ]: {prompt_str}")
