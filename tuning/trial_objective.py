@@ -35,10 +35,7 @@ def objective(trial, device = None):
     
     print(f"\n[Rank {dist.get_rank() if dist.is_initialized() else 0}] Starting Trial {trial.number}")
     
-    try:
-        if not dist.is_initialized():
-            dist.init_process_group(backend="nccl")  
-        
+    try:        
         local_rank, device, _ = setup_device()
         tokenizer = load_tokenizer()
         vocab_size = tokenizer.get_vocab_size()
@@ -102,7 +99,7 @@ def objective(trial, device = None):
         trial.set_user_attr("combined_energy", "N/A")
         trial.set_user_attr("trial_time", (time.time() - start_time) / 3600 )
 
-        log_trial_to_summary("bayesian_tuning_summary.txt", trial)
+        log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
         return float("inf")
     
     finally:
