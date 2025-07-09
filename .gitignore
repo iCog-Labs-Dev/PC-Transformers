@@ -12,3 +12,5 @@ data_preprocessing/
 *.egg-info/
 checkpoints/
 Data_preprocessing/Data/opwb/
+tests/
+*.ini

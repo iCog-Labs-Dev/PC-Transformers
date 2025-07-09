@@ -12,6 +12,7 @@ from utils.model_utils import load_tokenizer, reset_pc_modules
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import argparse
 
 """
 Usage: python training.py
@@ -90,8 +91,17 @@ def train(model, dataloader, tokenizer, config, global_step, device):
     return avg_energy, avg_perplexity, global_step
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
+    args = parser.parse_args()
+
+    # Set dataset in config
+    from Data_preprocessing.config import Config
+    Config.DATASET_NAME = args.dataset
+    print(f"Using dataset: {Config.DATASET_NAME}")
+
     local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}")
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} (local rank {local_rank})")
 
     tokenizer = load_tokenizer()
