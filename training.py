@@ -72,16 +72,16 @@ def train(model, dataloader, tokenizer, global_step, device):
         
         if dist.is_initialized() and dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
-            if device.type == "cuda":
-                print(f"    [Before Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
-                    f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB")
+            # if device.type == "cuda":
+            #     print(f"    [Before Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
+            #         f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB")
             
             reset_pc_modules(model)
             cleanup_memory()
             
-            if device.type == "cuda":
-                print(f"    [After Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
-                    f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB")
+            # if device.type == "cuda":
+            #     print(f"    [After Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
+            #         f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB")
         else:
             reset_pc_modules(model)
             cleanup_memory()
