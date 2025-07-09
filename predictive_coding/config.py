@@ -29,14 +29,16 @@ class GPTConfig:
     """
     vocab_size: int
     block_size: int
+    peak_learning_rate: float = 1.29e-04
+    warmup_steps: int= 58
     la: float=0.5
-    n_embed: int =64
+    n_embed: int =656
     dropout: float = 0.1
-    local_learning_rate: float = 1e-3
+    local_learning_rate: float = 0
     T: int = 10
     is_holding_error: bool = False
     update_bias: bool = True
-    num_heads: int = 2
+    num_heads: int = 16
     n_blocks: int = 4
     batch_size: int = 8
     num_epochs: int = 5
