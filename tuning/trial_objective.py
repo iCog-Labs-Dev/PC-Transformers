@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn 
 import time
+import math
 import pickle
 from training import train
 from eval import evaluate
@@ -35,6 +36,16 @@ def broadcast_config(config_dict, device):
     
     return pickle.loads(bytes(obj_tensor.tolist()))
 
+def sanitize_config_types(cfg):
+    int_keys = ["block_size", "n_embed", "num_heads", "n_blocks", "batch_size", "num_epochs", "eos_token_id", "vocab_size", "T", "warmup_steps"]
+    for k in int_keys:
+        if k in cfg:
+            val = cfg[k]
+            if not isinstance(val, (int, float)) or not math.isfinite(val):
+                raise ValueError(f"Config key {k} has invalid value: {val}")
+            cfg[k] = int(val)
+    return cfg
+
 def objective(trial, device = None):
     """Bayesian Objective function"""
     start_time = time.time()
@@ -61,6 +72,7 @@ def objective(trial, device = None):
         if dist.is_initialized():
             config_dict = broadcast_config(config_dict, device)
         
+        config_dict = sanitize_config_types(config_dict)
         config = GPTConfig(**config_dict)
         update_global_config(config.__dict__)
         
