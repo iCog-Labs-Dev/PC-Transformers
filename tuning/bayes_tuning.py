@@ -12,7 +12,8 @@ from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -84,4 +85,5 @@ if __name__ == "__main__":
     run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device)
 
     if use_ddp and dist.is_initialized():
+        dist.barrier(device_ids=[local_rank]) 
         dist.destroy_process_group()
