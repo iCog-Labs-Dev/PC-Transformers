@@ -18,6 +18,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
     obj_bytes = pickle.dumps(config_dict)
+    print(f"[Rank {dist.get_rank()}] Broadcasting config of size {len(obj_bytes)} bytes") 
     obj_tensor = torch.tensor(list(obj_bytes), dtype=torch.uint8, device=device)
     length = torch.tensor([len(obj_tensor)], device=device)
 
@@ -45,7 +46,9 @@ def objective(trial, device = None):
             if config is None:
                 print(f"[Rank {dist.get_rank() if dist.is_initialized() else 0}] Invalid config generated. Skipping trial.")
                 return float("inf")
-            config_dict = config.__dict__
+            print(f"[Rank 0] Config Generated: {config.__dict__}") 
+            config_dict = {k: v for k, v in config.__dict__.items() if isinstance(v, (int, float, str, bool))}
+
         else:
             config_dict = None
 
