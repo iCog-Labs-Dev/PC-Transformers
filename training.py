@@ -19,18 +19,17 @@ import argparse
 """
 Training Script for Predictive Coding Transformer
 
-This script trains a predictive coding transformer model on a specified dataset.
+This script trains a predictive coding transformer model
 
 Usage:
-    python training.py [--dataset DATASET] [--flash]
+    python training.py [--flash]
 
 Flags:
-    --dataset DATASET    Dataset to use: 'ptb' (Penn Treebank) or 'opwb' (OpenWebText) (default: 'opwb')
     --flash              Enable FlashAttention for attention layers (default: False)
 
 Example:
-    python training.py --dataset ptb --flash
-    torchrun --nproc-per-node=<NUM_GPUS> training.py --dataset ptb --flash
+    python training.py --flash
+    torchrun --nproc-per-node=<NUM_GPUS> training.py --flash
 """
 
 def train(model, dataloader, tokenizer, config, global_step, device):
@@ -128,14 +127,8 @@ def main():
     Parses command-line arguments, sets up the model, data, and training loop.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
     parser.add_argument('--flash', action='store_true', help='Enable FlashAttention for attention layers')
     args = parser.parse_args()
-
-    # Set dataset in config
-    from Data_preprocessing.config import Config
-    Config.DATASET_NAME = args.dataset
-    print(f"Using dataset: {Config.DATASET_NAME}")
 
     local_rank, device, use_ddp = setup_device()
     print(f"Using device: {device} (local rank {local_rank})")
