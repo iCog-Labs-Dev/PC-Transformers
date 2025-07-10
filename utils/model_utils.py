@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn.functional as F
+from transformers import GPT2Tokenizer
 from tokenizers import Tokenizer
 from Data_preprocessing.config import Config
 from model_architecture.pc_t_model import PCTransformer

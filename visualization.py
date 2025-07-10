@@ -1,10 +1,28 @@
+"""
+Visualization Script for Predictive Coding Transformer
+
+This script provides utilities for plotting training and validation metrics.
+
+Usage:
+    python visualization.py
+
+Example:
+    python visualization.py
+"""
 import matplotlib.pyplot as plt
 from pathlib import Path
 from matplotlib.ticker import MaxNLocator
 
-def plot_metrics(train_energies, val_energies=None):
+def plot_metrics(train_energies, val_energies):
     """
-    Plot training and validation metrics.
+    Plot training and validation energy metrics over epochs.
+
+    Args:
+        train_energies (list of float): List of training energy values per epoch.
+        val_energies (list of float): List of validation energy values per epoch.
+
+    Returns:
+        None
     """
     assets_dir = Path("assets")
     assets_dir.mkdir(exist_ok=True)
