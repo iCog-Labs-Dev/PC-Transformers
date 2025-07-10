@@ -20,7 +20,7 @@ def get_dynamic_model_config(trial, vocab_size):
     dropout = trial.suggest_float("dropout", 0.05, 0.3)
     base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
     warmup_steps = trial.suggest_int('warmup_steps', 100, 500)
-    energy_fn_name = ['kld', 'mse', 'scaled_mse'][trial.suggest_int('energy_idx', 0, 2)]
+    energy_fn_name = ['kld', 'mse'][trial.suggest_int('energy_idx', 0, 1)]
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
     scaled_lr = max(min(scaled_lr, 1e-2), 1e-6) 
