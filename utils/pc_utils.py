@@ -65,7 +65,7 @@ def compute_error_from_energy(mu: torch.Tensor, target: torch.Tensor, energy_fn_
         mu_soft = F.softmax(mu, dim=-1)
         target_soft = F.softmax(target, dim=-1)
         error = target_soft - mu_soft
-        energy = F.kl_div(mu_soft.log(), target_soft, reduction="batchmean")
+        energy = torch.clamp(F.kl_div(mu_soft.log(), target_soft, reduction="batchmean"), min=0.0, max=100.0)
     else:
         raise ValueError(f"Unsupported energy function: {energy_fn_name}")
     
