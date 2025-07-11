@@ -32,39 +32,39 @@ Install required Python packages:
 ```
 pip install -r requirements.txt
 ```
+If one also wants to use flash attention:
+pip install flash_attn
 ## Usage:
 Tokenize the data:
 ```bash
-python -m Data_preprocessing.tokenizer.bpe_tokenizer 
+python -m Data_preprocessing.tokenizer.bpe_tokenizer
 ```
 Train the model:
 ```bash
-Usage:
-    torchrun --nproc-per-node=<NUM_GPUS> training.py --flash
-    python training.py [--flash]
-
-Flags:
-    --flash              Enable FlashAttention for attention layers (default: False)
-
+torchrun --nproc-per-node=<NUM_GPUS> training.py
+```
+-With flash attention:
+```bash
+torchrun --nproc-per-node=<NUM_GPUS> training.py --flash
 ```
 Evaluate the model:
 ```bash
-Usage:
-    torchrun --nproc-per-node=<NUM_GPUS> eval.py --flash
-    python eval.py [--flash]
-
-Flags:
-    --flash              Enable FlashAttention for attention layers (default: False)
+torchrun --nproc-per-node=<NUM_GPUS> eval.py
+```
+-With flash attention:
+```bash
+torchrun --nproc-per-node=<NUM_GPUS> eval.py
 ```
 Generating text:
 ```bash
-Usage:
-    torchrun --nproc-per-node=<NUM_GPUS> generate_text.py --flash --max_tokens 100 --prompt "Once upon a time"
-    python generate_text.py [--flash] [--max_tokens N] [--prompt PROMPT] [--temperature T]
-
+torchrun --nproc-per-node=<NUM_GPUS> generate_text.py
+```
 Flags:
-    --flash              Enable FlashAttention for attention layers (default: False)
-    --max_tokens N       Maximum number of new tokens to generate (default: 50)
-    --prompt PROMPT      Text prompt to use for generation (default: None, uses test set)
-    --temperature T      Sampling temperature (default: 1.0)
+    --flash              (default: False)
+    --max_tokens N       (default: 50)
+    --prompt PROMPT      (default: None, uses test set)
+    --temperature T      (default: 1.0)
+-With these flags:
+```bash
+torchrun --nproc-per-node=<NUM_GPUS> generate_text.py --flash --prompt "once upon a time" --max_tokens 100 --temperature 3.4
 ```
