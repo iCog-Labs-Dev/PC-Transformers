@@ -24,7 +24,7 @@ def test_get_loaders_runs():
     """
     # Patch get_datasets, Config.BATCH_SIZE, and DataLoader drop_last
     with patch('Data_preprocessing.dataloader.get_datasets', return_value=(DummyDataset(), DummyDataset(), DummyDataset())), \
-         patch.object(dataloader_mod.Config, 'BATCH_SIZE', 1):
+         patch.object(dataloader_mod.Config, 'batch_size', 1):
         # Patch DataLoader to always use drop_last=False
         orig_DataLoader = dataloader_mod.DataLoader
         def PatchedDataLoader(*args, **kwargs):

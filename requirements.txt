@@ -5,3 +5,4 @@ nltk==3.9.1
 bert-score==0.3.13
 optuna
 psutil==7.0.0
+pytest
