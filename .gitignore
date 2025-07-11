@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-*.pkl
+!tests/dummy_data/
+# *.pkl
 *.json
 *.pt
 *.txt
