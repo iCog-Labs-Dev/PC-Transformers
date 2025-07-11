@@ -35,17 +35,36 @@ pip install -r requirements.txt
 ## Usage:
 Tokenize the data:
 ```bash
-python -m Data_preprocessing.tokenizer.bpe_tokenizer
+python -m Data_preprocessing.tokenizer.bpe_tokenizer 
 ```
 Train the model:
 ```bash
-torchrun --nproc-per-node=<NUM_GPUS> training.py
+Usage:
+    torchrun --nproc-per-node=<NUM_GPUS> training.py --flash
+    python training.py [--flash]
+
+Flags:
+    --flash              Enable FlashAttention for attention layers (default: False)
+
 ```
 Evaluate the model:
 ```bash
-torchrun --nproc-per-node=<NUM_GPUS> eval.py
+Usage:
+    torchrun --nproc-per-node=<NUM_GPUS> eval.py --flash
+    python eval.py [--flash]
+
+Flags:
+    --flash              Enable FlashAttention for attention layers (default: False)
 ```
 Generating text:
 ```bash
-torchrun --nproc-per-node=<NUM_GPUS> generate_text.py
+Usage:
+    torchrun --nproc-per-node=<NUM_GPUS> generate_text.py --flash --max_tokens 100 --prompt "Once upon a time"
+    python generate_text.py [--flash] [--max_tokens N] [--prompt PROMPT] [--temperature T]
+
+Flags:
+    --flash              Enable FlashAttention for attention layers (default: False)
+    --max_tokens N       Maximum number of new tokens to generate (default: 50)
+    --prompt PROMPT      Text prompt to use for generation (default: None, uses test set)
+    --temperature T      Sampling temperature (default: 1.0)
 ```
