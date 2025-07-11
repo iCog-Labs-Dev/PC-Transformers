@@ -38,8 +38,18 @@ def load_tokenizer():
 
     Returns:
         Tokenizer: An instance of the loaded tokenizer.
+
+    Raises:
+        FileNotFoundError: If the tokenizer file is not found.
     """
     tokenizer_path = os.path.join(Config.tokenizer_dir, "tokenizer.json")
+
+    if not os.path.exists(tokenizer_path):
+        print("🚨 Tokenizer not found!")
+        print(f"Expected tokenizer at: {tokenizer_path}")
+        raise FileNotFoundError(
+            f"Tokenizer file not found at {tokenizer_path}.\nPlease run:\n  python -m Data_preprocessing.tokenizer.bpe_tokenizer")
+
     return Tokenizer.from_file(tokenizer_path)
 
 def load_model(model_path, config):
