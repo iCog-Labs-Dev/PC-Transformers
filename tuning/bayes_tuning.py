@@ -11,13 +11,14 @@ from utils.device_utils import setup_device
 from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
+import argparse 
 
 logger = logging.getLogger(__name__)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 """Usage: torchrun --nproc-per-node=2 tuning/bayes_tuning.py """
 
-def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None):
+def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False):
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
     if local_rank == 0:
@@ -57,7 +58,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
 
     try:
         if local_rank == 0:
-            study.optimize(lambda trial: objective(trial, device), n_trials=n_trials, show_progress_bar= True)
+            study.optimize(lambda trial: objective(trial, device, flash), n_trials=n_trials, show_progress_bar= True)
             logger.info(f"[Rank {local_rank}] Tuning completed.")
             
             if len(study.trials) > 0:
@@ -75,6 +76,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         return study
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Bayesian Hyperparameter Tuning with Predictive Coding Transformer")
+    parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
+    args = parser.parse_args()
+
     if not logging.getLogger().hasHandlers() and int(os.environ.get("RANK", 0)) == 0:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -88,7 +93,7 @@ if __name__ == "__main__":
         torch.cuda.set_device(local_rank)
         dist.init_process_group(backend="nccl", rank=local_rank)
 
-    run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device)
+    run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash)
 
     if use_ddp and dist.is_initialized():
         dist.barrier(device_ids=[local_rank]) 
