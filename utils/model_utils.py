@@ -1,4 +1,5 @@
 import os
+import subprocess
 import torch
 import torch.nn.functional as F
 from tokenizers import Tokenizer
@@ -35,11 +36,32 @@ def pad_collate_fn(batch, pad_token_id=0):
 def load_tokenizer():
     """
     Load a pre-trained tokenizer from the specified directory in the config.
+    If it doesn't exist, automatically runs the tokenizer script.
 
     Returns:
         Tokenizer: An instance of the loaded tokenizer.
     """
     tokenizer_path = os.path.join(Config.tokenizer_dir, "tokenizer.json")
+
+    if not os.path.exists(tokenizer_path):
+        print(f"Tokenizer not found at: {tokenizer_path}")
+        print(" Attempting to generate tokenizer by running:")
+        print("    python -m Data_preprocessing.tokenizer.bpe_tokenizer")
+
+        try:
+            subprocess.run(
+                ["python", "-m", "Data_preprocessing.tokenizer.bpe_tokenizer"],
+                check=True
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError("Tokenizer generation failed. Please run the tokenizer script manually.") from e
+
+        if not os.path.exists(tokenizer_path):
+            raise FileNotFoundError(
+                f"Tokenizer still not found after attempting auto-generation.\n"
+                f"Please run:\n  python -m Data_preprocessing.tokenizer.bpe_tokenizer"
+            )
+
     return Tokenizer.from_file(tokenizer_path)
 
 def load_model(model_path, config):
