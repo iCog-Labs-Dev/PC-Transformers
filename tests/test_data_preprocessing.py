@@ -54,3 +54,63 @@ def test_penn_treebank_dataset_file_not_found():
             assert "Please tokenize the dataset first" in str(e)
         else:
             assert False, "Expected FileNotFoundError was not raised."
+
+def test_dummy_penn_treebank_dataset_loads():
+    """
+    Test that PennTreebankDataset loads dummy data from tests/dummy_data and returns correct fields.
+    """
+    from Data_preprocessing.datasets.penn_treebank import PennTreebankDataset
+    from unittest.mock import patch
+    dummy_dir = "tests/dummy_data"
+    with patch("Data_preprocessing.config.Config.tokenizer_dir", dummy_dir):
+        ds = PennTreebankDataset("train_ids.pkl", dummy_dir, block_size=8)
+        assert len(ds) == 2
+        sample = ds[0]
+        assert "input_ids" in sample and "target_ids" in sample
+
+def test_penn_treebank_dataset_filters_short_sequences(tmp_path):
+    """
+    Test that PennTreebankDataset filters out sequences of length <= 1.
+    Only sequences with length > 1 should remain in the dataset.
+    """
+    from Data_preprocessing.datasets.penn_treebank import PennTreebankDataset
+    import pickle
+    data = [[1], [1, 2], [1, 2, 3]]
+    file_path = tmp_path / "short_seqs.pkl"
+    with open(file_path, "wb") as f:
+        pickle.dump(data, f)
+    ds = PennTreebankDataset(str(file_path.name), str(tmp_path), block_size=8)
+    assert len(ds) == 2
+
+
+def test_penn_treebank_dataset_block_size_truncation(tmp_path):
+    """
+    Test that PennTreebankDataset truncates input and target sequences to the specified block_size.
+    """
+    from Data_preprocessing.datasets.penn_treebank import PennTreebankDataset
+    import pickle
+    data = [[i for i in range(20)]]  # Sequence longer than block_size
+    file_path = tmp_path / "long_seq.pkl"
+    with open(file_path, "wb") as f:
+        pickle.dump(data, f)
+    block_size = 8
+    ds = PennTreebankDataset(str(file_path.name), str(tmp_path), block_size=block_size)
+    sample = ds[0]
+    assert len(sample["input_ids"]) == block_size
+    assert len(sample["target_ids"]) == block_size
+
+
+def test_pad_collate_fn_pads_sequences():
+    """
+    Test that pad_collate_fn correctly pads input and target sequences in a batch to the same length.
+    """
+    from utils.model_utils import pad_collate_fn
+    import torch
+    batch = [
+        {"input_ids": torch.tensor([1, 2]), "target_ids": torch.tensor([1, 2])},
+        {"input_ids": torch.tensor([1, 2, 3]), "target_ids": torch.tensor([1, 2, 3])}
+    ]
+    pad_token_id = 0
+    result = pad_collate_fn(batch, pad_token_id)
+    assert result["input_ids"].shape == (2, 3)
+    assert (result["input_ids"][0, -1] == pad_token_id)
