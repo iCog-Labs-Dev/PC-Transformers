@@ -11,7 +11,3 @@ data_preprocessing/
 .venv/
 *.egg-info/
 checkpoints/
-
-.github/
-*.ini
-tests/
