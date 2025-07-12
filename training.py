@@ -14,24 +14,53 @@ from utils.model_utils import load_tokenizer, reset_pc_modules
 from utils.device_utils import setup_device, cleanup_memory
 from eval import evaluate
 from visualization import plot_metrics
+import argparse
 
-"""Usage: torchrun --nproc-per-node=2 training.py"""
+"""
+Training Script for Predictive Coding Transformer
 
-def train(model, dataloader, tokenizer, global_step, device):
+This script trains a predictive coding transformer model
+
+Usage:
+    python training.py [--flash]
+
+Flags:
+    --flash              Enable FlashAttention for attention layers (default: False)
+
+Example:
+    python training.py --flash
+    torchrun --nproc-per-node=<NUM_GPUS> training.py --flash
+"""
+
+def train(model, dataloader, tokenizer, config, global_step, device):
+    """
+    Run one epoch of training for the predictive coding transformer model.
+
+    Args:
+        model (nn.Module): The model to train.
+        dataloader (DataLoader): DataLoader for the training data.
+        tokenizer: Tokenizer object for decoding and padding.
+        config (GPTConfig): Model and training configuration.
+        global_step (int): The current global step for learning rate scheduling.
+        device (torch.device): Device to run training on.
+
+    Returns:
+        tuple: (average energy, average perplexity, updated global_step)
+    """
     model.train()
     total_energy = 0.0
     total_ce_loss = 0.0
     batch_count = 0
-    pad_token_id = tokenizer.token_to_id("[PAD]")
+    pad_token_id = tokenizer.token_to_id('[PAD]')
     vocab_size = tokenizer.get_vocab_size()
 
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
 
-        if global_step < GPTConfig.warmup_steps:
-            lr = GPTConfig.local_learning_rate + global_step / GPTConfig.warmup_steps * (
-                GPTConfig.peak_learning_rate - GPTConfig.local_learning_rate)
+        if global_step < config.warmup_steps:
+            lr = config.local_learning_rate + global_step / config.warmup_steps * (
+                config.peak_learning_rate - config.local_learning_rate)
         else:
             lr = GPTConfig.peak_learning_rate
 
@@ -93,6 +122,14 @@ def train(model, dataloader, tokenizer, global_step, device):
     return avg_energy, avg_perplexity, global_step
 
 def main():
+    """
+    Main entry point for training the predictive coding transformer model.
+    Parses command-line arguments, sets up the model, data, and training loop.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--flash', action='store_true', help='Enable FlashAttention for attention layers')
+    args = parser.parse_args()
+
     local_rank, device, use_ddp = setup_device()
     print(f"Using device: {device} (local rank {local_rank})")
 
@@ -118,7 +155,8 @@ def main():
         update_bias=False,
         use_lateral = True,
         energy_fn_name="kld",
-        eos_token_id = tokenizer.token_to_id("[EOS]")
+        eos_token_id = tokenizer.token_to_id("[EOS]"),
+        use_flash_attention=args.flash
     )
     model = PCTransformer(config).to(device)
     if use_ddp:
@@ -149,7 +187,7 @@ def main():
             print(f"Epoch {epoch+1}/{config.num_epochs}")
 
         model.train()
-        train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, global_step, device)
+        train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, config, global_step, device)
         train_energies.append(train_energy)
         
         model.eval()

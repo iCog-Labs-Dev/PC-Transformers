@@ -32,6 +32,8 @@ Install required Python packages:
 ```
 pip install -r requirements.txt
 ```
+If one also wants to use flash attention:
+pip install flash_attn
 ## Usage:
 Tokenize the data:
 ```bash
@@ -41,11 +43,28 @@ Train the model:
 ```bash
 torchrun --nproc-per-node=<NUM_GPUS> training.py
 ```
+-With flash attention:
+```bash
+torchrun --nproc-per-node=<NUM_GPUS> training.py --flash
+```
 Evaluate the model:
+```bash
+torchrun --nproc-per-node=<NUM_GPUS> eval.py
+```
+-With flash attention:
 ```bash
 torchrun --nproc-per-node=<NUM_GPUS> eval.py
 ```
 Generating text:
 ```bash
 torchrun --nproc-per-node=<NUM_GPUS> generate_text.py
+```
+Flags:
+    --flash              (default: False)
+    --max_tokens N       (default: 50)
+    --prompt PROMPT      (default: None, uses test set)
+    --temperature T      (default: 1.0)
+-With these flags:
+```bash
+torchrun --nproc-per-node=<NUM_GPUS> generate_text.py --flash --prompt "once upon a time" --max_tokens 100 --temperature 3.4
 ```

@@ -3,7 +3,7 @@ from predictive_coding.config import GPTConfig
 
 logger = logging.getLogger(__name__)
 
-def get_dynamic_model_config(trial, vocab_size):
+def get_dynamic_model_config(trial, vocab_size, flash=False):
     """Get model configuration with dynamic parameter combinations"""
     n_embed = trial.suggest_int("n_embed", 64, 768, step=16)
 
@@ -42,7 +42,8 @@ def get_dynamic_model_config(trial, vocab_size):
         update_bias=update_bias,
         use_lateral=True,
         energy_fn_name=energy_fn_name,
-        eos_token_id = eos_token_id
+        eos_token_id = eos_token_id, 
+        use_flash_attention=flash
     )
 
 def update_global_config(config):
