@@ -16,7 +16,21 @@ import argparse
 logger = logging.getLogger(__name__)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-"""Usage: torchrun --nproc-per-node=2 tuning/bayes_tuning.py """
+"""
+Bayesian tuning Script for Predictive Coding Transformer
+
+This script trains a predictive coding transformer model
+
+Usage:
+    python tuning/bayes_tuning.py [--flash]
+
+Flags:
+    --flash              Enable FlashAttention for attention layers (default: False)
+
+Example:
+    python tuning/bayes_tuning.py [--flash]
+    torchrun --nproc-per-node=<NUM_GPUS> tuning/bayes_tuning.py --flash
+"""
 
 def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False):
     """Run clean dynamic hyperparameter tuning"""
