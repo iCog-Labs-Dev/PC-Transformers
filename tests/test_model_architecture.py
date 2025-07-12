@@ -1,29 +1,12 @@
-# ===================== Test Config Helper =====================
-def make_test_config(**overrides):
-    base = dict(
-        vocab_size=20,
-        block_size=5,
-        n_embed=8,
-        dropout=0.1,
-        local_learning_rate=1e-3,
-        T=2,
-        is_holding_error=True,
-        num_heads=2,
-        n_blocks=1,
-        num_epochs=1,
-        update_bias=False,
-        energy_fn_name="scaled_mse",
-        eos_token_id=19
-    )
-    base.update(overrides)
-    from predictive_coding.config import GPTConfig
-    return GPTConfig(**base)
-
+from config import make_test_config
 # ===================== Embedding Layer (embedding.py) =====================
 import torch
 from model_architecture.embedding import Embedding_Layer
 
 def test_embedding_layer_output_shape():
+    """
+    Test that the Embedding_Layer produces outputs of the correct shape.
+    """
     batch_size = 2
     seq_len = 5
     config = make_test_config(block_size=seq_len)
@@ -36,6 +19,9 @@ def test_embedding_layer_output_shape():
     assert out.shape == (batch_size, seq_len, config.n_embed)
 
 def test_embedding_layer_layernorm_changes_output():
+    """
+    Test that LayerNorm changes the output of the Embedding_Layer.
+    """
     batch_size = 2
     seq_len = 5
     config = make_test_config(block_size=seq_len, dropout=0.0)
@@ -47,6 +33,9 @@ def test_embedding_layer_layernorm_changes_output():
     assert not torch.allclose(out, out_norm), "LayerNorm should change the output."
 
 def test_embedding_layer_dropout_changes_output():
+    """
+    Test that Dropout changes the output of the Embedding_Layer in training and eval modes.
+    """
     batch_size = 2
     seq_len = 5
     config = make_test_config(block_size=seq_len, dropout=0.5)
@@ -69,6 +58,9 @@ import math
 from model_architecture.attention import Attention
 
 def test_attention_output_shape():
+    """
+    Test that the Attention module produces outputs of the correct shape.
+    """
     batch_size = 2
     seq_len = 5
     config = make_test_config(block_size=seq_len)
@@ -86,6 +78,9 @@ def test_attention_output_shape():
     assert attn_out.shape == (batch_size, seq_len, config.n_embed)
 
 def test_attention_various_head_counts():
+    """
+    Test that the Attention module can handle different head counts and produce correct outputs.
+    """
     batch_size = 2
     seq_len = 5
     for n_embed, num_heads in [(8, 2), (12, 3), (16, 4)]:
@@ -104,6 +99,9 @@ def test_attention_various_head_counts():
         assert attn_out.shape == (batch_size, seq_len, n_embed)
 
 def test_attention_mask_application():
+    """
+    Test that the Attention module correctly applies a mask to the output.
+    """
     batch_size = 1
     seq_len = 4
     config = make_test_config(block_size=seq_len)
@@ -127,6 +125,9 @@ import torch.nn as nn
 from model_architecture.mlp import MLP
 
 def test_mlp_output_shape():
+    """
+    Test that the MLP module produces outputs of the correct shape.
+    """
     batch_size = 2
     seq_len = 5
     config = make_test_config(block_size=seq_len)
@@ -137,6 +138,9 @@ def test_mlp_output_shape():
     assert out2.shape == (batch_size, seq_len, config.n_embed)
 
 def test_mlp_various_input_sizes():
+    """
+    Test that the MLP module can handle different input sizes.
+    """
     config = make_test_config()
     mlp = MLP(config)
     for batch_size, seq_len in [(1, 3), (4, 2), (2, 7)]:
@@ -149,6 +153,9 @@ def test_mlp_various_input_sizes():
 from model_architecture.output import OutputLayer
 
 def test_output_layer_logits_shape():
+    """
+    Test that the OutputLayer produces outputs of the correct shape.
+    """
     batch_size = 2
     seq_len = 5
     vocab_size = 20
@@ -157,3 +164,157 @@ def test_output_layer_logits_shape():
     x = torch.randn(batch_size, seq_len, config.n_embed)
     logits = output_layer.output(x)
     assert logits.shape == (batch_size, seq_len, vocab_size) 
+
+# ===================== Transformer Block (transformer_block.py) =====================
+from model_architecture.transformer_block import TransformerBlock
+
+def test_transformer_block_components():
+    """
+    Test that the TransformerBlock has all required submodules (ln1, attn, ln2, mlp)
+    and that its layer norms produce outputs of the correct shape.
+    """
+    batch_size = 2
+    seq_len = 5
+    config = make_test_config(block_size=seq_len)
+    block = TransformerBlock(config)
+    x = torch.randn(batch_size, seq_len, config.n_embed)
+    
+    # Test that components exist and have correct shapes
+    assert hasattr(block, 'ln1')
+    assert hasattr(block, 'attn')
+    assert hasattr(block, 'ln2')
+    assert hasattr(block, 'mlp')
+    
+    # Test layer norms output shape
+    ln1_out = block.ln1(x)
+    ln2_out = block.ln2(x)
+    assert ln1_out.shape == (batch_size, seq_len, config.n_embed)
+    assert ln2_out.shape == (batch_size, seq_len, config.n_embed)
+
+def test_transformer_block_layer_norms_different():
+    """
+    Test that the two LayerNorms in TransformerBlock produce outputs that are different from the input.
+    Note: Since both LayerNorms are initialized identically, their outputs may be similar, but should not be identical to the input.
+    """
+    batch_size = 2
+    seq_len = 5
+    config = make_test_config(block_size=seq_len)
+    block = TransformerBlock(config)
+    x = torch.randn(batch_size, seq_len, config.n_embed)
+    
+    # Test that layer norms change the output
+    ln1_out = block.ln1(x)
+    ln2_out = block.ln2(x)
+    assert not torch.allclose(x, ln1_out), "LayerNorm1 should change the output"
+    assert not torch.allclose(x, ln2_out), "LayerNorm2 should change the output"
+    # Check output shapes
+    assert ln1_out.shape == (batch_size, seq_len, config.n_embed)
+    assert ln2_out.shape == (batch_size, seq_len, config.n_embed)
+
+# ===================== PC Transformer Model (pc_t_model.py) =====================
+from model_architecture.pc_t_model import PCTransformer
+
+def test_pc_transformer_initialization():
+    """
+    Test that the PCTransformer model initializes with the correct number of blocks and required components.
+    """
+    config = make_test_config(n_blocks=2)
+    model = PCTransformer(config)
+    assert hasattr(model, 'embedding')
+    assert hasattr(model, 'blocks')
+    assert hasattr(model, 'output')
+    assert len(model.blocks) == config.n_blocks
+
+def test_pc_transformer_components():
+    """
+    Test that the PCTransformer and its blocks have all required submodules.
+    """
+    batch_size = 2
+    seq_len = 5
+    vocab_size = 20
+    config = make_test_config(block_size=seq_len, vocab_size=vocab_size, n_blocks=1)
+    model = PCTransformer(config)
+    # Test that model components exist and have correct shapes
+    assert hasattr(model, 'embedding')
+    assert hasattr(model, 'blocks')
+    assert hasattr(model, 'output')
+    assert len(model.blocks) == config.n_blocks
+    # Test that blocks have expected components
+    for block in model.blocks:
+        assert hasattr(block, 'ln1')
+        assert hasattr(block, 'attn')
+        assert hasattr(block, 'ln2')
+        assert hasattr(block, 'mlp')
+
+def test_pc_transformer_input_validation():
+    """
+    Test that input and target IDs for PCTransformer have the correct shape and dimensions.
+    """
+    batch_size = 2
+    seq_len = 5
+    vocab_size = 20
+    config = make_test_config(block_size=seq_len, vocab_size=vocab_size, n_blocks=1)
+    model = PCTransformer(config)
+    input_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+    target_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+    # Test that input validation works
+    assert input_ids.shape == (batch_size, seq_len)
+    assert target_ids.shape == (batch_size, seq_len)
+    assert input_ids.ndim == 2, "Expected input_ids shape [B, S]"
+
+def test_pc_transformer_config_attributes():
+    """
+    Test that the PCTransformer model exposes its configuration attributes correctly.
+    """
+    config = make_test_config(n_blocks=2)
+    model = PCTransformer(config)
+    assert hasattr(model, 'config')
+    assert model.config.n_blocks == config.n_blocks
+    assert model.config.vocab_size == config.vocab_size
+    assert model.config.n_embed == config.n_embed 
+
+def test_pc_transformer_train_mode():
+    """
+    Test that PCTransformer can be set to training mode and maintains its components.
+    """
+    config = make_test_config(n_blocks=1, T=2)
+    model = PCTransformer(config)
+    model.train()
+    
+    assert model.training == True
+    assert hasattr(model, 'embedding')
+    assert hasattr(model, 'blocks')
+    assert hasattr(model, 'output')
+
+def test_pc_transformer_eval_mode():
+    """
+    Test that PCTransformer can be set to evaluation mode and maintains its components.
+    """
+    config = make_test_config(n_blocks=1, T=2)
+    model = PCTransformer(config)
+    model.eval()
+    
+    assert model.training == False
+    assert hasattr(model, 'embedding')
+    assert hasattr(model, 'blocks')
+    assert hasattr(model, 'output')
+
+def test_pc_transformer_register_lateral_weights():
+    """
+    Test that the register_all_lateral_weights method can be called without errors.
+    """
+    config = make_test_config(n_blocks=1, T=2)
+    model = PCTransformer(config)
+    
+    # This should not raise an error
+    model.register_all_lateral_weights()
+    
+    # Check that lateral weights are registered
+    for block in model.blocks:
+        assert hasattr(block.attn.pc_qkv, 'W_latents')
+        assert hasattr(block.attn.pc_output, 'W_latents')
+        assert hasattr(block.mlp.pc_layer1, 'W_latents')
+        assert hasattr(block.mlp.pc_layer2, 'W_latents')
+    
+    assert hasattr(model.output.pc_layer, 'W_latents')
+
