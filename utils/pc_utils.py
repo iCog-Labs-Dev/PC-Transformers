@@ -172,6 +172,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         if requires_update:
             anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
             W_latents[layer_type] = W_latents[layer_type] + local_lr * anti_hebbian_latent
+            W_latents[layer_type] = torch.clamp(W_latents[layer_type], -1.0, 1.0)
     
     else:
         x= x + local_lr * error 
@@ -245,6 +246,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             if requires_update:
                 anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
                 W_latents[layer_type] =W_latent + local_lr * anti_hebbian_latent
+                W_latents[layer_type] = torch.clamp(W_latents[layer_type], -1.0, 1.0)
         
         else:
             x= x+ local_lr * error
