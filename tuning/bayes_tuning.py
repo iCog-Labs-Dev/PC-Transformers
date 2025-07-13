@@ -56,9 +56,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
     logger.info(f"[Rank {local_rank}] Summary Log: {summary_path}")
     logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
 
+    study.optimize(lambda trial: objective(trial, device, flash), n_trials=n_trials, show_progress_bar= True)
+
     try:
         if local_rank == 0:
-            study.optimize(lambda trial: objective(trial, device, flash), n_trials=n_trials, show_progress_bar= True)
             logger.info(f"[Rank {local_rank}] Tuning completed.")
             
             if len(study.trials) > 0:
@@ -80,8 +81,13 @@ if __name__ == "__main__":
     parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
     args = parser.parse_args()
 
-    if not logging.getLogger().hasHandlers() and int(os.environ.get("RANK", 0)) == 0:
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    rank = int(os.environ.get("RANK", 0))
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(
+            level=logging.INFO,
+            format=f"[Rank {rank}] %(asctime)s - %(levelname)s - %(message)s",
+            stream=sys.stdout
+        )
 
     torch.manual_seed(42)
     if torch.cuda.is_available():
@@ -93,7 +99,10 @@ if __name__ == "__main__":
         torch.cuda.set_device(local_rank)
         dist.init_process_group(backend="nccl", rank=local_rank)
 
-    run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash)
+    if use_ddp:
+        dist.barrier(device_ids=[local_rank])
+
+    study = run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash)
 
     if use_ddp and dist.is_initialized():
         dist.barrier(device_ids=[local_rank]) 
