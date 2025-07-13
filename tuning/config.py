@@ -68,5 +68,5 @@ def update_global_config(config):
 
 def normalize_energy(energy_value, energy_fn_name):
     """ Normalize energy values to comparable scales across different energy functions."""
-    factors = {'mse': 1.0, 'scaled_mse': 20.0, 'kld': 0.2}
+    factors = {'mse': 1.0, 'kld': 0.2}
     return energy_value * factors.get(energy_fn_name, 1.0)

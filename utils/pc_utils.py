@@ -45,22 +45,7 @@ def compute_error_from_energy(mu: torch.Tensor, target: torch.Tensor, energy_fn_
     if energy_fn_name == "mse":
         error = target - mu
         energy = 0.5 * (error ** 2).mean()
-
-    elif energy_fn_name == "scaled_mse":
-        scale = 1.0 / (target.var(dim=-1, keepdim=True) + 1e-5)
-        error = scale * (target - mu)
-        energy = 0.5 * (scale * error ** 2).mean()
-
-    elif energy_fn_name == "l1":
-        error = torch.sign(target - mu)
-        energy = error.abs().mean()
-
-    elif energy_fn_name == "cosine":
-        mu_norm = mu / (mu.norm(dim=-1, keepdim=True) + 1e-8)
-        target_norm = target / (target.norm(dim=-1, keepdim=True) + 1e-8)
-        error = target_norm - mu_norm
-        energy = (1 - F.cosine_similarity(mu, target, dim=-1)).mean()
-
+           
     elif energy_fn_name == "kld":
         mu_soft = F.softmax(mu, dim=-1)
         target_soft = F.softmax(target, dim=-1)
