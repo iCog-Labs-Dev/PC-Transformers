@@ -100,21 +100,16 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         batch_count += 1
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         
-        if dist.is_initialized() and dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
+        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
             # if device.type == "cuda":
-            #     print(f"    [Before Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
-            #         f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB")
-            
-            reset_pc_modules(model)
-            cleanup_memory()
-            
-            # if device.type == "cuda":
-            #     print(f"    [After Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB | "
-            #         f"Reserved: {torch.cuda.memory_reserved(device) / 1e6:.2f} MB")
-        else:
-            reset_pc_modules(model)
-            cleanup_memory()
+            #     print(f"    [Before Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB")
+
+        reset_pc_modules(model)
+        cleanup_memory()
+
+        # if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0 and device.type == "cuda":
+        #     print(f"    [After Cleanup] Allocated: {torch.cuda.memory_allocated(device) / 1e6:.2f} MB")
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0

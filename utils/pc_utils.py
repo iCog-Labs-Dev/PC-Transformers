@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from predictive_coding.config import GPTConfig
 from typing import Tuple
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 
@@ -46,22 +45,7 @@ def compute_error_from_energy(mu: torch.Tensor, target: torch.Tensor, energy_fn_
     if energy_fn_name == "mse":
         error = target - mu
         energy = 0.5 * (error ** 2).mean()
-
-    elif energy_fn_name == "scaled_mse":
-        scale = 1.0 / (target.var(dim=-1, keepdim=True) + 1e-5)
-        error = scale * (target - mu)
-        energy = 0.5 * (scale * error ** 2).mean()
-
-    elif energy_fn_name == "l1":
-        error = torch.sign(target - mu)
-        energy = error.abs().mean()
-
-    elif energy_fn_name == "cosine":
-        mu_norm = mu / (mu.norm(dim=-1, keepdim=True) + 1e-8)
-        target_norm = target / (target.norm(dim=-1, keepdim=True) + 1e-8)
-        error = target_norm - mu_norm
-        energy = (1 - F.cosine_similarity(mu, target, dim=-1)).mean()
-
+           
     elif energy_fn_name == "kld":
         mu_soft = F.softmax(mu, dim=-1)
         target_soft = F.softmax(target, dim=-1)
@@ -172,6 +156,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         if requires_update:
             anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
             W_latents[layer_type] = W_latents[layer_type] + local_lr * anti_hebbian_latent
+            W_latents[layer_type] = torch.clamp(W_latents[layer_type], -1.0, 1.0)
     
     else:
         x= x + local_lr * error 
@@ -191,7 +176,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     return x, mu
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, flash=False):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, flash=False):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
         q_proj = proj_layers.get("q_proj", None)
@@ -203,9 +188,8 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         V= v_proj(x)
         batch_size, seq_len, embed_dim=target.shape
         
-        num_heads = GPTConfig.num_heads
-        head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
-        la= GPTConfig.la * math.sqrt(1.0 / head_dim)
+        head_dim = n_embed // num_heads 
+        la= la * math.sqrt(1.0 / head_dim)
 
         Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
         K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
@@ -245,6 +229,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             if requires_update:
                 anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
                 W_latents[layer_type] =W_latent + local_lr * anti_hebbian_latent
+                W_latents[layer_type] = torch.clamp(W_latents[layer_type], -1.0, 1.0)
         
         else:
             x= x+ local_lr * error

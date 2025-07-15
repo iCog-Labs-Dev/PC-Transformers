@@ -11,4 +11,4 @@ class Config:
    
     # Training
     batch_size = 8
-    num_workers = 8
+    num_workers = 4

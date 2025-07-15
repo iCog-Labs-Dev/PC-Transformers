@@ -20,10 +20,13 @@ class PCLayer(nn.Module):
     def __init__(
         self,
         T: int = 1,
-        local_learning_rate: float = 1e-3,
+        local_learning_rate: float = 1e-5,
         is_holding_error: bool = False,
         update_bias: bool = True,
-        energy_fn_name: str = "scaled_mse",
+        energy_fn_name: str = "mse",
+        num_heads: Optional[int] = None,
+        n_embed: Optional[int] = None,
+        la: Optional[float] = None,
     ):
         """
         Initialize the PCLayer.
@@ -47,6 +50,9 @@ class PCLayer(nn.Module):
         self.energy_fn_name = energy_fn_name 
         self._energy = 0.0
         self._errors = []
+        self.num_heads = num_heads
+        self.n_embed = n_embed
+        self.la = la
 
     def register_lateral(self, layer_type: str, size: int):
         """
@@ -130,7 +136,8 @@ class PCLayer(nn.Module):
         elif layer_type == "attn":
             x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
                               self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                              self.energy_fn_name, self.update_bias, requires_update, layer_instance=self, flash=use_flash_attention)
+                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, 
+                              self.n_embed, self.la, flash=use_flash_attention)
         else:
             x, mu = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
                                self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
