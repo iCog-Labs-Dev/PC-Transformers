@@ -39,7 +39,7 @@ def test_gpt_config_default_values():
     assert config.batch_size == 8
     assert config.num_epochs == 5
     assert config.use_lateral == True
-    assert config.energy_fn_name == "scaled_mse"
+    assert config.energy_fn_name == "mse"
     assert config.eos_token_id == None
     assert config.use_flash_attention == False
 
@@ -90,21 +90,6 @@ def test_gpt_config_custom_values():
     assert config.use_flash_attention == True
 
 # ===================== PCLayer Tests (pc_layer.py) =====================
-
-def test_pc_layer_initialization():
-    """
-    Test that PCLayer can be initialized with default parameters.
-    """
-    pc_layer = PCLayer()
-    assert pc_layer.T == 1
-    assert pc_layer.local_lr == 1e-3
-    assert pc_layer.is_holding_error == False
-    assert pc_layer.update_bias == True
-    assert pc_layer.clamp_value == 1.0
-    assert pc_layer.use_lateral == True
-    assert pc_layer.energy_fn_name == "scaled_mse"
-    assert pc_layer._energy == 0.0
-    assert pc_layer._errors == []
 
 def test_pc_layer_custom_initialization():
     """

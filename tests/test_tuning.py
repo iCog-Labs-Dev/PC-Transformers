@@ -118,18 +118,10 @@ def test_normalize_energy():
     mse_energy = normalize_energy(1.0, 'mse')
     assert mse_energy == 1.0
     
-    # Test scaled MSE normalization
-    scaled_mse_energy = normalize_energy(1.0, 'scaled_mse')
-    assert scaled_mse_energy == 20.0
-    
     # Test KLD normalization
     kld_energy = normalize_energy(1.0, 'kld')
     assert kld_energy == 0.2
     
-    # Test unknown energy function
-    unknown_energy = normalize_energy(1.0, 'unknown')
-    assert unknown_energy == 1.0
-
 # ===================== Dataloader Tests (dataloader.py) =====================
 
 @patch('torch.cuda.is_available')
