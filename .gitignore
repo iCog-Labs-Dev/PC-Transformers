@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-*.pkl
+!tests/dummy_data/
+# *.pkl
 *.json
 *.pt
 *.txt
@@ -11,7 +12,3 @@ data_preprocessing/
 .venv/
 *.egg-info/
 checkpoints/
-
-.github/
-*.ini
-tests/
