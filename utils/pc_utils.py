@@ -4,6 +4,7 @@ import math
 import gc
 from predictive_coding.config import GPTConfig
 from torch.amp import autocast
+from contextlib import nullcontext
 
 def compute_DVL(attn_v):
     B, H, T, D= attn_v.shape
@@ -64,7 +65,7 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     pos_layer = layer["pos"]
 
     use_amp = target.is_cuda
-    autocast_ctx = autocast('cuda') if use_amp else torch.no_grad()
+    autocast_ctx = autocast('cuda') if use_amp else nullcontext()
     with autocast_ctx:
         if requires_update or mu_word_cache is None or mu_pos_cache is None:
             mu_word = word_layer(input_ids)
@@ -116,7 +117,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         tuple: (updated activity tensor, predicted output tensor)
     """
     use_amp = target.is_cuda
-    autocast_ctx = autocast('cuda') if use_amp else torch.no_grad()
+    autocast_ctx = autocast('cuda') if use_amp else nullcontext()
     with autocast_ctx:
         mu = layer(x)
         if layer_type == "fc1":
@@ -164,7 +165,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         
         assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"        
         use_amp = target.is_cuda
-        autocast_ctx = autocast('cuda') if use_amp else torch.no_grad()
+        autocast_ctx = autocast('cuda') if use_amp else nullcontext()
         with autocast_ctx:
             Q= q_proj(x)
             K= k_proj(x)
