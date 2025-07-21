@@ -2,7 +2,9 @@ import torch
 import torch.nn.functional as F
 import math
 from predictive_coding.config import GPTConfig
-import numpy
+import torch.amp as amp
+from contextlib import nullcontext
+
 def compute_DVL(attn_v):
     B, H, T, D= attn_v.shape
     
@@ -73,33 +75,35 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     """
     word_layer = layer["word"]
     pos_layer = layer["pos"]
+    use_amp = target.is_cuda
+    autocast_ctx = amp.autocast('cuda') if use_amp else nullcontext()
+    with autocast_ctx:
+        if requires_update or mu_word_cache is None or mu_pos_cache is None:
+            mu_word = word_layer(input_ids)
+            mu_pos = pos_layer(position_ids)
+        else:
+            mu_word = mu_word_cache
+            mu_pos = mu_pos_cache
+        mu = mu_word + mu_pos
 
-    if requires_update or mu_word_cache is None or mu_pos_cache is None:
-        mu_word = word_layer(input_ids)
-        mu_pos = pos_layer(position_ids)
-    else:
-        mu_word = mu_word_cache
-        mu_pos = mu_pos_cache
-    mu = mu_word + mu_pos
+        if not requires_update:
+            if t == T - 1:
+                finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
+            return mu, mu_word, mu_pos
 
-    if not requires_update:
+        error = target - mu
+        update = torch.clamp(error, -clamp_value, clamp_value)
+        with torch.no_grad():
+            flat_input_ids = input_ids.reshape(-1)
+            flat_update = update.reshape(-1, update.size(-1))
+            word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
+            flat_position_ids = position_ids.reshape(-1)
+            pos_layer.weight.data.index_add_(0, flat_position_ids, local_lr * flat_update)
+
         if t == T - 1:
-            finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
+            finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
+
         return mu, mu_word, mu_pos
-
-    error = target - mu
-    update = torch.clamp(error, -clamp_value, clamp_value)
-    with torch.no_grad():
-        flat_input_ids = input_ids.reshape(-1)
-        flat_update = update.reshape(-1, update.size(-1))
-        word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
-        flat_position_ids = position_ids.reshape(-1)
-        pos_layer.weight.data.index_add_(0, flat_position_ids, local_lr * flat_update)
-
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
-
-    return mu, mu_word, mu_pos
     
 def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update):
     """
@@ -123,43 +127,46 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     Returns:
         tuple: (updated activity tensor, predicted output tensor)
     """
-    mu = layer(x)
-    if layer_type == "fc1":
-        mu = F.gelu(mu)
+    use_amp = target.is_cuda
+    autocast_ctx = amp.autocast('cuda') if use_amp else nullcontext()
+    with autocast_ctx:
+        mu = layer(x)
+        if layer_type == "fc1":
+            mu = F.gelu(mu)
 
-    error = target - mu
-    if layer.weight.shape[0] != layer.weight.shape[1]:
-        error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
-    else:
-        error_proj = error  
+        error = target - mu
+        if layer.weight.shape[0] != layer.weight.shape[1]:
+            error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
+        else:
+            error_proj = error  
 
-    if use_lateral and layer_type in W_latents:
-        W_latent = W_latents[layer_type]
-        x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
-        delta_x = error_proj + x_latent
-        x = x + local_lr * delta_x
+        if use_lateral and layer_type in W_latents:
+            W_latent = W_latents[layer_type]
+            x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
+            delta_x = error_proj + x_latent
+            x = x + local_lr * delta_x
 
+            if requires_update:
+                anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+                W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
+        
+        else:
+            x= x + local_lr * error 
+        
+        x = torch.clamp(x, -clamp_value, clamp_value)
+        
+        # Hebbian Update W_layer
         if requires_update:
-            anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
-    
-    else:
-        x= x + local_lr * error 
-    
-    x = torch.clamp(x, -clamp_value, clamp_value)
-    
-    # Hebbian Update W_layer
-    if requires_update:
-        delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-        layer.weight.data.add_(delta_W)
+            delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+            layer.weight.data.add_(delta_W)
 
-        if layer.bias is not None and update_bias:
-            layer.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
+            if layer.bias is not None and update_bias:
+                layer.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
 
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+        if t == T - 1:
+            finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
-    return x, mu
+        return x, mu
 
 def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance):
         assert proj_layers is not None, "proj_layers dict is required for attention"
@@ -167,69 +174,72 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         k_proj = proj_layers.get("k_proj", None)
         v_proj = proj_layers.get("v_proj", None)
         
-        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"        
-        Q= q_proj(x)
-        K= k_proj(x)
-        V= v_proj(x)
-        batch_size, seq_len, embed_dim=target.shape
+        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"     
+        use_amp = target.is_cuda
+        autocast_ctx = autocast('cuda') if use_amp else nullcontext()
+        with autocast_ctx:   
+            Q= q_proj(x)
+            K= k_proj(x)
+            V= v_proj(x)
+            batch_size, seq_len, embed_dim=target.shape
+            
+            num_heads = GPTConfig.num_heads
+            head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
+            la= GPTConfig.la * math.sqrt(1.0 / head_dim)
+
+            Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
+            K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+            V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+
+            
+            scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #B,H,T,T
+            mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
+            scores = scores.masked_fill(~mask, float("-inf"))
+            attn_weights = scores.softmax(dim=-1) # B, H, T, T
+            mu_heads = attn_weights @ V   # B, H, T, D
+            dvl_grad=compute_DVL(mu_heads)
+            dvl_norm = dvl_grad.norm().item()
         
-        num_heads = GPTConfig.num_heads
-        head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
-        la= GPTConfig.la * math.sqrt(1.0 / head_dim)
-
-        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
-        K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-        V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-
-          
-        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) #B,H,T,T
-        mask = torch.tril(torch.ones_like(scores, dtype=torch.bool))
-        scores = scores.masked_fill(~mask, float("-inf"))
-        attn_weights = scores.softmax(dim=-1) # B, H, T, T
-        mu_heads = attn_weights @ V   # B, H, T, D
-        dvl_grad=compute_DVL(mu_heads)
-        dvl_norm = dvl_grad.norm().item()
-    
-        #print(f"Diversity Grad Norm: {dvl_norm:.8f}")
-        similarity = get_head_similarity(mu_heads)
+            #print(f"Diversity Grad Norm: {dvl_norm:.8f}")
+            similarity = get_head_similarity(mu_heads)
+            
+            mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
         
-        mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-     
-        error = target - mu  # B, T, D
-        if dvl_grad is not None:
-            B, T, H, D = dvl_grad.shape
-            dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
-            dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
-            error = error + la * dvl_projected
-        else:
-            error = error
-        if layer_instance is not None:
-            setattr(layer_instance, '_head_similarity', similarity)
-            setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
-            setattr(layer_instance, '_head_similarity_max', similarity.max().item())
-    
-
-        if requires_update:
-            anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
+            error = target - mu  # B, T, D
+            if dvl_grad is not None:
+                B, T, H, D = dvl_grad.shape
+                dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
+                dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
+                error = error + la * dvl_projected
+            else:
+                error = error
+            if layer_instance is not None:
+                setattr(layer_instance, '_head_similarity', similarity)
+                setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
+                setattr(layer_instance, '_head_similarity_max', similarity.max().item())
         
-        else:
-            x= x+ local_lr * error
 
-        x = torch.clamp(x, -clamp_value, clamp_value)
+            if requires_update:
+                anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+                W_latents[layer_type].data.add_(local_lr * anti_hebbian_latent)
+            
+            else:
+                x= x+ local_lr * error
 
-        # Hebbian update W_latent
-        if requires_update:
-            for proj in (q_proj, k_proj, v_proj):
-                delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-                proj.weight.data.add_(delta_W)
-                if proj.bias is not None and update_bias:
-                    proj.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
+            x = torch.clamp(x, -clamp_value, clamp_value)
 
-        if t == T - 1:
-            finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+            # Hebbian update W_latent
+            if requires_update:
+                for proj in (q_proj, k_proj, v_proj):
+                    delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+                    proj.weight.data.add_(delta_W)
+                    if proj.bias is not None and update_bias:
+                        proj.bias.data.add_(local_lr * error.mean(dim=(0, 1)))
 
-        return x, mu
+            if t == T - 1:
+                finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+
+            return x, mu
     
 ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,
