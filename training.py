@@ -92,8 +92,9 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                     _ = module._head_similarity_max
                     
         if layer_energies:
-            valid_energies = [e for e in layer_energies if not (torch.isnan(torch.tensor(e)) if isinstance(e, (int, float)) else True)]
-            batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
+            energies_tensor = torch.tensor(layer_energies, device=device)
+            valid_energies = energies_tensor[~torch.isnan(energies_tensor)]
+            batch_energy = valid_energies.mean().item() if not valid_energies.numel() == 0 else ce_loss.item()
         else:
             batch_energy = ce_loss.item()
         total_energy += batch_energy
