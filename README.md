@@ -1,51 +1,54 @@
 # PC-Transformers
 
-## **Overview**
+## Overview
 
-The PC-Transformers model combines the Transformer architecture with Predictive Coding to enable layer-wise prediction and local weight updates. Each layer predicts the next layer's activity, computes the prediction error, infers latent states, and updates weights. This approach aims to mimic biologically plausible learning mechanisms while maintaining the performance benefits of Transformers. 
+PC-Transformers explore a new paradigm in transformer models by integrating Predictive Coding principles, shifting away from global backpropagation and towards local, biologically-inspired, prediction-based learning. In this framework, each layer predicts the next layer’s activity and updates itself to minimize its own prediction error, mirroring how the brain may process information.
 
-The project leverages the [Penn Treebank dataset](https://www.kaggle.com/datasets/aliakay8/penn-treebank-dataset/data
-) for training and inference.
+This repository implements PC-Transformers and evaluates them on classic language modeling tasks, using the [Penn Treebank dataset](https://www.kaggle.com/datasets/aliakay8/penn-treebank-dataset/data), and a subset of OpenWebText.
 
-## **Model Architecture**
-<img src="assets/Model_diagram.png" alt="Model Diagram" height="500" width = "400"/>
-
-### 1. PC Layer
-The PCLayer implements the predictive coding mechanism at each transformer layer. It functions as a local inference and learning module that infers latent activities by minimizing the prediction error between the predicted output and the target activity. Additionally, it performs local weight updates using Hebbian learning for the layer weights and applies an Anti-Hebbian learning rule to lateral connections, with all updates driven by the layer’s prediction errors.
-
-### 2. Transformer Components
-The PCTransformer model consists of several key components, each integrated with the PCLayer to enable predictive coding-based inference. The Embedding Layer predicts the initial input to the transformer blocks by combining word and position embeddings. Each Transformer Block contains two main parts: an Attention mechanism, which applies predictive coding not only to the attention output but also internally to the score projection through the query, key, and value projections; and an MLP, where the first feedforward layer predicts the input to the second feedforward layer, and the second layer predicts the activity of the next transformer block. Finally, the Output Layer is a linear layer that produces token logits and also employs the PCLayer to perform local weight updates and iterative inference.
+---
 
 ## Installation
 
-Clone the repository and install dependencies:
 ```bash
 git clone https://github.com/iCog-Labs-Dev/PC-Transformers.git
 cd PC-Transformers
-```
-Create and activate a virtual environment (optional but recommended):
-```
 python3 -m venv venv
 source venv/bin/activate 
-```
-Install required Python packages:
-```
 pip install -r requirements.txt
 ```
-## Usage:
-Tokenize the data:
+
+## Usage
+**Tokenize Data:**
 ```bash
 python -m Data_preprocessing.tokenizer.bpe_tokenizer
 ```
-Train the model:
+**Train Model:**
 ```bash
 torchrun --nproc-per-node=<NUM_GPUS> training.py
 ```
-Evaluate the model:
+**Evaluate:**
 ```bash
 torchrun --nproc-per-node=<NUM_GPUS> eval.py
 ```
-Generating text:
+**Generating Text:**
 ```bash
 torchrun --nproc-per-node=<NUM_GPUS> generate_text.py
 ```
+
+---
+
+## Model Structure
+
+- **Embedding Layer:** Maps tokens and positions to vectors.
+- **Attention Block:** Predicts contextualized representations using local error and diversity regularization.
+- **MLP Block:** Two-layer feedforward, each minimizing local prediction error.
+- **Output Layer:** Projects final representation to vocabulary logits for next-token prediction.
+
+Each layer iteratively refines its latent state and weights over T steps using only local signals.
+
+---
+
+## Contact
+
+For questions or contributions, please open an issue 
