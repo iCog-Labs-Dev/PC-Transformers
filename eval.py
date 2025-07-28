@@ -11,7 +11,9 @@ from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
-"""Usage: python eval.py"""
+"""Usage: torchrun --nproc-per-node=2 eval.py"""
+local_rank = int(os.getenv("LOCAL_RANK", 0))
+device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
 local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")

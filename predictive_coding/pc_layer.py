@@ -210,6 +210,9 @@ class PCLayer(nn.Module):
             
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
+                
+                if layer_type in self.W_latents:
+                    self.W_latents[layer_type] = self.W_latents[layer_type].to(device)
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
@@ -218,6 +221,8 @@ class PCLayer(nn.Module):
 
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
+
+                
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         """

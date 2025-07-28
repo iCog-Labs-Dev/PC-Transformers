@@ -15,7 +15,7 @@ It takes a prompt, generates new tokens, and prints the prompt, target, and gene
 local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
-def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0, device = None):
+def generate_text(model, config, input_ids, max_new_tokens, temperature, device = None):
     model.eval()
     input_tensor = input_ids.unsqueeze(0).to(device)
 

@@ -14,7 +14,7 @@ def compute_DVL(attn_v, requires_update):
     s_m=torch.bmm(x, x.transpose(1, 2))
     N = s_m.size(1)
     mask = ~torch.eye(N, dtype=torch.bool, device=attn_v.device)
-    s_m= s_m[:, mask].mean(dim=-1)
+    s_m = s_m[:, mask].mean(dim=-1)
     identity = torch.eye(H, device=attn_v.device)
     identity = identity.unsqueeze(0).expand(H, -1, -1) 
     corr=  s_m - identity
@@ -95,11 +95,11 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             flat_input_ids = input_ids.reshape(-1)
             flat_update = update.reshape(-1, update.size(-1))
 
-            word_weight = word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
+            word_weight = word_layer.weight.data.index_add(0, flat_input_ids, local_lr * flat_update)
             word_layer.weight = nn.Parameter(word_weight)
             
             flat_position_ids = position_ids.reshape(-1)
-            pos_weight = pos_layer.weight.data.index_add_(0, flat_position_ids, local_lr * flat_update)
+            pos_weight = pos_layer.weight.data.index_add(0, flat_position_ids, local_lr * flat_update)
             pos_layer.weight = nn.Parameter(pos_weight)
 
     if t == T - 1:
@@ -284,7 +284,6 @@ def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_er
     device = mu.device
     target = target.to(device)
     error = error.to(device)
-
     energy = energy_fn(mu, target,energy_fn_name).mean().item() if is_holding_error else None
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
