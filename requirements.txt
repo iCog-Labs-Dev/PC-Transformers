@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
 filelock==3.18.0
 fsspec==2025.3.2
 MarkupSafe==3.0.2
@@ -12,7 +13,4 @@ nltk==3.9.1
 bert-score==0.3.13
 optuna
 psutil==7.0.0
---extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.5.0
-torchvision==0.15.1
-torchaudio==2.5.1
