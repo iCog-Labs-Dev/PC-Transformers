@@ -5,12 +5,13 @@ import math
 import time
 import torch.nn.functional as F
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
+from utils.pc_utils import cleanup_memory
+from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -85,6 +86,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
+        cleanup_memory()
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
@@ -148,7 +150,7 @@ def main():
         train_energies.append(train_energy)
         
         model.eval()
-        val_energy, val_perplexity, global_step = train(model, valid_loader, tokenizer, config, global_step, device)
+        val_energy, _, val_perplexity = evaluate(model, valid_loader, tokenizer, max_batches= None, device=device)
         val_energies.append(val_energy)
 
         if rank == 0:

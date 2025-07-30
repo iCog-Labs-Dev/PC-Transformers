@@ -8,6 +8,7 @@ from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
+from utils.pc_utils import cleanup_memory
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
@@ -75,6 +76,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
 
         reset_pc_modules(model)
+        cleanup_memory()
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
