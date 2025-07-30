@@ -1,12 +1,21 @@
 import torch
 from torch.amp import autocast
+import logging
+
+# Set up logging
+logging.basicConfig(
+    format='[%(levelname)s] %(message)s',
+    level=logging.INFO 
+)
+
 try:
-    from flash_attn.flash_attn_interface import flash_attn_unpadded_qkvpacked_func
+    from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
     FLASH_AVAILABLE = True
+    logging.info("FlashAttention is available and will be used.")
 except ImportError:
     FLASH_AVAILABLE = False
-    import warnings
-    warnings.warn("FlashAttention is not installed. Falling back to standard attention.")
+    logging.warning("FlashAttention is not installed. Falling back to standard attention.")
+    
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def apply_flash_attention(q, k, v, mask=None):
