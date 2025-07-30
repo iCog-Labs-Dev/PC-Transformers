@@ -54,6 +54,10 @@ Flash Attention Works well with the follwing settings(Further Updates Pending):
 ```
 If not please install the advised Nvidia Driver and Cuda + Cuda Toolkits
 
+```bash
+apt install cuda-toolkit-12-4
+```
+
 
 Download and Install Flash Attention"
 
