@@ -35,10 +35,10 @@ def generate_text(model, config, input_ids, max_new_tokens, temperature, device 
                 
     return input_tensor[0] 
 
-def text_generation(model, config, device = None):
+def text_generation(model, config, device = None,  max_samples=2):
     decoded_preds, decoded_targets = [], []
-    num_samples = min(5, input_ids.size(0))
     prompt_len = 5
+    total_samples = 0
 
     _, _, test_loader = get_loaders(distributed=True)
     tokenizer = load_tokenizer()
@@ -46,8 +46,12 @@ def text_generation(model, config, device = None):
 
     for batch_idx, batch in enumerate(test_loader):
         input_ids = batch["input_ids"].to(device) 
+        batch_size = input_ids.size(0)
 
-        for i in range(num_samples):
+        for i in range(batch_size):
+            if total_samples >= max_samples:
+                break
+
             prompt_ids = input_ids[i][:prompt_len]
             generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7, device = device)
 
@@ -69,7 +73,12 @@ def text_generation(model, config, device = None):
                 print(f"[PROMPT ]: {prompt_str}")
                 print(f"[TARGET ]: {target_str}")
                 print(f"[PREDICT]: {generated_str}")
+            
+            total_samples += 1
+
+        if total_samples >= max_samples:
             break
+
     return decoded_preds, decoded_targets
 
 def main():
@@ -101,7 +110,7 @@ def main():
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     if local_rank == 0:
-        decoded_preds, decoded_targets = text_generation(model, config, device)
+        decoded_preds, decoded_targets = text_generation(model, config, device, max_samples=2)
         if decoded_preds and decoded_targets and local_rank == 0:
             compute_text_metrics(decoded_preds, decoded_targets)
     
