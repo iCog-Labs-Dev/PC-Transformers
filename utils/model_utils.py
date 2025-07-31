@@ -1,7 +1,7 @@
 import os
 import torch
 import torch.nn.functional as F
-from transformers import GPT2Tokenizer
+from transformers import GPT2TokenizerFast
 from Data_preprocessing.config import Config
 from model_architecture.pc_t_model import PCTransformer
 from bert_score import score as bertscore
@@ -21,7 +21,7 @@ def pad_collate_fn(batch, pad_token_id=0):
 
 def load_tokenizer():
     tokenizer_path = os.path.join(Config.TOKENIZER_DIR, f"gpt2_tokenizer_{Config.DATASET_NAME}.json")
-    tokenizer= GPT2Tokenizer.from_pretrained(tokenizer_path)
+    tokenizer= GPT2TokenizerFast.from_pretrained(tokenizer_path)
     special_tokens = {"pad_token": "[PAD]", "eos_token": "[EOS]"}
     tokenizer.add_special_tokens(special_tokens)
     

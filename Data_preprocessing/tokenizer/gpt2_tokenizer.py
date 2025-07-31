@@ -1,6 +1,7 @@
 import os
+import time
 import pickle
-from transformers import GPT2Tokenizer
+from transformers import GPT2TokenizerFast
 from Data_preprocessing.config import Config
 
 class GPT2TokenizerWrapper:
@@ -9,13 +10,13 @@ class GPT2TokenizerWrapper:
         print(f"Initializing tokenizer for dataset: {dataset_name}")  
         os.makedirs(Config.TOKENIZER_DIR, exist_ok=True)
         print(f"Ensured tokenizer directory exists: {Config.TOKENIZER_DIR}")  
-        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
 
         special_tokens = {"pad_token": "[PAD]", "eos_token": "[EOS]"}
         self.tokenizer.add_special_tokens(special_tokens)
         self.vocab_size = self.tokenizer.vocab_size + len(special_tokens)
 
-        print("Special tokens added.") 
+        print("Special tokens have been added...") 
         self.dataset_name = dataset_name
         self.tokenizer_path = os.path.join(Config.TOKENIZER_DIR, f"gpt2_tokenizer_{dataset_name}.json")
 
@@ -64,17 +65,18 @@ class GPT2TokenizerWrapper:
 
 
 if __name__ == "__main__":
-    print("Starting tokenizer script...")  
+    print("---------- Starting tokenizer script ----------") 
+    start_time = time.time() 
     tokenizer_wrapper = GPT2TokenizerWrapper()  
-    print("Tokenizer initialized.")  
+    print("Tokenizer has been initialized...")  
 
     for subset_name in ["train", "valid", "test"]:
         print(f"Processing subset: {subset_name}")  
         tokenizer_wrapper.tokenize_and_save(subset_name)
 
     tokenizer_wrapper.save_tokenizer()
-    print("Tokenizer script completed.")  
-
+    total_time = time.time() - start_time
+    print(f"\nTokenizer completed in {total_time:.2f} seconds")
 
 
 
