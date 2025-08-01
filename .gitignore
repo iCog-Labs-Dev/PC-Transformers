@@ -4,6 +4,7 @@ __pycache__/
 *.json
 *.pt
 *.txt
+!tuning/bayesian_tuning_results.txt 
 *.db
 *.whl
 pc_transformer_venv/
