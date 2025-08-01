@@ -31,16 +31,19 @@ def setup_ddp():
 
 def train(model, dataloader, tokenizer, config, global_step, device):
     model.train()
-    total_energy = 0.0
     total_ce_loss = 0.0
+    total_internal_energy = 0.0
+    total_output_energy = 0.0
     batch_count = 0
     pad_token_id = tokenizer.pad_token_id
     vocab_size = len(tokenizer)
+    output_pc_layer = model.module.output.pc_layer
 
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
-        
+
+        # LR schedule
         if global_step < config.warmup_steps:
             lr = config.local_learning_rate + global_step / config.warmup_steps * (
                 config.peak_learning_rate - config.local_learning_rate)
@@ -50,9 +53,8 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         for module in model.modules():
             if hasattr(module, 'local_lr'):
                 module.set_learning_rate(lr)
-
         global_step += 1
-        
+
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size-1)
 
@@ -63,35 +65,51 @@ def train(model, dataloader, tokenizer, config, global_step, device):
             ignore_index=pad_token_id)
         total_ce_loss += ce_loss.item()
 
-        layer_energies = []
+        internal_energies = []
+        output_energy = None
+
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
-                if energy is not None and not (torch.isnan(torch.tensor(energy)) if isinstance(energy, (int, float)) else False):
-                    layer_energies.append(energy)
-                if hasattr(module, "_head_similarity"):
+                if energy is None or (isinstance(energy, float) and math.isnan(energy)):
+                    continue
+
+                if module is output_pc_layer:
+                    output_energy = energy
+                else:
+                    internal_energies.append(energy)
+
+                if hasattr(module, "_head_similarity_avg"):
                     _ = module._head_similarity_avg
+                if hasattr(module, "_head_similarity_max"):
                     _ = module._head_similarity_max
-                    
-        if layer_energies:
-            valid_energies = [e for e in layer_energies if not (torch.isnan(torch.tensor(e)) if isinstance(e, (int, float)) else True)]
-            batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
-        else:
-            batch_energy = ce_loss.item()
-        total_energy += batch_energy
+
+        avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
+        avg_output_energy = output_energy if output_energy is not None else ce_loss.item()
+
+        total_internal_energy += avg_internal_energy
+        total_output_energy += avg_output_energy
         batch_count += 1
+
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | "
+                  f"Internal Energy: {avg_internal_energy:.4f} | "
+                  f"Output (KLD) Energy: {avg_output_energy:.4f} | "
+                  f"Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
         cleanup_memory()
 
-    avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
+    # Compute averages
+    avg_internal = total_internal_energy / batch_count if batch_count > 0 else 0.0
+    avg_output = total_output_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
-    avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")    
-    return avg_energy, avg_perplexity, global_step
+    avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
+
+    # Return avg_internal as "train_energy" for plotting compatibility
+    return avg_internal, avg_output, avg_perplexity, global_step
 
 def main():
     local_rank = setup_ddp()
@@ -116,7 +134,8 @@ def main():
         num_epochs= 20,
         update_bias= True,
         use_lateral = True,
-        energy_fn_name="scaled_mse",
+        internal_energy_fn_name="scaled_mse",
+        output_energy_fn_name="kld",
         eos_token_id = tokenizer.eos_token_id
     )
     model = PCTransformer(config).to(device)
@@ -130,8 +149,10 @@ def main():
     
     start_time = time.time()
     global_step = 0
-    train_energies = []
-    val_energies = []
+    train_internal_energies = []
+    train_output_energies = []
+    val_internal_energies = []
+    val_output_energies = []
     
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
@@ -146,25 +167,35 @@ def main():
             print(f"Epoch {epoch+1}/{config.num_epochs}")
         
         model.train()
-        train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, config, global_step, device)
-        train_energies.append(train_energy)
+        train_internal_energy, train_output_energy, train_perplexity, _= train(model, train_loader, tokenizer, config, global_step, device)
+        train_internal_energies.append(train_internal_energy)
+        train_output_energies.append(train_output_energy)
         
         model.eval()
-        val_energy, _, val_perplexity = evaluate(model, valid_loader, tokenizer, max_batches= None, device=device)
-        val_energies.append(val_energy)
+        val_internal_energy, val_output_energy, val_perplexity = evaluate(
+            model, valid_loader, tokenizer, max_batches=None, device=device
+        )
+        val_internal_energies.append(val_internal_energy)
+        val_output_energies.append(val_output_energy)
 
         if rank == 0:
             print(f"Epoch {epoch+1}/{config.num_epochs} | "
-            f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-            f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
+            f"Train Internal: {train_internal_energy:.4f} | "
+              f"Train Output: {train_output_energy:.4f} | "
+              f"Train PPL: {train_perplexity:.4f} | "
+              f"Val Internal: {val_internal_energy:.4f} | "
+              f"Val Output: {val_output_energy:.4f} | "
+              f"Val PPL: {val_perplexity:.4f}")
             
             if (epoch + 1) % 5 == 0:
                     os.makedirs("checkpoints", exist_ok=True)
                     checkpoint = {
                         'epoch': epoch,
                         'model_state_dict': model.module.state_dict(),
-                        'train_energy': train_energy,
-                        'val_energy': val_energy,
+                        'train_internal_energy': train_internal_energy,
+                        'train_output_energy': train_output_energy,
+                        'val_internal_energy': val_internal_energy,
+                        'val_output_energy': val_output_energy,
                         'train_perplexity': train_perplexity,
                         'val_perplexity': val_perplexity
                     }
@@ -174,15 +205,18 @@ def main():
 
 
     if rank == 0:
-        plot_metrics(train_energies, val_energies)
+        plot_metrics(train_internal_energies, val_internal_energies)
         os.makedirs("checkpoints", exist_ok=True)
         final_checkpoint = {
             'epoch': config.num_epochs,
             'model_state_dict': model.module.state_dict(),
-            'train_energy': train_energy,
-            'val_energy': val_energy,
+            'train_internal_energy': train_internal_energy,
+            'train_output_energy': train_output_energy,
+            'val_internal_energy': val_internal_energy,
+            'val_output_energy': val_output_energy,
             'train_perplexity': train_perplexity,
             'val_perplexity': val_perplexity
+          
         }
         torch.save(final_checkpoint, 'checkpoints/final_model.pt')
     
