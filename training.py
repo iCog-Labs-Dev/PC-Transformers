@@ -9,7 +9,8 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import get_loaders
-from utils.model_utils import load_tokenizer, reset_pc_modules, load_best_config
+from utils.model_utils import load_tokenizer, reset_pc_modules
+from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
 from eval import evaluate
 from visualization import plot_metrics

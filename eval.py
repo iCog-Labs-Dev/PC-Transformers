@@ -7,7 +7,8 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import get_loaders
 import torch.nn.functional as F
-from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, load_best_config
+from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
+from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
