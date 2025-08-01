@@ -246,7 +246,7 @@ ENERGY_FUNCTIONS = {
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
     "kld": lambda mu, x: torch.clamp(F.kl_div(
         mu.log_softmax(dim=-1),
-        x.softmax(dim=-1),
+        x,
         reduction='batchmean'
     ), min=0.0, max=100.0)
 }
