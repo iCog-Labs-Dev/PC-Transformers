@@ -155,7 +155,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
             layer.weight = nn.Parameter(layer.weight + delta_W)
             if layer.bias is not None and update_bias:
                 layer.bias = nn.Parameter(layer.bias + local_lr * error.mean(dim=(0, 1)))
-                #layer.bias = nn.Parameter(delta_b + local_lr * error.mean(dim=(0, 1)))
+                #layer.bias = nn.Parameter(layer.bias + delta_b * error.mean(dim=(0, 1)))
     x = torch.clamp(x, -clamp_value, clamp_value)
 
     if t == T - 1:
