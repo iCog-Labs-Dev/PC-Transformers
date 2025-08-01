@@ -47,6 +47,7 @@ class GPTConfig:
     batch_size: int = 8
     num_epochs: int = 5
     use_lateral: bool = True
-    energy_fn_name: str = "mse"
+    internal_energy_fn_name:str="scaled_mse",
+    output_energy_fn_name: str="kld",
     eos_token_id: int = None
     use_flash_attention: bool = False
