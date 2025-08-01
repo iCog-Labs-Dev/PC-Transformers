@@ -121,7 +121,7 @@ class PCTransformer(nn.Module):
             batch_size=B,
             seq_len=S,
             layer=self.output.output,
-            layer_type="linear",
+            layer_type="linear_output",
             device=device
         )
 
@@ -131,7 +131,7 @@ class PCTransformer(nn.Module):
                 self.output.pc_layer.forward,
                 target_activity=target_logits,
                 layer=self.output.output,
-                layer_type="linear",
+                layer_type="linear_output",
                 t=t,
                 T=self.config.T,
                 requires_update=self.training
@@ -142,7 +142,7 @@ class PCTransformer(nn.Module):
                 next_target = (
                     self.blocks[idx + 1].attn.pc_qkv.get_x("attn")
                     if idx < len(self.blocks) - 1
-                    else self.output.pc_layer.get_x("linear")
+                    else self.output.pc_layer.get_x("linear_output")
                 )
                 
                 layer_norm2 = block.ln2(next_target)
@@ -210,6 +210,6 @@ class PCTransformer(nn.Module):
                 except Exception as e:
                     print(f"Error in parallel inference step: {e}")
 
-        output_x = self.output.pc_layer.get_x("linear")
+        output_x = self.output.pc_layer.get_x("linear_output")
         logits = output_x @ self.output.output.weight.T + self.output.output.bias
         return logits
