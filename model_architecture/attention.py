@@ -32,7 +32,7 @@ class Attention(nn.Module):
             local_learning_rate=config.local_learning_rate,
             is_holding_error=config.is_holding_error,
             update_bias = config.update_bias,
-            energy_fn_name=config.energy_fn_name,
+            energy_fn_name=config.internal_energy_fn_name,
             num_heads=config.num_heads,
             n_embed=config.n_embed,
             la = config.la            
@@ -43,5 +43,5 @@ class Attention(nn.Module):
             local_learning_rate=config.local_learning_rate,
             is_holding_error=config.is_holding_error,
             update_bias = config.update_bias,
-            energy_fn_name=config.energy_fn_name,
+            energy_fn_name=config.internal_energy_fn_name,
         )

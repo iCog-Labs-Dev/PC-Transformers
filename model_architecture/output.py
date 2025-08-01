@@ -21,5 +21,5 @@ class OutputLayer(nn.Module):
             local_learning_rate=config.local_learning_rate,
             is_holding_error=config.is_holding_error,
             update_bias = config.update_bias,
-            energy_fn_name=config.energy_fn_name,
+            energy_fn_name=config.output_energy_fn_name,
         )

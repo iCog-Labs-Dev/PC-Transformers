@@ -25,7 +25,7 @@ class MLP(nn.Module):
             local_learning_rate=config.local_learning_rate,
             is_holding_error=config.is_holding_error,
             update_bias=config.update_bias,
-            energy_fn_name=config.energy_fn_name,
+            energy_fn_name=config.internal_energy_fn_name,
         )
 
         self.pc_layer1 = PCLayer(
@@ -33,5 +33,5 @@ class MLP(nn.Module):
             local_learning_rate=config.local_learning_rate,
             is_holding_error=config.is_holding_error,
             update_bias=config.update_bias,
-            energy_fn_name=config.energy_fn_name,
+            energy_fn_name=config.internal_energy_fn_name,
         )
