@@ -118,47 +118,44 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
                 print(f"[ERROR] autograd failed for x in {layer_type}: {e}")
                 delta_x = torch.zeros_like(x)
 
-        # Sanitize
         if delta_x is None:
             delta_x = torch.zeros_like(x)
         delta_x = torch.nan_to_num(delta_x, 0.0).clamp(-1.0, 1.0)
-        x = x - local_lr * delta_x  # descent on energy
 
         
         if requires_update:
             try:
-                delta_W = torch.autograd.grad(energy, layer.weight, retain_graph=True)[0]
-                delta_b = torch.autograd.grad(energy, layer.bias, retain_graph=True)[0] if layer.bias is not None else None
+                 grad_weight = torch.autograd.grad(energy, layer.weight, ...)[0]
+                 grad_bias = torch.autograd.grad(energy, layer.bias, ...)[0] if layer.bias else None
+                 delta_W = local_lr * grad_weight
+                 delta_b = local_lr * grad_bias if layer.bias else None
             except:
                 delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
                 delta_b = local_lr * error.mean(dim=(0, 1)) if layer.bias is not None else None
 
-            layer.weight = nn.Parameter(layer.weight - local_lr * delta_W)
-            if layer.bias is not None and update_bias:
-                layer.bias = nn.Parameter(layer.bias - local_lr * delta_b)
-
+            
     else:
         error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T) if layer.weight.shape[0] != layer.weight.shape[1] else error
-
-        if use_lateral and layer_type in W_latents:
+        delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+        delta_x = error_proj 
+    if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type].to(device)
             x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
-            delta_x = error_proj + x_latent
+            delta_x= delta_x+ x_latent
             x = x + local_lr * delta_x
 
             if requires_update:
                 anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
                 W_latents[layer_type] = W_latents[layer_type] + local_lr * anti_hebbian_latent
-        else:
+    else:
             x = x + local_lr * error_proj
 
         # pc weight update
-        if requires_update:
-            delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+    if requires_update:
             layer.weight = nn.Parameter(layer.weight + delta_W)
             if layer.bias is not None and update_bias:
                 layer.bias = nn.Parameter(layer.bias + local_lr * error.mean(dim=(0, 1)))
-
+                #layer.bias = nn.Parameter(delta_b + local_lr * error.mean(dim=(0, 1)))
     x = torch.clamp(x, -clamp_value, clamp_value)
 
     if t == T - 1:
