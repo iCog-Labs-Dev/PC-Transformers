@@ -32,7 +32,7 @@ def load_tokenizer():
 
 def load_model(model_path, config):
     model = PCTransformer(config)
-    model.load_state_dict(torch.load(model_path), strict = False)
+    model.load_state_dict(torch.load(model_path, weights_only=True), strict = False)
     return model
 
 def reset_pc_modules(model):
