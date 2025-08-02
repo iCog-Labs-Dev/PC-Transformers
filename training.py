@@ -17,10 +17,11 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 """
-Usage: python training.py
-
-This script trains a predictive coding transformer model on a dataset.
+This script trains the predictive coding transformer model on the provided dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
+
+Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
+
 """
 
 def setup_ddp():
@@ -117,7 +118,8 @@ def main():
         update_bias= True,
         use_lateral = True,
         energy_fn_name="scaled_mse",
-        eos_token_id = tokenizer.eos_token_id
+        eos_token_id = tokenizer.eos_token_id,
+        use_flash_attention=True
     )
     model = PCTransformer(config).to(device)
     model = DDP(model, device_ids=[local_rank], 
