@@ -12,6 +12,8 @@ from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
 import argparse
+import subprocess
+from transformers import GPT2Tokenizer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -62,6 +64,31 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         logger.warning(f"[Rank {local_rank}] Tuning interrupted")
         return study
 
+def get_tokenizer_dir(dataset):
+    # Use a directory, not a file, for HuggingFace
+    base_dir = os.path.join("Data_preprocessing", "tokenizer", "outputs")
+    dir_name = f"gpt2_tokenizer_{dataset}"
+    return os.path.join(base_dir, dir_name)
+
+def load_tokenizer_with_fallback(dataset):
+    tokenizer_dir = get_tokenizer_dir(dataset)
+    if not os.path.isdir(tokenizer_dir) or not os.path.exists(os.path.join(tokenizer_dir, "tokenizer.json")):
+        print(f"Tokenizer directory {tokenizer_dir} not found or incomplete. Attempting to run tokenizer script...")
+        try:
+            subprocess.run([
+                "python", "-m", "Data_preprocessing.tokenizer.gpt2_tokenizer",
+                f"--dataset={dataset}"
+            ], check=True)
+        except Exception as e:
+            print(f"Tokenizer script failed: {e}")
+            raise RuntimeError("Tokenizer could not be loaded or created.")
+    try:
+        tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_dir)
+    except Exception as e:
+        print(f"Failed to load tokenizer from {tokenizer_dir}: {e}")
+        raise
+    return tokenizer
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Bayesian Hyperparameter Tuning with Predictive Coding Transformer")
     parser.add_argument('--flash', '--flash_attention', action='store_true', help='Enable FlashAttention for attention layers')
@@ -80,6 +107,9 @@ if __name__ == "__main__":
     else:
         local_rank = -1
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Ensure tokenizer exists or is created
+    tokenizer = load_tokenizer_with_fallback(args.dataset)
 
     # Set config flag for FlashAttention
     use_flash_attention = args.flash

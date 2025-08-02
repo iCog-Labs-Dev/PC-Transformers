@@ -65,21 +65,19 @@ class GPT2TokenizerWrapper:
 
 
 if __name__ == "__main__":
-    print("---------- Starting tokenizer script ----------") 
-    start_time = time.time() 
-    tokenizer_wrapper = GPT2TokenizerWrapper()  
-    print("Tokenizer has been initialized...")  
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
+    args = parser.parse_args()
+    print(f"Using dataset: {args.dataset}")
+
+    print("Starting tokenizer script...")  
+    tokenizer_wrapper = GPT2TokenizerWrapper(args.dataset)  
+    print("Tokenizer initialized.")  
 
     for subset_name in ["train", "valid", "test"]:
         print(f"Processing subset: {subset_name}")  
         tokenizer_wrapper.tokenize_and_save(subset_name)
 
     tokenizer_wrapper.save_tokenizer()
-    total_time = time.time() - start_time
-    print(f"\nTokenizer completed in {total_time:.2f} seconds")
-
-
-
-
-
-
+    print("Tokenizer script completed.")  
+    
