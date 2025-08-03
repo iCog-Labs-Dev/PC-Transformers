@@ -18,10 +18,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 """
-This script trains the Predictive Coding Transformer using DDP on multiple GPUs.
-Tracks combined energy (internal + output) and saves checkpoints.
+This script trains the predictive coding transformer model on the provided dataset.
+It tracks and plots the average predictive coding energy per epoch and saves the trained model.
 
-Usage: torchrun --nproc_per_node=<NUM_GPU>  training.py
+Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
+
 """
 
 def setup_ddp():

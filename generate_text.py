@@ -6,12 +6,15 @@ import torch.nn.functional as F
 from Data_preprocessing.dataloader import get_loaders
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-"""
-Usage: python generate_text.py
 
-This script generates text using a trained predictive coding transformer model.
-It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
 """
+This script generates text using the trained predictive coding transformer model.
+It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
+
+Usage: torchrun --nproc-per-node=<NUM_GPU> generate_text.py
+
+"""
+
 local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 

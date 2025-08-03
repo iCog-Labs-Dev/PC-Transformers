@@ -12,7 +12,15 @@ from utils.pc_utils import cleanup_memory
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
-"""Usage: torchrun --nproc-per-node=2 eval.py"""
+"""
+This script evaluates the performance of the predictive coding transformer model.
+
+Usage: torchrun --nproc-per-node=<NUM_GPU> eval.py
+
+"""
+
+local_rank = int(os.getenv("LOCAL_RANK", 0))
+device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
 local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")

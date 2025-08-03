@@ -1,6 +1,3 @@
-"""
-Bayesian Hyperparameter Tuning
-"""
 import torch
 import logging
 import optuna
@@ -17,7 +14,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-"""Usage:  python bayes_tuning.py """
+"""
+This script performs Bayesian hyperparameter tuning for the model using Optuna. 
+It supports energy-based evaluation, model configuration, and training setup,
+and is compatible with multi-GPU execution using DDP.
+
+Usage:  torchrun --nproc-per-node=<NUM_GPU> tuning/bayes_tuning.py 
+
+"""
 
 def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False):
     """Run clean dynamic hyperparameter tuning"""
