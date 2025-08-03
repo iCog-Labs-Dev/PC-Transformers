@@ -127,7 +127,7 @@ def main():
         block_size=128,
         n_embed=256,
         n_blocks=4,
-        T=5,
+        T=2,
         local_learning_rate=0.0,
         peak_learning_rate=2e-5,
         warmup_steps=200,
@@ -135,7 +135,7 @@ def main():
         is_holding_error=True,
         update_bias=True,
         num_heads=8,
-        num_epochs=10,
+        num_epochs=1,
         use_lateral=True,
         internal_energy_fn_name="mse",
         output_energy_fn_name="kld",
@@ -163,7 +163,8 @@ def main():
         print(f"{total_params / 1e6:.2f} M parameters", flush=True)
 
     for epoch in range(config.num_epochs):
-        if hasattr(train_loader.sample, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
+        if isinstance(train_loader.sampler, torch.utils.data.distributed.DistributedSampler):
+
             train_loader.sampler.set_epoch(epoch)
         
 
