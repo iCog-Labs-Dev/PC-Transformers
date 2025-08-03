@@ -13,19 +13,23 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
 """Usage: torchrun --nproc-per-node=2 eval.py"""
-local_rank = int(os.getenv("LOCAL_RANK", 0))
-device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
 local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
 def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
     model.eval()
-    total_energy = 0.0
+    total_combined_energy = 0.0
     batch_count = 0
     total_ce_loss = 0.0
     pad_token_id = tokenizer.pad_token_id
     vocab_size = len(tokenizer)
+    
+    base_model = model.module if hasattr(model, 'module') else model
+    output_pc_layer = base_model.output.pc_layer
+
+    alpha = getattr(base_model.config, 'combined_internal_weight', 0.3)
+    beta = getattr(base_model.config, 'combined_output_weight', 0.7)
     
     if local_rank == 0:
         if max_batches is None:
@@ -56,37 +60,43 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         )
         total_ce_loss += ce_loss.item()
 
-        layer_energies = []
+        internal_energies = []
+        output_energy = None
+
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
-                if energy is not None and not torch.isnan(torch.tensor(energy)):
-                    layer_energies.append(energy)
+                if energy is None or (isinstance(energy, float) and math.isnan(energy)):
+                    continue
 
-        if layer_energies:
-            valid_energies = [e for e in layer_energies if not torch.isnan(torch.tensor(e))]
-            batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
-        else:
-            batch_energy = ce_loss.item()
+                if module is output_pc_layer:
+                    output_energy = energy
+                else:
+                    internal_energies.append(energy)
 
-        total_energy += batch_energy
+        avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
+        avg_output_energy = output_energy if output_energy is not None else ce_loss.item()
+
+        combined_energy = alpha * avg_internal_energy + beta * avg_output_energy
+        total_combined_energy += combined_energy
         batch_count += 1
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}|  Combined Energy: { combined_energy:.4f}", flush=True)
 
         reset_pc_modules(model)
         cleanup_memory()
 
-    avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
+    avg_combined_energy = total_combined_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
 
+    
     if local_rank == 0:
         print(f"Total Batches Processed: {batch_idx + 1}")
-        print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
+        print(f"Avg CE Loss: {avg_ce_loss:.4f} | avg_combined_energy: {avg_combined_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
 
-    return avg_energy, avg_ce_loss, avg_perplexity
+    return avg_combined_energy, avg_perplexity
 
 def main():
     dist.init_process_group(backend="nccl")
@@ -106,8 +116,11 @@ def main():
         n_blocks=6,
         num_epochs=1,
         update_bias=False,
-        energy_fn_name="scaled_mse", 
-        eos_token_id = tokenizer.eos_token_id
+        internal_energy_fn_name="mse", 
+        output_energy_fn_name="kld",
+        eos_token_id = tokenizer.eos_token_id,
+        combined_internal_weight=0.3,
+        combined_output_weight=0.7
     )
 
     model_path = "checkpoints/final_model.pt"

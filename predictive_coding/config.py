@@ -51,3 +51,5 @@ class GPTConfig:
     output_energy_fn_name: str="kld",
     eos_token_id: int = None
     use_flash_attention: bool = False
+    combined_internal_weight: float = 0.3
+    combined_output_weight: float = 0.7
