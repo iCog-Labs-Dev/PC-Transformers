@@ -127,7 +127,7 @@ def main():
         block_size=128,
         n_embed=256,
         n_blocks=4,
-        T=2,
+        T=5,
         local_learning_rate=0.0,
         peak_learning_rate=2e-5,
         warmup_steps=200,
@@ -135,7 +135,7 @@ def main():
         is_holding_error=True,
         update_bias=True,
         num_heads=8,
-        num_epochs=1,
+        num_epochs=10,
         use_lateral=True,
         internal_energy_fn_name="mse",
         output_energy_fn_name="kld",
@@ -164,7 +164,6 @@ def main():
 
     for epoch in range(config.num_epochs):
         if isinstance(train_loader.sampler, torch.utils.data.distributed.DistributedSampler):
-
             train_loader.sampler.set_epoch(epoch)
         
 
@@ -186,7 +185,7 @@ def main():
 
         if rank == 0:
             print(f"Epoch {epoch + 1}/{config.num_epochs} | "
-                  f"Train Combined: {train_combined_energy:.4f} | Train PPL: {train_perplexity:.4f} | "
+                  f"Train Combined_energy: {train_combined_energy:.4f} | Train PPL: {train_perplexity:.4f} | "
                   f"Val Combined: {val_combined_energy:.4f} | Val PPL: {val_perplexity:.4f}")
 
             if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
