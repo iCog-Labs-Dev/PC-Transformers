@@ -101,7 +101,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | "
-                  f"Combined: {combined_energy:.4f} | "
+                  f"Combined_energy: {combined_energy:.4f} | "
                   f"Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
@@ -186,7 +186,7 @@ def main():
         if rank == 0:
             print(f"Epoch {epoch + 1}/{config.num_epochs} | "
                   f"Train Combined_energy: {train_combined_energy:.4f} | Train PPL: {train_perplexity:.4f} | "
-                  f"Val Combined: {val_combined_energy:.4f} | Val PPL: {val_perplexity:.4f}")
+                  f"Val Combined_energy: {val_combined_energy:.4f} | Val PPL: {val_perplexity:.4f}")
 
             if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
                 os.makedirs("checkpoints", exist_ok=True)
