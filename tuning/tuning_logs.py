@@ -2,7 +2,7 @@ def initialize_logs(study_name: str):
     """Create and initialize summary and trial log files."""
     summary_path = f"tuning/{study_name}_summary.txt"
     trials_path = f"tuning/{study_name}_trials.txt"
-
+    
     with open(summary_path, "w") as f:
         f.write(f"BAYESIAN TUNING SUMMARY - {study_name}\n")
         f.write(f"{'='*50}\n\n")
@@ -57,14 +57,10 @@ def write_final_results(results_path, trial):
         f.write("COMBINED ENERGY OPTIMIZATION RESULTS\n")
         f.write("====================================\n\n")
         f.write(f"Best combined energy: {trial.value:.4f}\n")
-        
-        def format_val(val):
-            return f"{float(val):.4f}" if isinstance(val, (float, int)) or str(val).replace('.', '', 1).isdigit() else str(val)
-
-        f.write(f"CE Loss: {format_val(ce_loss)}\n")
-        f.write(f"Raw Energy: {format_val(energy)}\n")
-        f.write(f"Normalized Energy: {format_val(norm_energy)}\n")
-        f.write(f"Combined Energy: {format_val(combined_energy)}\n\n")
+        f.write(f"CE Loss: {ce_loss:.4f}\n")
+        f.write(f"Raw Energy: {energy:.4f}\n")
+        f.write(f"Normalized Energy: {norm_energy:.4f}\n")
+        f.write(f"Combined Energy: {combined_energy:.4f}\n\n")
 
         if config:
             f.write("Best Configuration:\n")

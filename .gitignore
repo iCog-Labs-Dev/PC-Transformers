@@ -5,9 +5,11 @@ __pycache__/
 *.pt
 *.txt
 *.db
+*.whl
 pc_transformer_venv/
 data_preprocessing/
 
-.venv/
+venv/
 *.egg-info/
 checkpoints/
+Data_preprocessing/Data/opwb/

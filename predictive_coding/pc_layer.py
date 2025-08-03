@@ -24,6 +24,9 @@ class PCLayer(nn.Module):
         is_holding_error: bool = False,
         update_bias: bool = True,
         energy_fn_name: str = "scaled_mse",
+        num_heads: Optional[int] = None,
+        n_embed: Optional[int] = None,
+        la: Optional[float] = None,
     ):
         """
         Initialize the PCLayer.
@@ -47,6 +50,9 @@ class PCLayer(nn.Module):
         self.energy_fn_name = energy_fn_name 
         self._energy = 0.0
         self._errors = []
+        self.num_heads = num_heads
+        self.n_embed = n_embed
+        self.la = la
 
     def register_lateral(self, layer_type: str, size: int):
         """
@@ -61,7 +67,7 @@ class PCLayer(nn.Module):
 
         if layer_type not in self.W_latents:
             device = next(self.parameters()).device if list(self.parameters()) else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            W = torch.empty(size, size, device = device)
+            W = torch.empty(size, size, device=device)
             nn.init.xavier_uniform_(W)
             self.W_latents[layer_type] = nn.Parameter(W)
 
@@ -76,6 +82,7 @@ class PCLayer(nn.Module):
         t=0,
         T=1,
         requires_update: bool = True,
+        flash: bool = False,
     ):
         """
         Perform a single predictive coding inference step for the layer.
@@ -90,6 +97,7 @@ class PCLayer(nn.Module):
             t (int): Current inference step.
             T (int): Total number of inference steps.
             requires_update (bool): Whether to update weights.
+            flash (bool): Whether to use flash attention (if available).
 
         Returns:
             torch.Tensor or tuple: Updated activity tensor(s) for the layer.
@@ -98,6 +106,7 @@ class PCLayer(nn.Module):
         x = None
         self._energy = 0.0
         self._errors = []
+        
 
         if layer_type == "embed":
             if "embed" not in self._x_cache:
@@ -126,9 +135,11 @@ class PCLayer(nn.Module):
                 self._embed_cache["mu_pos"] = mu_pos
                 self._embed_cache["step"] = t
         elif layer_type == "attn":
+            # Step attention takes arguments strictly in order: t, T, target_activity, x, W_latents, proj_layers, layer_type,
+            # local_lr, clamp_value, use_lateral, is_holding_error, energy_fn
             x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
                               self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                              self.energy_fn_name, self.update_bias, requires_update, layer_instance=self)
+                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, flash=flash)
         else:
             x, mu = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
                                self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
@@ -177,15 +188,26 @@ class PCLayer(nn.Module):
 
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            x_word = layer["word"].weight[input_ids]
-            x_pos = layer["pos"].weight[position_ids]
+            
+            # Clip input_ids to valid range
+            vocab_size = layer["word"].weight.size(0)
+            if input_ids.max() >= vocab_size:
+                input_ids = torch.clamp(input_ids, max=vocab_size-1)
+            
+            # Position IDs should also be clipped to valid range
+            max_pos = layer["pos"].weight.size(0)
+            if position_ids.max() >= max_pos:
+                position_ids = torch.clamp(position_ids, max=max_pos-1)
+            
+            x_word = layer["word"].weight[input_ids] 
+            x_pos = layer["pos"].weight[position_ids] 
             self._x_cache["embed"] = (x_word, x_pos)
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
             H_out = proj_layers["v_proj"].weight.shape[0] 
             self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
-
+            
             if self.use_lateral:
                 self.register_lateral(layer_type, H_in)
                 
@@ -243,3 +265,19 @@ class PCLayer(nn.Module):
         Clear the stored errors for the layer.
         """
         self._errors = []
+        
+    def set_learning_rate(self, lr: float):
+        """
+        Set the local learning rate for the layer.
+        This method allows dynamic adjustment of the learning rate during training or inference.
+        """
+        self.local_lr = lr
+        
+    def get_learning_rate(self) -> float:
+        """
+        Get the current local learning rate for the layer.
+        
+        Returns:
+            float: The current local learning rate.
+        """
+        return self.local_lr

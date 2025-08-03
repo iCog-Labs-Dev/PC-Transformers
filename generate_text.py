@@ -1,18 +1,20 @@
 import torch
+import os
 from predictive_coding.config import GPTConfig
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules, decode_ids, compute_text_metrics
 import torch.nn.functional as F
 from Data_preprocessing.dataloader import get_loaders
-import os
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
 """
-Usage: python generate_text.py
-
-This script generates text using a trained predictive coding transformer model.
+This script generates text using the trained predictive coding transformer model.
 It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
+
+Usage: torchrun --nproc-per-node=<NUM_GPU> generate_text.py
+
 """
+
 local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
@@ -36,22 +38,23 @@ def generate_text(model, config, input_ids, max_new_tokens, temperature, device 
                 
     return input_tensor[0] 
 
-def text_generation(model, config, device = None):
-    model = model.to(device)
-    
-    decoded_preds = []
-    decoded_targets = []
-    num_samples = 5
+def text_generation(model, config, device = None,  max_samples=2):
+    decoded_preds, decoded_targets = [], []
     prompt_len = 5
-    
+    total_samples = 0
+
     _, _, test_loader = get_loaders(distributed=True)
     tokenizer = load_tokenizer()
-    pad_token_id = tokenizer.token_to_id("[PAD]")
-    
+    pad_token_id = tokenizer.pad_token_id
+
     for batch_idx, batch in enumerate(test_loader):
         input_ids = batch["input_ids"].to(device) 
+        batch_size = input_ids.size(0)
 
-        for i in range(min(num_samples, input_ids.size(0))): 
+        for i in range(batch_size):
+            if total_samples >= max_samples:
+                break
+
             prompt_ids = input_ids[i][:prompt_len]
             generated_ids = generate_text(model, config, prompt_ids, max_new_tokens= 50, temperature=0.7, device = device)
 
@@ -67,13 +70,18 @@ def text_generation(model, config, device = None):
 
             decoded_preds.append(generated_str)
             decoded_targets.append(target_str)
-            
+
             if local_rank == 0:
                 print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
                 print(f"[PROMPT ]: {prompt_str}")
                 print(f"[TARGET ]: {target_str}")
                 print(f"[PREDICT]: {generated_str}")
+            
+            total_samples += 1
+
+        if total_samples >= max_samples:
             break
+
     return decoded_preds, decoded_targets
 
 def main():
@@ -81,22 +89,22 @@ def main():
     print(f"[Rank {local_rank}] Using device: {device}")
 
     tokenizer = load_tokenizer()
-    vocab_size = tokenizer.get_vocab_size()
+    vocab_size = len(tokenizer)
 
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size=80,
-        n_embed=656,
-        dropout=0.09984621100041206,
-        local_learning_rate=0.0005567991677869024,
+        block_size=448,
+        n_embed= 592,
+        dropout= 0.24684719512514441,
+        local_learning_rate= 1e-5,
         T=7,
         is_holding_error=True,
-        num_heads=16,
-        n_blocks=4,
+        num_heads= 16,
+        n_blocks=6,
         num_epochs=1,
         update_bias=False,
-        energy_fn_name="mse",
-        eos_token_id = tokenizer.token_to_id("[EOS]")
+        energy_fn_name="scaled_mse",
+        eos_token_id = tokenizer.eos_token_id
     )
 
     model_path = "checkpoints/final_model.pt"
@@ -105,10 +113,10 @@ def main():
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     if local_rank == 0:
-        decoded_preds, decoded_targets = text_generation(model, config, device)
+        decoded_preds, decoded_targets = text_generation(model, config, device, max_samples=2)
         if decoded_preds and decoded_targets and local_rank == 0:
             compute_text_metrics(decoded_preds, decoded_targets)
-
+    
     dist.barrier()
     dist.destroy_process_group()
 

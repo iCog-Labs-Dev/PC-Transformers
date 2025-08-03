@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 import gc
 from predictive_coding.config import GPTConfig
+from utils.attention_utils import apply_flash_attention, apply_standard_attention
 
 def compute_DVL(attn_v, requires_update):
     B, H, T, D= attn_v.shape
@@ -64,6 +65,15 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     """
     word_layer = layer["word"]
     pos_layer = layer["pos"]
+
+    # Clip input_ids and position_ids to valid ranges
+    vocab_size = word_layer.weight.size(0)
+    if input_ids.max() >= vocab_size:
+        input_ids = torch.clamp(input_ids, max=vocab_size-1)
+        
+    max_pos = pos_layer.weight.size(0)
+    if position_ids.max() >= max_pos:
+        position_ids = torch.clamp(position_ids, max=max_pos-1)
 
     if requires_update or mu_word_cache is None or mu_pos_cache is None:
         mu_word = word_layer(input_ids)
@@ -158,7 +168,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     return x, mu
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, flash=False):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
         q_proj = proj_layers.get("q_proj", None)
@@ -169,26 +179,22 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         Q= q_proj(x)
         K= k_proj(x)
         V= v_proj(x)
-        batch_size, seq_len, embed_dim=target.shape
-        
-        num_heads = GPTConfig.num_heads
-        head_dim = GPTConfig.n_embed // GPTConfig.num_heads 
-        la= GPTConfig.la * math.sqrt(1.0 / head_dim)
+        batch_size, seq_len, embed_dim = target.shape
+        head_dim = n_embed // num_heads
+        la = la * math.sqrt(1.0 / head_dim)
 
-        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2) # B. H, T, D
+        Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
         K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
         V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-                  
-        scores = Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1)) # B, H, T, T
-        mask = torch.tril(torch.ones_like(scores, dtype=torch.bool, device=device))
-        scores = scores.masked_fill(~mask, float("-inf"))
-        attn_weights = scores.softmax(dim=-1)  # B, H, T, T
-        mu_heads = attn_weights @ V   # B, H, T, D
-        
-        dvl_grad=compute_DVL(mu_heads, requires_update)
-        if dvl_grad is not None:
-            dvl_grad = dvl_grad.to(device) 
 
+        if flash:
+            mu_heads = apply_flash_attention(Q, K, V)
+        else:
+            mu_heads = apply_standard_attention(Q, K, V)
+
+        dvl_grad = compute_DVL(mu_heads, requires_update)
+        if dvl_grad is not None:
+            dvl_grad = dvl_grad.to(device)
         dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
         similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
@@ -199,7 +205,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
             dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
             error = error + la * dvl_projected
-
+        
         if layer_instance is not None:
             setattr(layer_instance, '_head_similarity', similarity)
             setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
@@ -212,8 +218,8 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             x = x + local_lr * delta_x
 
             if requires_update:
-                anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-                W_latents[layer_type] =W_latent + local_lr * anti_hebbian_latent
+               anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+               W_latents[layer_type] =W_latent + local_lr * anti_hebbian_latent
         
         else:
             x= x+ local_lr * error
@@ -238,11 +244,11 @@ ENERGY_FUNCTIONS = {
     "mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1),
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
-    "kld": lambda mu, x: F.kl_div(
+    "kld": lambda mu, x: torch.clamp(F.kl_div(
         mu.log_softmax(dim=-1),
         x.softmax(dim=-1),
         reduction='batchmean'
-    )
+    ), min=0.0, max=100.0)
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
@@ -278,7 +284,6 @@ def finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_er
     device = mu.device
     target = target.to(device)
     error = error.to(device)
-    
     energy = energy_fn(mu, target,energy_fn_name).mean().item() if is_holding_error else None
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
@@ -293,8 +298,11 @@ def ids_to_one_hot(input_ids, vocab_size):
     Returns:
         torch.Tensor: One-hot encoded tensor of shape (B, S, vocab_size).
     """
-    """input_id from [B, S] to [B, S, V]"""
     device = input_ids.device
+
+    if input_ids.max() >= vocab_size:
+        input_ids = torch.clamp(input_ids, max=vocab_size-1)
+    
     return F.one_hot(input_ids, num_classes=vocab_size).float().to(device)
 
 def cleanup_memory():

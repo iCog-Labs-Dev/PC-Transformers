@@ -46,13 +46,13 @@ class PCTransformer(nn.Module):
                     if module.W_latents[key] is not None:
                         module.W_latents[key] = module.W_latents[key].to(next(self.parameters()).device)
 
-    def forward(self, target_ids: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, target_ids, input_ids):
         """
-        Forward pass for the PCTransformer.
+        Forward pass of the PCTransformer model.
 
         Args:
-            target_ids (torch.Tensor): Tensor of shape (B, T), containing ground truth token IDs.
-            input_ids (torch.Tensor): Tensor of shape (B, T), containing input token IDs.
+            target_ids (torch.Tensor): Target token IDs of shape (B, T).
+            input_ids (torch.Tensor): Input token IDs of shape (B, T).
 
         Returns:
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
@@ -64,12 +64,19 @@ class PCTransformer(nn.Module):
             if hasattr(module, "clear_errors"):
                 module.clear_errors()
 
-        assert input_ids.ndim == 2, "Expected input_ids shape [B, S]"
         B, S = input_ids.shape
         device = input_ids.device
         vocab_size = self.output.config.vocab_size
+        
+        # Clip input_ids and target_ids to valid range before using them
+        if input_ids.max() >= vocab_size:
+            input_ids = torch.clamp(input_ids, max=vocab_size-1)
+        
+        if target_ids.max() >= vocab_size:
+            target_ids = torch.clamp(target_ids, max=vocab_size-1)
+        
         target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
-        position_ids = torch.arange(S, device=device).unsqueeze(0).expand(B, S)
+        position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
         self.embedding.pc_layer.init_x(
             batch_size=B,
@@ -179,7 +186,8 @@ class PCTransformer(nn.Module):
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=self.training
+                    requires_update=self.training,
+                    flash= getattr(self.config, 'use_flash_attention', False)
                 ))
 
 
