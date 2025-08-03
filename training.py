@@ -13,6 +13,7 @@ from utils.model_utils import load_tokenizer, reset_pc_modules
 from utils.pc_utils import cleanup_memory
 from eval import evaluate
 from visualization import plot_metrics
+import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -20,7 +21,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 This script trains the Predictive Coding Transformer using DDP on multiple GPUs.
 Tracks combined energy (internal + output) and saves checkpoints.
 
-Usage: torchrun --nproc_per_node=2 training.py
+Usage: torchrun --nproc_per_node=<NUM_GPU>  training.py
 """
 
 def setup_ddp():
@@ -61,8 +62,11 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         for module in model.modules():
             if hasattr(module, 'local_lr'):
                 module.set_learning_rate(lr)
+                
         global_step += 1
-
+        if target_ids.max() >= vocab_size:
+            target_ids = torch.clamp(target_ids, max=vocab_size-1)
+            
         logits = model(target_ids, input_ids)
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
@@ -123,26 +127,26 @@ def main():
     vocab_size = len(tokenizer)
 
     config = GPTConfig(
-        vocab_size=vocab_size,
-        block_size=128,
-        n_embed=256,
-        n_blocks=4,
-        T=5,
-        local_learning_rate=0.0,
-        peak_learning_rate=2e-5,
-        warmup_steps=200,
-        dropout=0.1,
-        is_holding_error=True,
-        update_bias=True,
-        num_heads=8,
-        num_epochs=10,
-        use_lateral=True,
+        vocab_size = vocab_size,
+        block_size= 448, 
+        peak_learning_rate= 2e-5,
+        warmup_steps= 217,
+        n_embed=592,
+        dropout= 0.24684719512514441,
+        local_learning_rate= 0.0,
+        T= 10,
+        is_holding_error = True,
+        num_heads=16,
+        n_blocks=6,
+        num_epochs= 20,
+        update_bias= True,
+        use_lateral = True,
         internal_energy_fn_name="mse",
         output_energy_fn_name="kld",
         eos_token_id=tokenizer.eos_token_id,
         combined_internal_weight=0.3,
         combined_output_weight=0.7,
-        use_flash_attention=False  
+        use_flash_attention=True  
     )
 
     model = PCTransformer(config).to(device)
@@ -163,7 +167,7 @@ def main():
         print(f"{total_params / 1e6:.2f} M parameters", flush=True)
 
     for epoch in range(config.num_epochs):
-        if isinstance(train_loader.sampler, torch.utils.data.distributed.DistributedSampler):
+        if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
         
 
