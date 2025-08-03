@@ -128,7 +128,8 @@ def main():
         output_energy_fn_name="kld",
         eos_token_id = tokenizer.eos_token_id,
         combined_internal_weight=0.3,
-        combined_output_weight=0.7
+        combined_output_weight=0.7,
+        use_flash_attention=True
     )
 
     model_path = "checkpoints/final_model.pt"
