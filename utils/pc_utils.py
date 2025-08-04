@@ -7,25 +7,22 @@ from predictive_coding.config import GPTConfig
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 
 def compute_DVL(attn_v, requires_update):
-    B, H, T, D= attn_v.shape
+    B, H, T, D = attn_v.shape
     device = attn_v.device
-    x= attn_v.transpose(0, 1).flatten(2, 3)
-    x=F.normalize(x, p=2, dim=-1)
-    s_m=torch.bmm(x, x.transpose(1, 2))
-    N = s_m.size(1)
-    mask = ~torch.eye(N, dtype=torch.bool, device=attn_v.device)
-    s_m = s_m[:, mask].mean(dim=-1)
-    identity = torch.eye(H, device=attn_v.device)
-    identity = identity.unsqueeze(0).expand(H, -1, -1) 
-    corr=  s_m - identity
-    dvl=(corr** 2).mean()
+    x = attn_v.transpose(0, 1).flatten(2, 3)  # (H, B, T*D)
+    x = x.transpose(0, 1)  
+    x = F.normalize(x, p=2, dim=-1)
+    s_m = torch.bmm(x, x.transpose(1, 2))  
+    s_m = s_m.mean(dim=0)  
+    identity = torch.eye(H, device=attn_v.device)  
+    corr = s_m - identity  
+    dvl = (corr ** 2).mean()  
     dvl_grad = torch.zeros_like(attn_v, device=device)
-
     try:
         if requires_update:
-            dvl_grad= torch.autograd.grad(dvl, attn_v, retain_graph= True)[0]
+            dvl_grad = torch.autograd.grad(dvl, attn_v, retain_graph=True)[0]
     except Exception as e:
-        print(f" Error computing diversity gradient: {e}")
+        print(f"Error computing diversity gradient: {e}")
     return dvl_grad
 
 def get_head_similarity(mu_heads):
