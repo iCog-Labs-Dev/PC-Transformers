@@ -15,6 +15,7 @@ from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import logging
 
 """
 This script trains the predictive coding transformer model on the provided dataset.
@@ -23,6 +24,20 @@ It tracks and plots the average predictive coding energy per epoch and saves the
 Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
+
+# Configure logging
+log_dir = 'logs'
+os.makedirs(log_dir, exist_ok = True)
+
+logging.basicConfig(
+    level = logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(log_dir, 'training.log')),
+        logging.StreamHandler() #printing to console/terminal as well
+    ]
+)
+logger = logging.getLogger(__name__)
 
 def setup_ddp():
     dist.init_process_group(backend="nccl")
@@ -84,7 +99,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
+            logger.info(f"Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -97,7 +112,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 def main():
     local_rank = setup_ddp()
     device = torch.device(f"cuda:{local_rank}")
-    print(f"Using device: {device} (local rank {local_rank})")
+    logger.info(f"Using device: {device} (local rank {local_rank})")
 
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
@@ -137,15 +152,13 @@ def main():
     
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
-        print("========== Training started ==========", flush=True) 
-        print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
+        logger.info(f"\n{'#' * 120}\n") # add a line of '#' characters to separate each training
+        logger.info("========== Training started ==========") 
+        logger.info(f"{sum(p.numel() for p in model.parameters())/1e6:.2f} M parameters")
         
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
-            train_loader.sampler.set_epoch(epoch)
-        
-        if rank == 0:
-            print(f"Epoch {epoch+1}/{config.num_epochs}")
+            train_loader.sampler.set_epoch(epoch)       
         
         model.train()
         train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, config, global_step, device)
@@ -156,9 +169,12 @@ def main():
         val_energies.append(val_energy)
 
         if rank == 0:
-            print(f"Epoch {epoch+1}/{config.num_epochs} | "
-            f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-            f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
+            # add horizontal bar
+            logger.info("-" * 100)
+            logger.info(f"Epoch {epoch+1}/{config.num_epochs}")
+            logger.info(f"{'Metrics':<20} {'Training':<15} {'Validation':<15}")
+            logger.info(f"{'Energy':<20} {train_energy:<15.4f} {val_energy:<15.4f}")
+            logger.info(f"{'Perplexity':<20} {train_perplexity:<15.4f} {val_perplexity:<15.4f}")
             
             if (epoch + 1) % 5 == 0:
                     os.makedirs("checkpoints", exist_ok=True)
@@ -172,7 +188,7 @@ def main():
                     }
                     checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
                     torch.save(checkpoint, checkpoint_path)
-                    print(f"Saved checkpoint to {checkpoint_path}")
+                    logger.info(f"Saved checkpoint to {checkpoint_path}")
 
 
     if rank == 0:
@@ -189,9 +205,9 @@ def main():
         torch.save(final_checkpoint, 'checkpoints/final_model.pt')
     
         total_time = time.time() - start_time
-        print(f"\nTraining completed in {total_time:.2f} seconds")
-        print("Final model saved to: checkpoints/final_model.pt")
-        print("========== Training completed ==========")
+        logger.info(f"Training completed in {total_time:.2f} seconds")
+        logger.info("Final model saved to: checkpoints/final_model.pt")
+        logger.info("========== Training completed ==========")
     
     dist.destroy_process_group()
 
