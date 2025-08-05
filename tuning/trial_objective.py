@@ -9,7 +9,7 @@ from utils.pc_utils import cleanup_memory
 from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
 from utils.model_utils import reset_pc_modules, load_tokenizer
-from tuning.config import get_dynamic_model_config, update_global_config, normalize_energy
+from tuning.config import get_dynamic_model_config, update_global_config
 from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
 from tuning.tuning_logs import log_trial_to_detailed_log, log_trial_to_summary
 import torch.distributed as dist
@@ -77,35 +77,49 @@ def objective(trial, device = None, flash=False):
         if len(train_loader) == 0 or len(valid_loader) == 0:
             return float("inf")
 
+        # Train the model and get training metrics
         model.train()
-        train(model, train_loader, tokenizer, config, global_step = 0, device = device)
+        train_energy, train_perplexity, global_step = train(model, train_loader, tokenizer, config, global_step=0, device=device)
         reset_pc_modules(model)
 
+        # Evaluate the model
         model.eval()
-        avg_energy, val_loss, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
+        val_energy, val_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
+
+        # Calculate trial time
+        trial_time = (time.time() - start_time) / 3600
         
-        normalized_energy = normalize_energy(avg_energy, config.energy_fn_name)
-        combined_energy = normalized_energy + val_loss
-        trial_time = (time.time() - start_time) /3600
-        
+        # Store all metrics - using raw energy values directly
         trial.set_user_attr("config", config.__dict__)
-        trial.set_user_attr("ce_loss", val_loss)
-        trial.set_user_attr("energy", avg_energy)
-        trial.set_user_attr("normalized_energy", normalized_energy)
-        trial.set_user_attr("combined_energy", combined_energy)
+        trial.set_user_attr("train_energy", train_energy)
+        trial.set_user_attr("train_perplexity", train_perplexity)
+        trial.set_user_attr("val_energy", val_energy)
+        trial.set_user_attr("val_perplexity", val_perplexity)
         trial.set_user_attr("trial_time", trial_time)
-
+        trial.set_user_attr("global_step", global_step)
+        
+        # Log results
         log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
-        log_trial_to_detailed_log("tuning/bayesian_tuning_trials.txt", trial, config, trial_time, val_loss, avg_energy, normalized_energy, combined_energy)
-
-        return combined_energy
+        log_trial_to_detailed_log(
+            "tuning/bayesian_tuning_trials.txt",
+            trial,
+            config,
+            trial_time,
+            val_energy,
+            val_perplexity,
+            train_energy=train_energy,
+            train_perplexity=train_perplexity
+        )
+        
+        # Use training energy for optimization (lower is better)
+        return train_energy
     
     except Exception as e:
         print("Trial failed:", e)
         trial.set_user_attr("ce_loss", "N/A")
+        trial.set_user_attr("perplexity", "N/A")
         trial.set_user_attr("energy", "N/A")
         trial.set_user_attr("normalized_energy", "N/A")
-        trial.set_user_attr("combined_energy", "N/A")
         trial.set_user_attr("trial_time", (time.time() - start_time) / 3600)
 
         log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
