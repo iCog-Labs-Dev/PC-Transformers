@@ -12,8 +12,8 @@ from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
 import argparse
+from utils.device_utils import setup_ddp
 import subprocess
-from transformers import GPT2Tokenizer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -97,25 +97,15 @@ if __name__ == "__main__":
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
-        
-    if "RANK" in os.environ and torch.cuda.is_available():
-        import torch.distributed as dist
-        dist.init_process_group(backend="nccl")
-        local_rank = int(os.environ["LOCAL_RANK"])
-        device = torch.device(f"cuda:{local_rank}")
-        torch.cuda.set_device(local_rank)
-    else:
-        local_rank = -1
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Ensure tokenizer exists or is created
-    tokenizer = load_tokenizer_with_fallback(args.dataset)
+    local_rank, is_distributed = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
     # Set config flag for FlashAttention
     use_flash_attention = args.flash
     
-    train_loader, valid_loader,_ = get_loaders((local_rank >= 0))
+    train_loader, valid_loader,_ = get_loaders(is_distributed)
     run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=use_flash_attention)
 
-    if dist.is_initialized():
+    if is_distributed:
         dist.destroy_process_group()

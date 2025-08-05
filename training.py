@@ -15,6 +15,8 @@ from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import argparse
+from utils.device_utils import setup_ddp
 
 """
 Usage: python training.py
@@ -22,17 +24,6 @@ Usage: python training.py
 This script trains a predictive coding transformer model on a dataset.
 It tracks and plots the average predictive coding energy per epoch and saves the trained model.
 """
-
-def setup_ddp():
-    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
-        dist.init_process_group(backend=backend)
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        if torch.cuda.is_available():
-            torch.cuda.set_device(local_rank)
-        return local_rank, True
-    else:
-        return 0, False
 
 def train(model, dataloader, tokenizer, config, global_step, device):
     model.train()
