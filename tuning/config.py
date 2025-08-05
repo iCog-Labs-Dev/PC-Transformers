@@ -19,7 +19,8 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     dropout = trial.suggest_float("dropout", 0.05, 0.3)
     base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
     warmup_steps = trial.suggest_int('warmup_steps', 100, 500)
-    energy_fn_name = ['kld', 'mse', 'scaled_mse'][trial.suggest_int('energy_idx', 0, 2)]
+    # Fixed energy function - not tuned, just monitored
+    energy_fn_name = 'mse'  # Use MSE as default energy function
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
     
@@ -61,9 +62,3 @@ def update_global_config(config):
         except Exception as e:
             logger.warning(f"Failed to update config key '{key}': {e}")
             continue
-
-
-def normalize_energy(energy_value, energy_fn_name):
-    """ Normalize energy values to comparable scales across different energy functions."""
-    factors = {'mse': 1.0, 'scaled_mse': 20.0, 'kld': 0.2}
-    return energy_value * factors.get(energy_fn_name, 1.0)
