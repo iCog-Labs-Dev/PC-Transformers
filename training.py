@@ -36,7 +36,7 @@ def setup_ddp():
 def train(model, dataloader, tokenizer, config, global_step, device):
     model.train()
     total_ce_loss = 0.0
-    total_combined_energy = 0.0
+    total_energy = 0.0
     batch_count = 0
     pad_token_id = tokenizer.pad_token_id
     vocab_size = len(tokenizer)
@@ -98,25 +98,25 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
         avg_output_energy = output_energy if output_energy is not None else ce_loss.item()
 
-        combined_energy = alpha * avg_internal_energy +beta* avg_output_energy
-        total_combined_energy += combined_energy
+        batch_energy = alpha * avg_internal_energy +beta* avg_output_energy
+        total_energy += batch_energy
         batch_count += 1
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | "
-                  f"Combined_energy: {combined_energy:.4f} | "
+                  f"batch_energy: {batch_energy:.4f} | "
                   f"Perplexity: {perplexity:.4f}", flush=True)
 
         reset_pc_modules(model)
         cleanup_memory()
 
-    avg_combined_energy = total_combined_energy / batch_count if batch_count > 0 else 0.0
+    avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
 
-    return avg_combined_energy, avg_perplexity, global_step
+    return avg_energy, avg_perplexity, global_step
 
 
 def main():
@@ -158,8 +158,8 @@ def main():
 
     start_time = time.time()
     global_step = 0
-    train_combined_energies = []
-    val_combined_energies = []
+    train_energies = []
+    val_energies = []
 
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
@@ -176,30 +176,30 @@ def main():
             print(f"Epoch {epoch + 1}/{config.num_epochs}")
 
         model.train()
-        train_combined_energy, train_perplexity, global_step = train(
+        train_energy, train_perplexity, global_step = train(
             model, train_loader, tokenizer, config, global_step, device
         )
-        train_combined_energies.append(train_combined_energy)
+        train_energies.append(train_energy)
 
         
         model.eval()
-        val_combined_energy, val_perplexity = evaluate(
+        val_energy, val_perplexity = evaluate(
             model, valid_loader, tokenizer, max_batches=None, device=device
         )
-        val_combined_energies.append(val_combined_energy)
+        val_energies.append(val_energy)
 
         if rank == 0:
             print(f"Epoch {epoch + 1}/{config.num_epochs} | "
-                  f"Train Combined_energy: {train_combined_energy:.4f} | Train PPL: {train_perplexity:.4f} | "
-                  f"Val Combined_energy: {val_combined_energy:.4f} | Val PPL: {val_perplexity:.4f}")
+                  f"Train_energy: {train_energy:.4f} | Train PPL: {train_perplexity:.4f} | "
+                  f"Val_energy: {val_energy:.4f} | Val PPL: {val_perplexity:.4f}")
 
             if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
                 os.makedirs("checkpoints", exist_ok=True)
                 checkpoint = {
                     'epoch': epoch,
                     'model_state_dict': model.module.state_dict(),
-                    'train_combined_energy': train_combined_energy,
-                    'val_combined_energy': val_combined_energy,
+                    'train_energy': train_energy,
+                    'val_energy': val_energy,
                     'train_perplexity': train_perplexity,
                     'val_perplexity': val_perplexity
                 }
@@ -208,13 +208,13 @@ def main():
                 print(f"Saved checkpoint to {checkpoint_path}")
 
     if rank == 0:
-        plot_metrics(train_combined_energies, val_combined_energies)
+        plot_metrics(train_energies, val_energies)
         os.makedirs("checkpoints", exist_ok=True)
         final_checkpoint = {
             'epoch': config.num_epochs,
             'model_state_dict': model.module.state_dict(),
-            'train_combined_energy': train_combined_energy,
-            'val_combined_energy': val_combined_energy,
+            'train_energy': train_energy,
+            'val_energy': val_energy,
             'train_perplexity': train_perplexity,
             'val_perplexity': val_perplexity
         }

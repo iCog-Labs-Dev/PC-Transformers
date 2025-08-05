@@ -38,7 +38,10 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         num_epochs=3,
         update_bias=update_bias,
         use_lateral=True,
-        energy_fn_name=energy_fn_name,
+        internal_energy_fn_name="mse",
+        output_energy_fn_name="kld",
+        combined_internal_weight=0.3,
+        combined_output_weight=0.7,
         use_flash_attention=flash
     )
 
