@@ -99,7 +99,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+            logger.info(f"Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -169,6 +169,8 @@ def main():
         val_energies.append(val_energy)
 
         if rank == 0:
+            # add horizontal bar
+            logger.info("-" * 100)
             logger.info(f"Epoch {epoch+1}/{config.num_epochs}")
             logger.info(f"{'Metrics':<20} {'Training':<15} {'Validation':<15}")
             logger.info(f"{'Energy':<20} {train_energy:<15.4f} {val_energy:<15.4f}")
