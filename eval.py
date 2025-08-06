@@ -29,12 +29,6 @@ Usage (Single GPU or CPU Evaluation):
 
 """
 
-local_rank = int(os.getenv("LOCAL_RANK", 0))
-device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
-
-local_rank = 0
-device = torch.device("cpu")
-
 def evaluate(model, dataloader, tokenizer, max_batches=None, device=None, rank=0):
     model.eval()
     total_energy = 0.0
@@ -42,6 +36,18 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None, rank=0
     total_ce_loss = 0.0
     pad_token_id = tokenizer.pad_token_id
     vocab_size = len(tokenizer)
+    
+    base_model = model.module if hasattr(model, 'module') else model
+    output_pc_layer = base_model.output.pc_layer
+
+    alpha = getattr(base_model.config, 'combined_internal_weight', 0.3)
+    beta = getattr(base_model.config, 'combined_output_weight', 0.7)
+    
+    base_model = model.module if hasattr(model, 'module') else model
+    output_pc_layer = base_model.output.pc_layer
+
+    alpha = getattr(base_model.config, 'combined_internal_weight', 0.3)
+    beta = getattr(base_model.config, 'combined_output_weight', 0.7)
     
     if rank == 0:
         if max_batches is None:
@@ -72,19 +78,24 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None, rank=0
         )
         total_ce_loss += ce_loss.item()
 
-        layer_energies = []
+        internal_energies = []
+        output_energy = None
+
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
                 energy = module.get_energy()
-                if energy is not None and not torch.isnan(torch.tensor(energy)):
-                    layer_energies.append(energy)
+                if energy is None or (isinstance(energy, float) and math.isnan(energy)):
+                    continue
 
-        if layer_energies:
-            valid_energies = [e for e in layer_energies if not torch.isnan(torch.tensor(e))]
-            batch_energy = sum(valid_energies) / len(valid_energies) if valid_energies else ce_loss.item()
-        else:
-            batch_energy = ce_loss.item()
+                if module is output_pc_layer:
+                    output_energy = energy
+                else:
+                    internal_energies.append(energy)
 
+        avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
+        avg_output_energy = output_energy if output_energy is not None else ce_loss.item()
+
+        batch_energy = alpha * avg_internal_energy + beta * avg_output_energy
         total_energy += batch_energy
         batch_count += 1
 
@@ -103,7 +114,6 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None, rank=0
         print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
 
     return avg_energy, avg_ce_loss, avg_perplexity
-
 
 def main():
     local_rank, is_distributed = setup_ddp()
@@ -124,8 +134,12 @@ def main():
         n_blocks=6,
         num_epochs=1,
         update_bias=False,
-        energy_fn_name="scaled_mse", 
-        eos_token_id = tokenizer.eos_token_id
+        internal_energy_fn_name="mse", 
+        output_energy_fn_name="kld",
+        eos_token_id = tokenizer.eos_token_id,
+        combined_internal_weight=0.3,
+        combined_output_weight=0.7,
+        use_flash_attention=True
     )
 
     model_path = "checkpoints/final_model.pt"

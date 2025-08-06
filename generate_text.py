@@ -6,29 +6,20 @@ import torch.nn.functional as F
 from Data_preprocessing.dataloader import get_loaders
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
-"""
-generate_text.py
 
-This script generates text using a trained Predictive Coding Transformer model.
-It loads a model checkpoint, selects a short prompt from test data, and then generates
-continuation tokens autoregressively. 
+"""
+Usage: python generate_text.py
+
+This script generates text using a trained predictive coding transformer model.
+It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
 
 USAGE(CPU):
     python generate_text.py
 
 Usage (Multi-GPU):
     torchrun --nproc-per-node=<NUM_GPUS> generate_text.py
-
 """
 
-
-def get_device_and_rank():
-    if torch.cuda.is_available():
-        local_rank = int(os.getenv("LOCAL_RANK", 0))
-        device = torch.device(f"cuda:{local_rank}")
-        return device, local_rank
-    else:
-        return torch.device("cpu"), 0
 
 def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0, device = None):
     model.eval()
@@ -124,7 +115,8 @@ def main():
         n_blocks=6,
         num_epochs=1,
         update_bias=False,
-        energy_fn_name="scaled_mse",
+        internal_energy_fn_name="mse",
+        output_energy_fn_name="kld",
         eos_token_id = tokenizer.eos_token_id
     )
 

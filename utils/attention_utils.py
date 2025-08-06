@@ -31,15 +31,15 @@ def apply_flash_attention(q, k, v, mask=None):
         return apply_standard_attention(q, k, v, mask)
     B, num_heads, T, head_dim = q.shape
     # FlashAttention expects [B, T, 3, num_heads, head_dim]
-    qkv = torch.stack([q, k, v], dim=2).transpose(1, 2)  # [B, T, 3, num_heads, head_dim]
+    qkv = torch.stack([q, k, v], dim=2) # [B, T, 3, num_heads, head_dim]
     orig_dtype = qkv.dtype
     with autocast(device_type=device, dtype=torch.float16):
         if qkv.dtype not in [torch.float16, torch.bfloat16]:
             qkv = qkv.to(torch.float16)
-        attn_out = flash_attn_unpadded_qkvpacked_func(qkv, None, 0.0, causal=True)
+        attn_out = flash_attn_qkvpacked_func(qkv, 0.0, None, causal=True)
         attn_out = attn_out.to(orig_dtype)
     # Output: [B, T, num_heads, head_dim] -> [B, num_heads, T, head_dim]
-    return attn_out.permute(0, 2, 1, 3).contiguous()
+    return attn_out
 
 def apply_standard_attention(q, k, v, mask=None):
     """
