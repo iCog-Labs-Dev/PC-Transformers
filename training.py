@@ -142,7 +142,7 @@ def main():
         num_epochs= 20,
         update_bias= True,
         use_lateral = True,
-        internal_energy_fn_name="mse",
+        internal_energy_fn_name="pc_e",
         output_energy_fn_name="kld",
         eos_token_id=tokenizer.eos_token_id,
         combined_internal_weight=0.3,

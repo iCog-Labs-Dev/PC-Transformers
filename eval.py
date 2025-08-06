@@ -124,7 +124,7 @@ def main():
         n_blocks=6,
         num_epochs=1,
         update_bias=False,
-        internal_energy_fn_name="mse", 
+        internal_energy_fn_name="pc_e", 
         output_energy_fn_name="kld",
         eos_token_id = tokenizer.eos_token_id,
         combined_internal_weight=0.3,
