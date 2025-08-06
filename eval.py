@@ -13,7 +13,22 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_ddp
 
-"""Usage: torchrun --nproc-per-node=2 eval.py"""
+"""
+Evaluation Script
+
+This script evaluates a trained predictive coding transformer model on a test dataset.
+It computes cross-entropy loss, energy-based metrics, and perplexity over the test set.
+
+Evaluation is performed either on CPU, single GPU, or across multiple GPUs
+
+Usage (Multi-GPU Distributed Evaluation):
+    torchrun --nproc-per-node=<NUM_GPUS> eval.py
+
+Usage (Single GPU or CPU Evaluation):
+    python eval.py
+
+"""
+
 local_rank = int(os.getenv("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 

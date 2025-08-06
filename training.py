@@ -19,10 +19,24 @@ import argparse
 from utils.device_utils import setup_ddp
 
 """
-Usage: python training.py
+training.py
 
-This script trains a predictive coding transformer model on a dataset.
-It tracks and plots the average predictive coding energy per epoch and saves the trained model.
+This script trains a Predictive Coding Transformer model using the selected dataset.
+It supports distributed training and logs energy and perplexity metrics
+for both training and validation phases. 
+
+
+Usage (CPU):
+    python training.py --dataset=<dataset_name>
+
+Usage (Multi-GPU Distributed Training):
+    torchrun --nproc-per-node=<NUM_GPUS> training.py --dataset=<dataset_name>
+    
+ARGUMENTS:
+    --dataset: Which dataset to use. Options:
+        - ptb  : Penn Treebank
+        - opwb : OpenWebText
+
 """
 
 def train(model, dataloader, tokenizer, config, global_step, device):

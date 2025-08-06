@@ -3,6 +3,22 @@ import time
 import pickle
 from transformers import GPT2TokenizerFast
 from Data_preprocessing.config import Config
+import argparse
+
+"""
+GPT-2 Tokenizer Wrapper Script
+
+This script tokenizes dataset splits (train/valid/test) using the GPT-2 tokenizer and saves the tokenized IDs.
+
+Usage:
+    python -m Data_preprocessing.tokenizer.gpt2_tokenizer --dataset=<dataset_name>
+
+Arguments:
+    --dataset: Dataset to use (default: opwb)
+        Choices:
+            ptb  - Penn Treebank dataset
+            opwb - Open WebBook dataset
+"""
 
 class GPT2TokenizerWrapper:
     def __init__(self, dataset_name=Config.DATASET_NAME):
@@ -66,7 +82,17 @@ class GPT2TokenizerWrapper:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
+    parser.add_argument(
+        '--dataset', 
+        type=str, 
+        default='opwb', 
+        choices=['ptb', 'opwb'], 
+        help=(
+            "Dataset to use:\n"
+            "  ptb  - Penn Treebank dataset\n"
+            "  opwb - Open WebBook dataset\n"
+        ))
+    
     args = parser.parse_args()
     print(f"Using dataset: {args.dataset}")
 

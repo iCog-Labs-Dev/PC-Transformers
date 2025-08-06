@@ -7,11 +7,20 @@ from Data_preprocessing.dataloader import get_loaders
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 """
-Usage: python generate_text.py
+generate_text.py
 
-This script generates text using a trained predictive coding transformer model.
-It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
+This script generates text using a trained Predictive Coding Transformer model.
+It loads a model checkpoint, selects a short prompt from test data, and then generates
+continuation tokens autoregressively. 
+
+USAGE(CPU):
+    python generate_text.py
+
+Usage (Multi-GPU):
+    torchrun --nproc-per-node=<NUM_GPUS> generate_text.py
+
 """
+
 
 def get_device_and_rank():
     if torch.cuda.is_available():
