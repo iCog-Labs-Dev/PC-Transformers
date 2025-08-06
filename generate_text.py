@@ -46,7 +46,8 @@ def text_generation(model, config, device = None,  max_samples=2):
     prompt_len = 5
     total_samples = 0
 
-    _, _, test_loader = get_loaders(distributed=True)
+    is_distributed = torch.cuda.is_available() and "RANK" in os.environ and "WORLD_SIZE" in os.environ
+    _, _, test_loader = get_loaders(distributed=is_distributed)
     tokenizer = load_tokenizer()
     pad_token_id = tokenizer.pad_token_id
 
@@ -73,6 +74,8 @@ def text_generation(model, config, device = None,  max_samples=2):
 
             decoded_preds.append(generated_str)
             decoded_targets.append(target_str)
+            
+            _, local_rank = get_device_and_rank()
 
             if local_rank == 0:
                 print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
