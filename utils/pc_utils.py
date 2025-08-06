@@ -251,6 +251,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
 ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,
     "mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1),
+    "pc_e": lambda mu, x: ((mu - x) ** 2)*0.5,
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
     "kld": lambda mu, x: torch.clamp(F.kl_div(
