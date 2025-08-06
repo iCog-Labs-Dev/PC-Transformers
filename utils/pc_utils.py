@@ -104,7 +104,7 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
 
     return mu, mu_word, mu_pos
     
-def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update):
+def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, upper_mu):
     """
     Perform a predictive coding update step for a linear (fully connected) layer.
 
@@ -132,6 +132,13 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         mu = F.gelu(mu)
 
     error = target - mu
+    U_error = torch.zeros_like(x, device=device)
+    
+    
+    if upper_mu is not None:
+         U_error = x- upper_mu
+         U_error= U_error @layer.weight.T # project the error 
+         error= error-U_error     
     if layer.weight.shape[0] != layer.weight.shape[1]:
         error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
     else:
@@ -152,7 +159,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     
     x = torch.clamp(x, -clamp_value, clamp_value)
     
-    # Hebbian Update W_layer
+    # PC Update W_layer
     if requires_update:
         delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
         layer.weight = nn.Parameter(layer.weight + delta_W)
@@ -165,7 +172,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     return x, mu
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, flash=False):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, upper_mu, flash=False):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
         q_proj = proj_layers.get("q_proj", None)
@@ -197,6 +204,11 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
         error = target - mu  # B, T, D
+        U_error = torch.zeros_like(x, device=device)
+        if upper_mu is not None:
+         U_error = x- upper_mu
+         error= error-U_error  
+          
         if dvl_grad is not None:
             B, T, H, D = dvl_grad.shape
             dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
@@ -223,7 +235,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
 
         x = torch.clamp(x, -clamp_value, clamp_value)
 
-        # Hebbian update W_latent
+        # PC update W_latent
         if requires_update:
             for proj in (q_proj, k_proj, v_proj):
                 delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
