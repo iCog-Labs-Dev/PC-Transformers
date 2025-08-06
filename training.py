@@ -117,7 +117,7 @@ def main():
         num_epochs= 20,
         update_bias= True,
         use_lateral = True,
-        energy_fn_name="scaled_mse",
+        energy_fn_name="kld",
         eos_token_id = tokenizer.eos_token_id,
         use_flash_attention=True
     )
