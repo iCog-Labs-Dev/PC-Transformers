@@ -11,7 +11,7 @@ from predictive_coding.config import GPTConfig
 from utils.model_utils import reset_pc_modules, load_tokenizer
 from tuning.config import get_dynamic_model_config, update_global_config
 from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
-from tuning.tuning_logs import log_trial_to_detailed_log, log_trial_to_summary
+from tuning.tuning_logs import log_trial_to_detailed_log
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -90,7 +90,6 @@ def objective(trial, device = None, flash=False):
         trial.set_user_attr("energy", avg_energy)
         trial.set_user_attr("trial_time", trial_time)
 
-        log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
         log_trial_to_detailed_log("tuning/bayesian_tuning_trials.txt", trial, config, trial_time, avg_energy)
 
         return avg_energy
@@ -100,7 +99,6 @@ def objective(trial, device = None, flash=False):
         trial.set_user_attr("energy", "N/A")
         trial.set_user_attr("trial_time", (time.time() - start_time) / 3600)
 
-        log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
         return float("inf")
     
     finally:

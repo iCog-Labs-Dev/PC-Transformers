@@ -47,9 +47,8 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         storage=storage_url
     )
 
-    summary_path, trials_path = initialize_logs(study_name)
+    trials_path = initialize_logs(study_name)
     logger.info(f"[Rank {local_rank}] Starting Bayesian tuning with {n_trials} trials")
-    logger.info(f"[Rank {local_rank}] Summary Log: {summary_path}")
     logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
 
     try:

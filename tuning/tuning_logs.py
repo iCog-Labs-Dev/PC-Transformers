@@ -1,30 +1,13 @@
 def initialize_logs(study_name: str):
     """Create and initialize summary and trial log files."""
-    summary_path = f"tuning/{study_name}_summary.txt"
     trials_path = f"tuning/{study_name}_trials.txt"
-    
-    with open(summary_path, "w") as f:
-        f.write(f"BAYESIAN TUNING SUMMARY - {study_name}\n")
-        f.write(f"{'='*50}\n\n")
-        f.write("Objective: Minimize Average Energy\n\n")
-        f.write("Trial Progress:\n")
-        f.write(f"{'Trial':<6} {'Time(s)':<8}{'Avg Energy':<12}")
-        f.write(f"{'-'*82}\n")
 
     with open(trials_path, "w") as f:
         f.write(f"DETAILED TRIAL RESULTS - {study_name}\n")
         f.write(f"{'='*50}\n")
         f.write("Objective: Minimize Averge Energy \n\n")
 
-    return summary_path, trials_path
-
-def log_trial_to_summary(summary_path, trial):
-    """Appends a trial result to the summary log file."""
-    energy = trial.user_attrs.get("energy", "N/A")
-    trial_time = trial.user_attrs.get("trial_time", 0)
-
-    with open(summary_path, "a") as f:
-        f.write(f"{trial.number:<6} {trial_time:<8.1f}{energy:<12} ")
+    return trials_path
 
 def log_trial_to_detailed_log(trials_path, trial, config, trial_time, avg_energy):
     """Appends detailed info about a completed trial to a trials log file."""
