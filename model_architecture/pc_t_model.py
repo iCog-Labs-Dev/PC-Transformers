@@ -143,7 +143,7 @@ class PCTransformer(nn.Module):
                 T=self.config.T,
                 requires_update=self.training,
                 upper_mu= mu_mlp2
-            ))
+            )
             
             for idx in range(len(self.blocks) - 1, -1, -1):
                 block = self.blocks[idx]
@@ -168,7 +168,7 @@ class PCTransformer(nn.Module):
                     T=self.config.T,
                     requires_update=self.training,
                     upper_mu= mu_mlp1
-                ))
+                )
                             
                 mu_attn_op = block.attn.pc_output.get_mu("linear") if t > 0 else None
 
@@ -184,7 +184,7 @@ class PCTransformer(nn.Module):
                     T=self.config.T,
                     requires_update=self.training,
                     upper_mu= mu_attn_op
-                ))
+                )
                 
                 layer_norm1 = block.ln1(block.mlp.pc_layer1.get_x("fc1"))
                 if idx == 0:
@@ -206,7 +206,7 @@ class PCTransformer(nn.Module):
                     T=self.config.T,
                     requires_update=self.training,
                     upper_mu= mu_attn_qkv
-                ))
+                )
 
                 # Execute attention QKV
                 execute_parallel(
@@ -221,7 +221,7 @@ class PCTransformer(nn.Module):
                     requires_update=self.training,
                     upper_mu=mu_embed,
                     flash= getattr(self.config, 'use_flash_attention', False)
-                ))
+                )
 
 
             # Execute embedding layer
