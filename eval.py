@@ -90,7 +90,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         batch_count += 1
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}|  batch Energy: { batch_energy:.4f}", flush=True)
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Energy: { batch_energy:.4f}", flush=True)
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -102,7 +102,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
     
     if local_rank == 0:
         print(f"Total Batches Processed: {batch_idx + 1}")
-        print(f"Avg CE Loss: {avg_ce_loss:.4f} | avg_energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
+        print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
 
     return avg_energy, avg_perplexity
 
