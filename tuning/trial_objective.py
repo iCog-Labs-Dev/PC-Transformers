@@ -29,7 +29,7 @@ def broadcast_config(config_dict, device):
     dist.broadcast(obj_tensor, src=0)
     return pickle.loads(bytes(obj_tensor.tolist()))
 
-def objective(trial, device = None, flash=False):
+def objective(trial, device=None, is_distributed=False, flash=False):
     """Bayesian Objective function"""
     start_time = time.time()
     model = None
@@ -37,8 +37,6 @@ def objective(trial, device = None, flash=False):
     print(f"\nStarting Trial {trial.number}")
     
     try:
-        local_rank, is_distributed = setup_ddp()
-        device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
         tokenizer = load_tokenizer()
         vocab_size = len(tokenizer)
 
@@ -76,10 +74,10 @@ def objective(trial, device = None, flash=False):
         reset_pc_modules(model)
 
         model.eval()
-        avg_energy, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
-        
-        trial_time = (time.time() - start_time) 
-        
+        avg_energy, _, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
+
+        trial_time = (time.time() - start_time)
+
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", avg_energy)
         trial.set_user_attr("trial_time", trial_time)

@@ -25,7 +25,7 @@ Usage:  torchrun --nproc-per-node=<NUM_GPU> tuning/bayes_tuning.py
 
 """
 
-def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False):
+def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, is_distributed=False, flash=False):
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
     if local_rank == 0 or local_rank == -1:
@@ -55,7 +55,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
 
     try:
-        study.optimize(lambda trial: objective(trial, device, flash), n_trials=n_trials, show_progress_bar=(local_rank == 0))
+        study.optimize(lambda trial: objective(trial, device=device, is_distributed=is_distributed, flash=flash),
+               n_trials=n_trials,
+               show_progress_bar=(local_rank == 0))
+
         logger.info(f"[Rank {local_rank}] Bayesian tuning completed!")
     
         if local_rank == 0 and study.best_trial:
@@ -84,7 +87,8 @@ if __name__ == "__main__":
     use_flash_attention = args.flash
     
     train_loader, valid_loader,_ = get_loaders(is_distributed)
-    run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=use_flash_attention)
+    run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=local_rank, device=device, is_distributed=is_distributed, flash=use_flash_attention)
+
 
     if is_distributed:
         dist.destroy_process_group()
