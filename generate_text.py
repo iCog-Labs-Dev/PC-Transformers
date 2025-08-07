@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from Data_preprocessing.dataloader import get_loaders
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
+from utils.device_utils import setup_ddp
+
 
 """
 Usage: python generate_text.py
@@ -75,7 +77,7 @@ def text_generation(model, config, device = None,  max_samples=2):
             decoded_preds.append(generated_str)
             decoded_targets.append(target_str)
             
-            _, local_rank = get_device_and_rank()
+            _, local_rank = setup_ddp()
 
             if local_rank == 0:
                 print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
@@ -91,10 +93,10 @@ def text_generation(model, config, device = None,  max_samples=2):
     return decoded_preds, decoded_targets
 
 def main():
-    device, local_rank = get_device_and_rank()
-    use_ddp = torch.cuda.is_available() and "RANK" in os.environ and "WORLD_SIZE" in os.environ
+    local_rank, is_distributed = setup_ddp ()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
-    if use_ddp:
+    if is_distributed:
         dist.init_process_group(backend="nccl")
         print(f"[Rank {local_rank}] Using device: {device} (DDP enabled)")
     else:
@@ -123,15 +125,15 @@ def main():
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     model = model.to(device)
-    if use_ddp:
+    if is_distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    if (not use_ddp) or (local_rank == 0):
+    if (not is_distributed) or (local_rank == 0):
         decoded_preds, decoded_targets = text_generation(model, config, device)
-        if decoded_preds and decoded_targets and ((not use_ddp) or (local_rank == 0)):
+        if decoded_preds and decoded_targets and ((not is_distributed) or (local_rank == 0)):
             compute_text_metrics(decoded_preds, decoded_targets)
     
-    if use_ddp:
+    if is_distributed:
         dist.barrier()
         dist.destroy_process_group()
 

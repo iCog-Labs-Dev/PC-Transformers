@@ -93,7 +93,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(f"Using dataset: {args.dataset}")
 
-    print("Starting tokenizer script...")  
+    print("Starting tokenizer script...") 
+    start_time = time.time()  
     tokenizer_wrapper = GPT2TokenizerWrapper(args.dataset)  
     print("Tokenizer initialized.")  
 
