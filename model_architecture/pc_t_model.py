@@ -5,7 +5,6 @@ from .transformer_block import TransformerBlock
 from utils.pc_utils import ids_to_one_hot
 from .output import OutputLayer
 
-
 class PCTransformer(nn.Module):
     """
     Top-down Predictive Coding Transformer model.
@@ -45,10 +44,9 @@ class PCTransformer(nn.Module):
                 for key in module.W_latents:
                     if module.W_latents[key] is not None:
                         module.W_latents[key] = module.W_latents[key].to(next(self.parameters()).device)
-
     def forward(self, target_ids, input_ids):
         """
-        Forward pass of the PCTransformer model.
+        Forward pass of the PCTransformer model, using torch.jit.fork for CPU or torch.cuda.stream for CUDA.
 
         Args:
             target_ids (torch.Tensor): Target token IDs of shape (B, T).
@@ -80,7 +78,7 @@ class PCTransformer(nn.Module):
 
         self.embedding.pc_layer.init_x(
             batch_size=B,
-            seq_len= S,
+            seq_len=S,
             layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
             layer_type="embed",
             input_ids=input_ids,
@@ -125,18 +123,42 @@ class PCTransformer(nn.Module):
             device=device
         )
 
-        for t in range(self.config.T):
+        # Check if CUDA is available and the input is on a CUDA device
+        use_cuda = torch.cuda.is_available() and device.type == 'cuda'
+
+        if use_cuda:
+            # Create CUDA streams for parallel execution
+            streams = [torch.cuda.Stream(device=device) for _ in range(len(self.blocks) * 4 + 2)]
+        else:
+            # Prepare list for futures when using torch.jit.fork
             futures = []
-            futures.append(torch.jit.fork(
-                self.output.pc_layer.forward,
-                target_activity=target_logits,
-                layer=self.output.output,
-                layer_type="linear",
-                t=t,
-                T=self.config.T,
-                requires_update=self.training
-            ))
-            
+
+        for t in range(self.config.T):
+            if use_cuda:
+                stream_idx = 0
+                # Execute output layer in a separate stream
+                with torch.cuda.stream(streams[stream_idx]):
+                    self.output.pc_layer.forward(
+                        target_activity=target_logits,
+                        layer=self.output.output,
+                        layer_type="linear",
+                        t=t,
+                        T=self.config.T,
+                        requires_update=self.training
+                    )
+                stream_idx += 1
+            else:
+                futures.append(torch.jit.fork(
+                    self.output.pc_layer.forward,
+                    target_activity=target_logits,
+                    layer=self.output.output,
+                    layer_type="linear",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=self.training
+                ))
+
+            # Iterate through blocks in reverse order for parallel execution
             for idx in range(len(self.blocks) - 1, -1, -1):
                 block = self.blocks[idx]
                 next_target = (
@@ -147,68 +169,141 @@ class PCTransformer(nn.Module):
                 
                 layer_norm2 = block.ln2(next_target)
                 
-                futures.append(torch.jit.fork(
-                    block.mlp.pc_layer2.forward,
-                    target_activity=layer_norm2,
-                    layer=block.mlp.fc2,
-                    layer_type="linear",
-                    t=t,
-                    T=self.config.T,
-                    requires_update=self.training
-                ))
+                if use_cuda:
+                    # Execute MLP layer 2 in a stream
+                    with torch.cuda.stream(streams[stream_idx]):
+                        block.mlp.pc_layer2.forward(
+                            target_activity=layer_norm2,
+                            layer=block.mlp.fc2,
+                            layer_type="linear",
+                            t=t,
+                            T=self.config.T,
+                            requires_update=self.training
+                        )
+                    stream_idx += 1
+                else:
+                    futures.append(torch.jit.fork(
+                        block.mlp.pc_layer2.forward,
+                        target_activity=layer_norm2,
+                        layer=block.mlp.fc2,
+                        layer_type="linear",
+                        t=t,
+                        T=self.config.T,
+                        requires_update=self.training
+                    ))
 
-                futures.append(torch.jit.fork(
-                    block.mlp.pc_layer1.forward,
-                    target_activity=block.mlp.pc_layer2.get_x("linear"),
-                    layer=block.mlp.fc1,
-                    layer_type="fc1",
-                    t=t,
-                    T=self.config.T,
-                    requires_update=self.training
-                ))
+                if use_cuda:
+                    # Execute MLP layer 1 in a stream
+                    with torch.cuda.stream(streams[stream_idx]):
+                        block.mlp.pc_layer1.forward(
+                            target_activity=block.mlp.pc_layer2.get_x("linear"),
+                            layer=block.mlp.fc1,
+                            layer_type="fc1",
+                            t=t,
+                            T=self.config.T,
+                            requires_update=self.training
+                        )
+                    stream_idx += 1
+                else:
+                    futures.append(torch.jit.fork(
+                        block.mlp.pc_layer1.forward,
+                        target_activity=block.mlp.pc_layer2.get_x("linear"),
+                        layer=block.mlp.fc1,
+                        layer_type="fc1",
+                        t=t,
+                        T=self.config.T,
+                        requires_update=self.training
+                    ))
                 
                 layer_norm1 = block.ln1(block.mlp.pc_layer1.get_x("fc1"))
                     
+                if use_cuda:
+                    # Execute attention output in a stream
+                    with torch.cuda.stream(streams[stream_idx]):
+                        block.attn.pc_output.forward(
+                            target_activity=layer_norm1,
+                            layer=block.attn.output,
+                            layer_type="linear",
+                            t=t,
+                            T=self.config.T,
+                            requires_update=self.training
+                        )
+                    stream_idx += 1
+                else:
+                    futures.append(torch.jit.fork(
+                        block.attn.pc_output.forward,
+                        target_activity=layer_norm1,
+                        layer=block.attn.output,
+                        layer_type="linear",
+                        t=t,
+                        T=self.config.T,
+                        requires_update=self.training
+                    ))
+
+                if use_cuda:
+                    # Execute attention QKV in a stream
+                    with torch.cuda.stream(streams[stream_idx]):
+                        block.attn.pc_qkv.forward(
+                            target_activity=block.attn.pc_output.get_x("linear"),
+                            proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                            layer_type="attn",
+                            t=t,
+                            T=self.config.T,
+                            requires_update=self.training,
+                            flash=getattr(self.config, 'use_flash_attention', False)
+                        )
+                    stream_idx += 1
+                else:
+                    futures.append(torch.jit.fork(
+                        block.attn.pc_qkv.forward,
+                        target_activity=block.attn.pc_output.get_x("linear"),
+                        proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                        layer_type="attn",
+                        t=t,
+                        T=self.config.T,
+                        requires_update=self.training,
+                        flash=getattr(self.config, 'use_flash_attention', False)
+                    ))
+
+            if use_cuda:
+                # Execute embedding layer in a stream
+                with torch.cuda.stream(streams[stream_idx]):
+                    self.embedding.pc_layer.forward(
+                        target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
+                        layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
+                        layer_type="embed",
+                        input_ids=input_ids,
+                        position_ids=position_ids,
+                        t=t,
+                        T=self.config.T,
+                        requires_update=self.training
+                    )
+                stream_idx += 1
+
+                # Synchronize all streams to ensure completion
+                for stream in streams[:stream_idx]:
+                    stream.synchronize()
+            else:
+                # Execute embedding layer with fork
                 futures.append(torch.jit.fork(
-                    block.attn.pc_output.forward,
-                    target_activity=layer_norm1,
-                    layer=block.attn.output,
-                    layer_type="linear",
+                    self.embedding.pc_layer.forward,
+                    target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
+                    layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
+                    layer_type="embed",
+                    input_ids=input_ids,
+                    position_ids=position_ids,
                     t=t,
                     T=self.config.T,
                     requires_update=self.training
                 ))
 
-                futures.append(torch.jit.fork(
-                    block.attn.pc_qkv.forward,
-                    target_activity=block.attn.pc_output.get_x("linear"),
-                    proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
-                    layer_type="attn",
-                    t=t,
-                    T=self.config.T,
-                    requires_update=self.training,
-                    flash= getattr(self.config, 'use_flash_attention', False)
-                ))
-
-
-            futures.append(torch.jit.fork(
-                self.embedding.pc_layer.forward,
-                target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
-                layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-                layer_type="embed",
-                input_ids=input_ids,
-                position_ids=position_ids,
-                t=t,
-                T=self.config.T,
-                requires_update=self.training
-            ))
-
-            # Wait for all concurrent inference steps to complete
-            for future in futures:
-                try:
-                    torch.jit.wait(future)
-                except Exception as e:
-                    print(f"Error in parallel inference step: {e}")
+                # Wait for all concurrent inference steps to complete
+                for future in futures:
+                    try:
+                        torch.jit.wait(future)
+                    except Exception as e:
+                        print(f"Error in parallel inference step: {e}")
+                futures.clear()  # Clear futures for the next iteration
 
         output_x = self.output.pc_layer.get_x("linear")
         logits = output_x @ self.output.output.weight.T + self.output.output.bias
