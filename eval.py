@@ -102,6 +102,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device=None, rank=0
         if rank == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
 
+
         reset_pc_modules(model)
         cleanup_memory()
 

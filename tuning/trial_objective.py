@@ -9,9 +9,9 @@ from utils.pc_utils import cleanup_memory
 from model_architecture.pc_t_model import PCTransformer
 from predictive_coding.config import GPTConfig
 from utils.model_utils import reset_pc_modules, load_tokenizer
-from tuning.config import get_dynamic_model_config, update_global_config, normalize_energy
+from tuning.config import get_dynamic_model_config, update_global_config
 from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
-from tuning.tuning_logs import log_trial_to_detailed_log, log_trial_to_summary
+from tuning.tuning_logs import log_trial_to_detailed_log
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_ddp
@@ -76,33 +76,27 @@ def objective(trial, device = None, flash=False):
         reset_pc_modules(model)
 
         model.eval()
-        avg_energy, val_loss, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
+        avg_energy, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
         
-        normalized_energy = normalize_energy(avg_energy, config.energy_fn_name)
-        combined_energy = normalized_energy + val_loss
-        trial_time = (time.time() - start_time) /3600
+        trial_time = (time.time() - start_time) 
         
         trial.set_user_attr("config", config.__dict__)
-        trial.set_user_attr("ce_loss", val_loss)
         trial.set_user_attr("energy", avg_energy)
-        trial.set_user_attr("normalized_energy", normalized_energy)
-        trial.set_user_attr("combined_energy", combined_energy)
         trial.set_user_attr("trial_time", trial_time)
 
-        log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
-        log_trial_to_detailed_log("tuning/bayesian_tuning_trials.txt", trial, config, trial_time, val_loss, avg_energy, normalized_energy, combined_energy)
+        trial_path = "tuning/bayesian_tuning_trials.txt"
 
-        return combined_energy
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            write_header = trial.number == 0 
+            log_trial_to_detailed_log(trial_path, trial, config, trial_time, avg_energy, write_header=write_header)
+
+        return avg_energy
     
     except Exception as e:
         print("Trial failed:", e)
-        trial.set_user_attr("ce_loss", "N/A")
         trial.set_user_attr("energy", "N/A")
-        trial.set_user_attr("normalized_energy", "N/A")
-        trial.set_user_attr("combined_energy", "N/A")
-        trial.set_user_attr("trial_time", (time.time() - start_time) / 3600)
+        trial.set_user_attr("trial_time", (time.time() - start_time))
 
-        log_trial_to_summary("tuning/bayesian_tuning_summary.txt", trial)
         return float("inf")
     
     finally:

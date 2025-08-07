@@ -113,7 +113,10 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
         rank = dist.get_rank() if dist.is_initialized() else 0
         if rank == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | "
+                  f"Energy: {batch_energy:.4f} | "
+                  f"Perplexity: {perplexity:.4f}", flush=True)
+
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -190,7 +193,6 @@ def main():
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
-        
 
         if rank == 0:
             print(f"Epoch {epoch + 1}/{config.num_epochs}")
@@ -201,7 +203,6 @@ def main():
         )
         train_energies.append(train_energy)
 
-        
         model.eval()
         val_energy,_,val_perplexity = evaluate(
             model, valid_loader, tokenizer, max_batches=None, device=device
@@ -209,23 +210,23 @@ def main():
         val_energies.append(val_energy)
 
         if rank == 0:
-            print(f"Epoch {epoch+1}/{config.num_epochs} | "
-            f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-            f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
-            
-            if (epoch + 1) % 5 == 0:
-                    os.makedirs("checkpoints", exist_ok=True)
-                    checkpoint = {
-                        'epoch': epoch,
-                        'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),
-                        'train_energy': train_energy,
-                        'val_energy': val_energy,
-                        'train_perplexity': train_perplexity,
-                        'val_perplexity': val_perplexity
-                    }
-                    checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
-                    torch.save(checkpoint, checkpoint_path)
-                    print(f"Saved checkpoint to {checkpoint_path}")
+            print(f"Epoch {epoch + 1}/{config.num_epochs} | "
+                  f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
+                  f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
+
+            if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
+                os.makedirs("checkpoints", exist_ok=True)
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),,
+                    'train_energy': train_energy,
+                    'val_energy': val_energy,
+                    'train_perplexity': train_perplexity,
+                    'val_perplexity': val_perplexity
+                }
+                checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
+                torch.save(checkpoint, checkpoint_path)
+                print(f"Saved checkpoint to {checkpoint_path}")
 
     if rank == 0:
         plot_metrics(train_energies, val_energies)

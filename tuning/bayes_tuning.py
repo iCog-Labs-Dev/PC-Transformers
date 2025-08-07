@@ -2,6 +2,7 @@ import torch
 import logging
 import optuna
 import os
+import time
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from Data_preprocessing.dataloader import get_loaders
@@ -48,10 +49,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         storage=storage_url
     )
 
-    summary_path, trials_path = initialize_logs(study_name)
-    logger.info(f"[Rank {local_rank}] Starting Bayesian tuning with {n_trials} trials")
-    logger.info(f"[Rank {local_rank}] Summary Log: {summary_path}")
-    logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
+    if local_rank == 0 or local_rank == -1:
+        trials_path = initialize_logs(study_name)
+        logger.info(f"[Rank {local_rank}] Starting Bayesian tuning with {n_trials} trials")
+        logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
 
     try:
         study.optimize(lambda trial: objective(trial, device, flash), n_trials=n_trials, show_progress_bar=(local_rank == 0))
