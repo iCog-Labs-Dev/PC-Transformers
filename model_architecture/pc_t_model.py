@@ -124,8 +124,9 @@ class PCTransformer(nn.Module):
             layer_type="linear_output",
             device=device
         )
-
+        
         for t in range(self.config.T):
+            mu_mlp2 = self.blocks[-1].mlp.pc_layer2.get_mu("linear") if t > 0 else None
             futures = []
             futures.append(torch.jit.fork(
                 self.output.pc_layer.forward,
@@ -134,7 +135,8 @@ class PCTransformer(nn.Module):
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
-                requires_update=self.training
+                requires_update=self.training,
+                upper_mu= mu_mlp2
             ))
             
             for idx in range(len(self.blocks) - 1, -1, -1):
@@ -146,7 +148,8 @@ class PCTransformer(nn.Module):
                 )
                 
                 layer_norm2 = block.ln2(next_target)
-                
+                mu_mlp1 = block.mlp.pc_layer1.get_mu("linear") if t > 0 else None
+
                 futures.append(torch.jit.fork(
                     block.mlp.pc_layer2.forward,
                     target_activity=layer_norm2,
@@ -154,8 +157,11 @@ class PCTransformer(nn.Module):
                     layer_type="linear",
                     t=t,
                     T=self.config.T,
-                    requires_update=self.training
+                    requires_update=self.training,
+                    upper_mu= mu_mlp1
                 ))
+                            
+                mu_attn_op = block.attn.pc_output.get_mu("linear") if t > 0 else None
 
                 futures.append(torch.jit.fork(
                     block.mlp.pc_layer1.forward,
@@ -164,11 +170,18 @@ class PCTransformer(nn.Module):
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
-                    requires_update=self.training
+                    requires_update=self.training,
+                    upper_mu= mu_attn_op
                 ))
                 
                 layer_norm1 = block.ln1(block.mlp.pc_layer1.get_x("fc1"))
-                    
+                if idx == 0:
+                   mu_embed = self.embedding.pc_layer.get_mu("embed") if t > 0 else None
+                else:
+                   mu_embed = self.blocks[idx - 1].mlp.pc_layer2.get_mu("linear") if t > 0 else None
+                
+                mu_attn_qkv = block.attn.pc_qkv.get_mu("linear") if t > 0 else None
+
                 futures.append(torch.jit.fork(
                     block.attn.pc_output.forward,
                     target_activity=layer_norm1,
@@ -176,7 +189,8 @@ class PCTransformer(nn.Module):
                     layer_type="linear",
                     t=t,
                     T=self.config.T,
-                    requires_update=self.training
+                    requires_update=self.training,
+                    upper_mu= mu_attn_qkv
                 ))
 
                 futures.append(torch.jit.fork(
@@ -187,6 +201,7 @@ class PCTransformer(nn.Module):
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
+                    upper_mu=mu_embed,
                     flash= getattr(self.config, 'use_flash_attention', False)
                 ))
 
@@ -202,7 +217,7 @@ class PCTransformer(nn.Module):
                 T=self.config.T,
                 requires_update=self.training
             ))
-
+    
             # Wait for all concurrent inference steps to complete
             for future in futures:
                 try:

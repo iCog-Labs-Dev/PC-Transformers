@@ -4,9 +4,19 @@ import pickle
 from transformers import GPT2TokenizerFast
 from Data_preprocessing.config import Config
 
+"""
+This script initializes a GPT-2 tokenizer (Fast version) and prepares it for tokenizing
+data from a specified dataset. It adds special tokens, tokenizes train/valid/test
+splits, appends EOS tokens, and saves the tokenized sequences as pickle files for later use.
+
+Usage:
+    Run as a module to tokenize the dataset:
+    > python -m Data_preprocessing.tokenizer.gpt2_tokenizer
+
+"""
+
 class GPT2TokenizerWrapper:
     def __init__(self, dataset_name=Config.DATASET_NAME):
-        """Initialize GPT-2 tokenizer with paths from config"""
         print(f"Initializing tokenizer for dataset: {dataset_name}")  
         os.makedirs(Config.TOKENIZER_DIR, exist_ok=True)
         print(f"Ensured tokenizer directory exists: {Config.TOKENIZER_DIR}")  
@@ -21,7 +31,6 @@ class GPT2TokenizerWrapper:
         self.tokenizer_path = os.path.join(Config.TOKENIZER_DIR, f"gpt2_tokenizer_{dataset_name}.json")
 
     def tokenize_and_save(self, subset_name):
-        """Tokenize a dataset split and save the IDs"""
         subset_path = os.path.join(Config.DATA_DIR, self.dataset_name, f"{subset_name}.txt")
         if not os.path.exists(subset_path):
            raise FileNotFoundError(f"{subset_name}.txt not found in {os.path.join(Config.DATA_DIR, self.dataset_name)}")
@@ -58,7 +67,6 @@ class GPT2TokenizerWrapper:
             pickle.dump(tokenized, f)
         print(f"Tokenized {subset_name}.txt and saved IDs to {output_path}")
     def save_tokenizer(self):
-        """Save the tokenizer configuration"""
         print(f"Saving tokenizer configuration to: {self.tokenizer_path}")  
         self.tokenizer.save_pretrained(self.tokenizer_path)
         print(f"Tokenizer saved to {self.tokenizer_path}")
@@ -77,9 +85,3 @@ if __name__ == "__main__":
     tokenizer_wrapper.save_tokenizer()
     total_time = time.time() - start_time
     print(f"\nTokenizer completed in {total_time:.2f} seconds")
-
-
-
-
-
-

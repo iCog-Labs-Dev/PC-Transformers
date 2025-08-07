@@ -47,6 +47,7 @@ class PCLayer(nn.Module):
         self.W_latents = nn.ParameterDict()
         self.use_lateral = True
         self._x_cache = {}
+        self._mu_cache={}
         self.energy_fn_name = energy_fn_name 
         self._energy = 0.0
         self._errors = []
@@ -74,6 +75,7 @@ class PCLayer(nn.Module):
     def forward(
         self,
         target_activity: torch.Tensor,
+        upper_mu:  Optional[torch.Tensor] = None,
         layer: Optional[nn.Module] = None,
         proj_layers: Optional[dict] = None,
         layer_type: str = "fc1",
@@ -139,12 +141,14 @@ class PCLayer(nn.Module):
             # local_lr, clamp_value, use_lateral, is_holding_error, energy_fn
             x, mu = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
                               self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, flash=flash)
+                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, upper_mu=upper_mu,flash=flash)
         else:
             x, mu = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
                                self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                               self.energy_fn_name, self.update_bias, requires_update)
-
+                               self.energy_fn_name, self.update_bias, requires_update,upper_mu=upper_mu)
+        
+        self._mu_cache[layer_type] = mu.detach().clone()  
+           
         if self.is_holding_error:
             error = target_activity - mu
             energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type,
@@ -158,7 +162,7 @@ class PCLayer(nn.Module):
             return mu_word, mu_pos
         else:
             self._x_cache[layer_type] = x
-            return x
+            return x, mu
 
     def init_x(
         self,
@@ -234,6 +238,15 @@ class PCLayer(nn.Module):
             torch.Tensor or None: Cached activity tensor, or None if not present.
         """
         return self._x_cache.get(layer_type, None)
+    def get_mu(self, layer_type: str) -> Optional[torch.Tensor]:
+        """" Get the cached mu(prediction of each layer) tensor for a given layer type.
+
+        Args:
+            layer_type (str): The type of layer.
+        Returns:
+            torch.Tensor or None: Cached prediction tensor, or None if not present.
+        """
+        return self._mu_cache.get(layer_type, None)
 
     def get_energy(self) -> Optional[float]:
         """
@@ -250,7 +263,7 @@ class PCLayer(nn.Module):
         """
         self._energy = 0.0
         self._x_cache.clear()
-
+        self._mu_cache.clear()
     def get_errors(self) -> list:
         """
         Get the list of error values accumulated during inference.

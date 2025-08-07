@@ -10,16 +10,14 @@ from utils.attention_utils import apply_flash_attention, apply_standard_attentio
 def compute_DVL(attn_v, requires_update):
     B, H, T, D = attn_v.shape
     device = attn_v.device
-    x = attn_v.transpose(0, 1).flatten(2, 3)
+    x = attn_v.transpose(0, 1).flatten(2, 3)  # (H, B, T*D)
+    x = x.transpose(0, 1)  
     x = F.normalize(x, p=2, dim=-1)
-    s_m = torch.bmm(x, x.transpose(1, 2))
-    N = s_m.size(1)
-    mask = ~torch.eye(N, dtype=torch.bool, device=attn_v.device)
-    s_m = s_m[:, mask].mean(dim=-1)
-    identity = torch.eye(H, device=attn_v.device)
-    identity = identity.unsqueeze(0).expand(H, -1, -1)
-    corr = s_m - identity
-    dvl = (corr ** 2).mean()
+    s_m = torch.bmm(x, x.transpose(1, 2))  
+    s_m = s_m.mean(dim=0)  
+    identity = torch.eye(H, device=attn_v.device)  
+    corr = s_m - identity  
+    dvl = (corr ** 2).mean()  
     dvl_grad = torch.zeros_like(attn_v, device=device)
     try:
         if requires_update:
@@ -87,10 +85,29 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
         finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
     return mu, mu_word, mu_pos
+    
+def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, upper_mu):
+    """
+    Perform a predictive coding update step for a linear (fully connected) layer.
 
-
-def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error,
-                energy_fn_name, update_bias, requires_update):
+    Args:
+        t (int): Current inference step.
+        T (int): Total number of inference steps.
+        target (torch.Tensor): Target activity tensor.
+        x (torch.Tensor): Current activity tensor.
+        layer (nn.Module): Linear layer.
+        W_latents (dict): Lateral weights.
+        layer_type (str): Layer type string.
+        local_lr (float): Local learning rate.
+        clamp_value (float): Value to clamp updates.
+        use_lateral (bool): Whether to use lateral connections.
+        is_holding_error (bool): Whether to accumulate errors.
+        energy_fn_name (str): Name of energy function.
+        update_bias (bool): Whether to update bias.
+        requires_update (bool): Whether to update weights.
+    Returns:
+        tuple: (updated activity tensor, predicted output tensor)
+    """
     device = x.device
 
     # Only enable gradients for output layer
@@ -103,37 +120,15 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         mu = F.gelu(mu)
 
     error = target - mu
-
-    if layer_type == "linear_output":
-        energy = energy_fn(mu, target, energy_fn_name="kld")
-
-        if not torch.isfinite(energy):
-            print(f"[WARNING] KLD energy is {energy} → using zero grad")
-            delta_x = torch.zeros_like(x)
-        else:
-            try:
-                grad_outputs = torch.autograd.grad(energy, x, retain_graph=True, allow_unused=True)
-                delta_x = grad_outputs[0] if grad_outputs[0] is not None else torch.zeros_like(x)
-            except Exception as e:
-                print(f"[ERROR] autograd failed for x in {layer_type}: {e}")
-                delta_x = torch.zeros_like(x)
-
-        if delta_x is None:
-            delta_x = torch.zeros_like(x)
-        delta_x = torch.nan_to_num(delta_x, 0.0).clamp(-1.0, 1.0)
-
-        
-        if requires_update:
-            try:
-                 grad_weight = torch.autograd.grad(energy, layer.weight, ...)[0]
-                 grad_bias = torch.autograd.grad(energy, layer.bias, ...)[0] if layer.bias else None
-                 delta_W = local_lr * grad_weight
-                 delta_b = local_lr * grad_bias if layer.bias else None
-            except:
-                delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-                delta_b = local_lr * error.mean(dim=(0, 1)) if layer.bias is not None else None
-
-            
+    U_error = torch.zeros_like(x, device=device)
+    
+    
+    if upper_mu is not None:
+         U_error = x- upper_mu
+         U_error= U_error @layer.weight.T # project the error 
+         error= error-U_error     
+    if layer.weight.shape[0] != layer.weight.shape[1]:
+        error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
     else:
         error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T) if layer.weight.shape[0] != layer.weight.shape[1] else error
         delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
@@ -148,9 +143,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
                 anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
                 W_latents[layer_type] = W_latents[layer_type] + local_lr * anti_hebbian_latent
     else:
-            x = x + local_lr * error_proj
-
-        # pc weight update
+        x= x + local_lr * error 
+    
+    x = torch.clamp(x, -clamp_value, clamp_value)
+    
+    # PC Update W_layer
     if requires_update:
             layer.weight = nn.Parameter(layer.weight + delta_W)
             if layer.bias is not None and update_bias:
@@ -163,22 +160,20 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     return x, mu
 
-
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error,
-              energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, flash=False):
-    assert proj_layers is not None, "proj_layers dict is required for attention"
-    device = x.device
-    q_proj = proj_layers.get("q_proj", None)
-    k_proj = proj_layers.get("k_proj", None)
-    v_proj = proj_layers.get("v_proj", None)
-    assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"
-
-    Q = q_proj(x)
-    K = k_proj(x)
-    V = v_proj(x)
-    batch_size, seq_len, embed_dim = target.shape
-    head_dim = n_embed // num_heads
-    la = la * math.sqrt(1.0 / head_dim)
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, upper_mu, flash=False):
+        assert proj_layers is not None, "proj_layers dict is required for attention"
+        device = x.device
+        q_proj = proj_layers.get("q_proj", None)
+        k_proj = proj_layers.get("k_proj", None)
+        v_proj = proj_layers.get("v_proj", None)
+        
+        assert all(p is not None for p in (q_proj, k_proj, v_proj)), "Missing Q/K/V projections in dict"        
+        Q= q_proj(x)
+        K= k_proj(x)
+        V= v_proj(x)
+        batch_size, seq_len, embed_dim = target.shape
+        head_dim = n_embed // num_heads
+        la = la * math.sqrt(1.0 / head_dim)
 
     Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
     K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
@@ -189,42 +184,52 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
     else:
         mu_heads = apply_standard_attention(Q, K, V)
 
-    dvl_grad = compute_DVL(mu_heads, requires_update)
-    if dvl_grad is not None:
-        dvl_grad = dvl_grad.to(device)
-    similarity = get_head_similarity(mu_heads)
-    mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-    error = target - mu
+        dvl_grad = compute_DVL(mu_heads, requires_update)
+        if dvl_grad is not None:
+            dvl_grad = dvl_grad.to(device)
+        dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
+        similarity = get_head_similarity(mu_heads)
+        mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+     
+        error = target - mu  # B, T, D
+        U_error = torch.zeros_like(x, device=device)
+        if upper_mu is not None:
+         U_error = x- upper_mu
+         error= error-U_error  
+          
+        if dvl_grad is not None:
+            B, T, H, D = dvl_grad.shape
+            dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
+            dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
+            error = error + la * dvl_projected
+        
+        if layer_instance is not None:
+            setattr(layer_instance, '_head_similarity', similarity)
+            setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
+            setattr(layer_instance, '_head_similarity_max', similarity.max().item())
+        
+        if use_lateral and layer_type in W_latents:
+            W_latent = W_latents[layer_type].to(device) 
+            x_latent = x @ W_latent
+            delta_x = error + x_latent
+            x = x + local_lr * delta_x
 
-    if dvl_grad is not None:
-        B, T, H, D = dvl_grad.shape
-        dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1).clamp(-1e-3, 1e-3)
-        error = error + la * dvl_projected
-
-    if layer_instance is not None:
-        setattr(layer_instance, '_head_similarity', similarity)
-        setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
-        setattr(layer_instance, '_head_similarity_max', similarity.max().item())
-
-    if use_lateral and layer_type in W_latents:
-        W_latent = W_latents[layer_type].to(device)
-        x_latent = x @ W_latent
-        delta_x = error + x_latent
-        x = x + local_lr * delta_x
-        if requires_update:
-            anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-            W_latents[layer_type] = W_latent + local_lr * anti_hebbian_latent
-    else:
-        x = x + local_lr * error
+            if requires_update:
+               anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+               W_latents[layer_type] =W_latent + local_lr * anti_hebbian_latent
+        
+        else:
+            x= x+ local_lr * error
 
     x = torch.clamp(x, -clamp_value, clamp_value)
 
-    if requires_update:
-        for proj in (q_proj, k_proj, v_proj):
-            delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-            proj.weight = nn.Parameter(proj.weight + delta_W)
-            if proj.bias is not None and update_bias:
-                proj.bias = nn.Parameter(proj.bias + local_lr * error.mean(dim=(0, 1)))
+        # PC update W_latent
+        if requires_update:
+            for proj in (q_proj, k_proj, v_proj):
+                delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
+                proj.weight = nn.Parameter(proj.weight + delta_W)
+                if proj.bias is not None and update_bias:
+                    proj.bias = nn.Parameter(proj.bias + local_lr * error.mean(dim=(0, 1)))
 
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
@@ -236,17 +241,14 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
 ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,
     "mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1),
+    "pc_e": lambda mu, x: ((mu - x) ** 2)*0.5,
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
-    "kld": lambda mu, target: torch.clamp(
-        F.kl_div(
-            F.log_softmax(mu, dim=-1).clamp(min=-50),
-            target,  # ← must be one-hot or soft labels
-            reduction='batchmean'
-        ),
-        min=0.0,
-        max=100.0
-    )
+    "kld": lambda mu, x: torch.clamp(F.kl_div(
+        mu.log_softmax(dim=-1),
+        x,
+        reduction='batchmean'
+    ), min=0.0, max=100.0)
 }
 
 
