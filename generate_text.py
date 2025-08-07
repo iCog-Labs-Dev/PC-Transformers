@@ -77,7 +77,7 @@ def text_generation(model, config, device = None,  max_samples=2):
             decoded_preds.append(generated_str)
             decoded_targets.append(target_str)
             
-            _, local_rank = setup_ddp()
+            local_rank = device.index if device.type == "cuda" else 0
 
             if local_rank == 0:
                 print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
@@ -96,11 +96,7 @@ def main():
     local_rank, is_distributed = setup_ddp ()
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
-    if is_distributed:
-        dist.init_process_group(backend="nccl")
-        print(f"[Rank {local_rank}] Using device: {device} (DDP enabled)")
-    else:
-        print(f"[CPU/SINGLE GPU] Using device: {device} (DDP disabled)")
+    print(f"[Rank {local_rank if is_distributed else 'CPU/SINGLE'}] Using device: {device} ({'DDP enabled' if is_distributed else 'DDP disabled'})")
 
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
