@@ -84,20 +84,24 @@ def objective(trial, device = None, flash=False):
         model.eval()
         avg_energy, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
         
-        trial_time = (time.time() - start_time) /3600
+        trial_time = (time.time() - start_time) 
         
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", avg_energy)
         trial.set_user_attr("trial_time", trial_time)
 
-        log_trial_to_detailed_log("tuning/bayesian_tuning_trials.txt", trial, config, trial_time, avg_energy)
+        trial_path = "tuning/bayesian_tuning_trials.txt"
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            write_header = trial.number == 0 
+            log_trial_to_detailed_log(trial_path, trial, config, trial_time, avg_energy, write_header=write_header)
 
         return avg_energy
     
     except Exception as e:
         print("Trial failed:", e)
         trial.set_user_attr("energy", "N/A")
-        trial.set_user_attr("trial_time", (time.time() - start_time) / 3600)
+        trial.set_user_attr("trial_time", (time.time() - start_time))
 
         return float("inf")
     
