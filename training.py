@@ -203,7 +203,7 @@ def main():
 
         
         model.eval()
-        val_energy, val_perplexity = evaluate(
+        val_energy,_,val_perplexity = evaluate(
             model, valid_loader, tokenizer, max_batches=None, device=device
         )
         val_energies.append(val_energy)
