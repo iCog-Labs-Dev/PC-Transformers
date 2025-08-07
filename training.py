@@ -69,13 +69,17 @@ def train(model, dataloader, tokenizer, config, global_step, device):
             target_ids = torch.clamp(target_ids, max=vocab_size-1)
             
         logits = model(target_ids, input_ids)
+        if not torch.isfinite(logits).all():
+          print(f"[ERROR] Non-finite logits in batch {batch_idx + 1}")
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             target_ids.view(-1),
             ignore_index=pad_token_id
         )
         total_ce_loss += ce_loss.item()
-
+        if ce_loss.item() > 10:
+            print(f"[WARNING] High ce_loss in batch {batch_idx + 1}: {ce_loss.item()}")
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         internal_energies = []
         output_energy = None
 
@@ -130,24 +134,24 @@ def main():
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size= 448, 
-        peak_learning_rate= 2e-5,
+        peak_learning_rate= 1e-6,
         warmup_steps= 217,
         n_embed=592,
         dropout= 0.24684719512514441,
-        local_learning_rate= 0.0,
+        local_learning_rate= 0.00001,
         T= 10,
         is_holding_error = True,
         num_heads=16,
         n_blocks=6,
         num_epochs= 20,
         update_bias= True,
-        use_lateral = True,
+        use_lateral = False,
         internal_energy_fn_name="pc_e",
-        output_energy_fn_name="kld",
+        output_energy_fn_name="pc_e",
         eos_token_id=tokenizer.eos_token_id,
         combined_internal_weight=0.3,
         combined_output_weight=0.7,
-        use_flash_attention=True  
+        use_flash_attention=False  
     )
 
     model = PCTransformer(config).to(device)
