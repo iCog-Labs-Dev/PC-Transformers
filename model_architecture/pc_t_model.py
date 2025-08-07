@@ -226,5 +226,10 @@ class PCTransformer(nn.Module):
                     print(f"Error in parallel inference step: {e}")
 
         output_x = self.output.pc_layer.get_x("linear_output")
+        if not torch.isfinite(output_x).all():
+          print(f"[ERROR] Non-finite output_x")
         logits = output_x @ self.output.output.weight.T + self.output.output.bias
+        if not torch.isfinite(logits).all():
+          print(f"[ERROR] Non-finite logits")
+        logits = torch.clamp(logits, min=-100.0, max=100.0)  # Clip logits
         return logits
