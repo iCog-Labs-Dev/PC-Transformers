@@ -218,7 +218,7 @@ def main():
                 os.makedirs("checkpoints", exist_ok=True)
                 checkpoint = {
                     'epoch': epoch,
-                    'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),,
+                    'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),
                     'train_energy': train_energy,
                     'val_energy': val_energy,
                     'train_perplexity': train_perplexity,
