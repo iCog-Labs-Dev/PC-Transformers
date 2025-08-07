@@ -9,17 +9,19 @@ def initialize_logs(study_name: str):
 
     return trials_path
 
-def log_trial_to_detailed_log(trials_path, trial, config, trial_time, avg_energy):
-    """Appends detailed info about a completed trial to a trials log file."""
+def log_trial_to_detailed_log(trials_path, trial, config, trial_time, avg_energy, write_header=False):
+    """Appends trial information in tabular format to a trials log file."""
     with open(trials_path, "a") as f:
-        f.write(f"TRIAL {trial.number}\n")
-        f.write(f"{'='*50}\n")
-        f.write(f"Time: {trial_time:.1f}s\n")
-        f.write(f"Avg Energy: {avg_energy:.6f}\n")
-        f.write(f"Config: n_embed x block_size: {config.n_embed}x{config.block_size} "
-                f"| heads={config.num_heads} | blocks={config.n_blocks} | T={config.T}\n")
-        f.write(f"LR: {config.peak_learning_rate:.2e} | Warmup: {config.warmup_steps} "
-                f"| Dropout: {config.dropout:.3f} | Bias: {config.update_bias}\n\n")
+        if write_header:
+            f.write(f"{'Trial':<6} | {'Time(s)':<8} | {'Avg Energy':<11} | "
+                    f"{'n_embed':<7} | {'block_size':<10} | {'heads':<5} | {'blocks':<6} | {'T':<3} | "
+                    f"{'LR':<8} | {'Warmup':<6} | {'Dropout':<7} | {'Bias':<5}\n")
+            f.write("-" * 120 + "\n")
+        
+        f.write(f"{trial.number:<6} | {trial_time:<8.1f} | {avg_energy:<11.6f} | "
+                f"{config.n_embed:<7} | {config.block_size:<10} | {config.num_heads:<5} | {config.n_blocks:<6} | "
+                f"{config.T:<3} | {config.peak_learning_rate:<8.1e} | {config.warmup_steps:<6} | "
+                f"{config.dropout:<7.3f} | {str(config.update_bias):<5}\n")
         
 def write_final_results(results_path, trial):
     config = trial.user_attrs.get("config", {})
