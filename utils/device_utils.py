@@ -47,3 +47,23 @@ def execute_parallel(
         future = torch.jit.fork(forward_fn, *args, **kwargs)
         streams_or_futures.append(future)
         return future
+
+def synchronize_execution(use_cuda: bool, streams_or_futures: List[Any]) -> None:
+    """
+    Synchronizes CUDA streams or waits for torch.jit.fork futures to complete.
+
+    Args:
+        use_cuda (bool): Whether CUDA streams are being used.
+        streams_or_futures (List[Any]): List of streams or futures to synchronize.
+    """
+    if use_cuda:
+        for stream in streams_or_futures:
+            if stream:  # Only synchronize non-None streams
+                stream.synchronize()
+    else:
+        for future in streams_or_futures:
+            try:
+                torch.jit.wait(future)
+            except Exception as e:
+                print(f"Error in parallel inference step: {e}")
+        streams_or_futures.clear()  # Clear futures after completion
