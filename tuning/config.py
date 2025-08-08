@@ -19,7 +19,6 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     dropout = trial.suggest_float("dropout", 0.05, 0.3)
     base_lr = trial.suggest_float('base_lr', 1e-5, 1e-3, log=True)
     warmup_steps = trial.suggest_int('warmup_steps', 100, 500)
-    energy_fn_name = ['kld', 'mse', 'scaled_mse'][trial.suggest_int('energy_idx', 0, 2)]
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     scaled_lr = base_lr * (n_embed / 256) ** 0.5 * (block_size / 256) ** 0.25
     
@@ -38,7 +37,8 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         num_epochs=3,
         update_bias=update_bias,
         use_lateral=True,
-        energy_fn_name=energy_fn_name,
+        internal_energy_fn_name="mse",
+        output_energy_fn_name="kld",
         use_flash_attention=flash
     )
 
@@ -47,8 +47,8 @@ def update_global_config(config):
     config_keys = [
         'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
         'dropout', 'local_learning_rate', 'peak_learning_rate', 'warmup_steps',
-        'update_bias', 'energy_fn_name', 'use_lateral',
-        'T', 'is_holding_error'
+        'update_bias', 'use_lateral', 'T', 'is_holding_error', 
+        'internal_energy_fn_name', 'output_energy_fn_name'
     ]
     
     for key in config_keys:
@@ -61,9 +61,3 @@ def update_global_config(config):
         except Exception as e:
             logger.warning(f"Failed to update config key '{key}': {e}")
             continue
-
-
-def normalize_energy(energy_value, energy_fn_name):
-    """ Normalize energy values to comparable scales across different energy functions."""
-    factors = {'mse': 1.0, 'scaled_mse': 20.0, 'kld': 0.2}
-    return energy_value * factors.get(energy_fn_name, 1.0)
