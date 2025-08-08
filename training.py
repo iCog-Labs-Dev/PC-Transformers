@@ -203,13 +203,15 @@ def main():
         )
         train_energies.append(train_energy)
 
-        model.eval()
-        val_energy,_,val_perplexity = evaluate(
-            model, valid_loader, tokenizer, max_batches=None, device=device
-        )
-        val_energies.append(val_energy)
+        
 
         if rank == 0:
+            model.eval()
+            
+            val_energy,_,val_perplexity = evaluate(
+                model, valid_loader, tokenizer, max_batches=None, device=device)
+            val_energies.append(val_energy)
+            
             print(f"Epoch {epoch + 1}/{config.num_epochs} | "
                   f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
                   f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
