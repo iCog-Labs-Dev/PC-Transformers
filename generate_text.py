@@ -6,19 +6,24 @@ import torch.nn.functional as F
 from Data_preprocessing.dataloader import get_loaders
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
+from utils.device_utils import setup_ddp
+
 
 """
-This script generates text using the trained predictive coding transformer model.
+Usage: python generate_text.py
+
+This script generates text using a trained predictive coding transformer model.
 It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
 
-Usage: torchrun --nproc-per-node=<NUM_GPU> generate_text.py
+USAGE(CPU):
+    python generate_text.py
 
+Usage (Multi-GPU):
+    torchrun --nproc-per-node=<NUM_GPUS> generate_text.py
 """
 
-local_rank = int(os.getenv("LOCAL_RANK", 0))
-device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
-def generate_text(model, config, input_ids, max_new_tokens, temperature, device = None):
+def generate_text(model, config, input_ids, max_new_tokens=50, temperature=1.0, device = None):
     model.eval()
     input_tensor = input_ids.unsqueeze(0).to(device)
 
@@ -43,7 +48,8 @@ def text_generation(model, config, device = None,  max_samples=2):
     prompt_len = 5
     total_samples = 0
 
-    _, _, test_loader = get_loaders(distributed=True)
+    is_distributed = torch.cuda.is_available() and "RANK" in os.environ and "WORLD_SIZE" in os.environ
+    _, _, test_loader = get_loaders(distributed=is_distributed)
     tokenizer = load_tokenizer()
     pad_token_id = tokenizer.pad_token_id
 
@@ -70,6 +76,8 @@ def text_generation(model, config, device = None,  max_samples=2):
 
             decoded_preds.append(generated_str)
             decoded_targets.append(target_str)
+            
+            local_rank = device.index if device.type == "cuda" else 0
 
             if local_rank == 0:
                 print(f"\n[Batch {batch_idx + 1}, Sample {i + 1}]")
@@ -85,8 +93,10 @@ def text_generation(model, config, device = None,  max_samples=2):
     return decoded_preds, decoded_targets
 
 def main():
-    dist.init_process_group(backend="nccl")
-    print(f"[Rank {local_rank}] Using device: {device}")
+    local_rank, is_distributed = setup_ddp ()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+
+    print(f"[Rank {local_rank if is_distributed else 'CPU/SINGLE'}] Using device: {device} ({'DDP enabled' if is_distributed else 'DDP disabled'})")
 
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
@@ -111,15 +121,17 @@ def main():
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     model = model.to(device)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    if is_distributed:
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    if local_rank == 0:
-        decoded_preds, decoded_targets = text_generation(model, config, device, max_samples=2)
-        if decoded_preds and decoded_targets and local_rank == 0:
+    if (not is_distributed) or (local_rank == 0):
+        decoded_preds, decoded_targets = text_generation(model, config, device)
+        if decoded_preds and decoded_targets and ((not is_distributed) or (local_rank == 0)):
             compute_text_metrics(decoded_preds, decoded_targets)
     
-    dist.barrier()
-    dist.destroy_process_group()
+    if is_distributed:
+        dist.barrier()
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()

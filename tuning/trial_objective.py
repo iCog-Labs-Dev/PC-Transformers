@@ -14,6 +14,7 @@ from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
 from tuning.tuning_logs import log_trial_to_detailed_log
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+from utils.device_utils import setup_ddp
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
@@ -28,7 +29,7 @@ def broadcast_config(config_dict, device):
     dist.broadcast(obj_tensor, src=0)
     return pickle.loads(bytes(obj_tensor.tolist()))
 
-def objective(trial, device = None, flash=False):
+def objective(trial, device=None, is_distributed=False, flash=False):
     """Bayesian Objective function"""
     start_time = time.time()
     model = None
@@ -36,19 +37,10 @@ def objective(trial, device = None, flash=False):
     print(f"\nStarting Trial {trial.number}")
     
     try:
-        if "RANK" in os.environ and torch.cuda.is_available():
-            if not dist.is_initialized():
-                dist.init_process_group(backend="gloo")
-            local_rank = int(os.environ["LOCAL_RANK"])
-            device = torch.device(f"cuda:{local_rank}")
-            torch.cuda.set_device(local_rank)
-        else:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            
         tokenizer = load_tokenizer()
         vocab_size = len(tokenizer)
 
-        if dist.is_initialized():
+        if is_distributed and dist.is_initialized():
             if dist.get_rank() == 0:
                 config = get_dynamic_model_config(trial, vocab_size, flash=flash)
                 if config is None:
@@ -68,11 +60,11 @@ def objective(trial, device = None, flash=False):
             update_global_config(config.__dict__)
 
         model = PCTransformer(config).to(device)  
-        if dist.is_initialized():
+        if is_distributed and dist.is_initialized():
             model = DDP(model, device_ids=[device.index], output_device=device.index)
 
         batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
-        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed=dist.is_initialized())
+        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed=is_distributed and dist.is_initialized())
 
         if len(train_loader) == 0 or len(valid_loader) == 0:
             return float("inf")
@@ -82,10 +74,10 @@ def objective(trial, device = None, flash=False):
         reset_pc_modules(model)
 
         model.eval()
-        avg_energy, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
-        
-        trial_time = (time.time() - start_time) 
-        
+        avg_energy, _, avg_perplexity = evaluate(model, valid_loader, tokenizer, max_batches=None, device=device)
+
+        trial_time = (time.time() - start_time)
+
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", avg_energy)
         trial.set_user_attr("trial_time", trial_time)

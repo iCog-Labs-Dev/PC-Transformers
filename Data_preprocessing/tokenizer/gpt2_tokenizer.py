@@ -3,6 +3,7 @@ import time
 import pickle
 from transformers import GPT2TokenizerFast
 from Data_preprocessing.config import Config
+import argparse
 
 """
 This script initializes a GPT-2 tokenizer (Fast version) and prepares it for tokenizing
@@ -10,9 +11,13 @@ data from a specified dataset. It adds special tokens, tokenizes train/valid/tes
 splits, appends EOS tokens, and saves the tokenized sequences as pickle files for later use.
 
 Usage:
-    Run as a module to tokenize the dataset:
-    > python -m Data_preprocessing.tokenizer.gpt2_tokenizer
+    python -m Data_preprocessing.tokenizer.gpt2_tokenizer --dataset=<dataset_name>
 
+Arguments:
+    --dataset: Dataset to use (default: opwb)
+        Choices:
+            ptb  - Penn Treebank dataset
+            opwb - Open WebBook dataset
 """
 
 class GPT2TokenizerWrapper:
@@ -73,10 +78,25 @@ class GPT2TokenizerWrapper:
 
 
 if __name__ == "__main__":
-    print("---------- Starting tokenizer script ----------") 
-    start_time = time.time() 
-    tokenizer_wrapper = GPT2TokenizerWrapper()  
-    print("Tokenizer has been initialized...")  
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--dataset', 
+        type=str, 
+        default='opwb', 
+        choices=['ptb', 'opwb'], 
+        help=(
+            "Dataset to use:\n"
+            "  ptb  - Penn Treebank dataset\n"
+            "  opwb - Open WebBook dataset\n"
+        ))
+    
+    args = parser.parse_args()
+    print(f"Using dataset: {args.dataset}")
+
+    print("Starting tokenizer script...") 
+    start_time = time.time()  
+    tokenizer_wrapper = GPT2TokenizerWrapper(args.dataset)  
+    print("Tokenizer initialized.")  
 
     for subset_name in ["train", "valid", "test"]:
         print(f"Processing subset: {subset_name}")  

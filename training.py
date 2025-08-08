@@ -15,22 +15,29 @@ from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-
-
-"""
-This script trains the predictive coding transformer model on the provided dataset.
-It tracks and plots the average predictive coding energy per epoch and saves the trained model.
-
-Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
+import argparse
+from utils.device_utils import setup_ddp
 
 """
+training.py
 
-def setup_ddp():
-    """Initialize DDP process group"""
-    dist.init_process_group(backend="nccl")
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    return local_rank
+This script trains a Predictive Coding Transformer model using the selected dataset.
+It supports distributed training and logs energy and perplexity metrics
+for both training and validation phases. 
+
+
+Usage (CPU):
+    python training.py --dataset=<dataset_name>
+
+Usage (Multi-GPU Distributed Training):
+    torchrun --nproc-per-node=<NUM_GPUS> training.py --dataset=<dataset_name>
+    
+ARGUMENTS:
+    --dataset: Which dataset to use. Options:
+        - ptb  : Penn Treebank
+        - opwb : OpenWebText
+
+"""
 
 
 def train(model, dataloader, tokenizer, config, global_step, device):
@@ -104,10 +111,12 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
-        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        if rank == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | "
                   f"Energy: {batch_energy:.4f} | "
                   f"Perplexity: {perplexity:.4f}", flush=True)
+
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -120,8 +129,17 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
 
 def main():
-    local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='opwb', choices=['ptb', 'opwb'], help='Dataset to use (ptb or opwb)')
+    args = parser.parse_args()
+
+    # Set dataset in config
+    from Data_preprocessing.config import Config
+    Config.DATASET_NAME = args.dataset
+    print(f"Using dataset: {Config.DATASET_NAME}")
+
+    local_rank, is_distributed = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} (local rank {local_rank})")
 
     tokenizer = load_tokenizer()
@@ -151,17 +169,22 @@ def main():
     )
 
     model = PCTransformer(config).to(device)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
-    model.module.register_all_lateral_weights()
+    if is_distributed:
+        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None, 
+                    output_device=local_rank if torch.cuda.is_available() else None, 
+                    find_unused_parameters=True)
+        model.module.register_all_lateral_weights()
+    else:
+        model.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders(distributed=True)
-
+    train_loader, valid_loader, _ = get_loaders(distributed=is_distributed)
+    
     start_time = time.time()
     global_step = 0
     train_energies = []
     val_energies = []
-
-    rank = dist.get_rank() if dist.is_initialized() else 0
+    
+    rank = dist.get_rank() if is_distributed and dist.is_initialized() else 0
     if rank == 0:
         print("========== Training started ==========", flush=True)
         total_params = sum(p.numel() for p in model.parameters())
@@ -180,13 +203,15 @@ def main():
         )
         train_energies.append(train_energy)
 
-        model.eval()
-        val_energy, val_perplexity = evaluate(
-            model, valid_loader, tokenizer, max_batches=None, device=device
-        )
-        val_energies.append(val_energy)
+        
 
         if rank == 0:
+            model.eval()
+            
+            val_energy,_,val_perplexity = evaluate(
+                model, valid_loader, tokenizer, max_batches=None, device=device)
+            val_energies.append(val_energy)
+            
             print(f"Epoch {epoch + 1}/{config.num_epochs} | "
                   f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
                   f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
@@ -195,7 +220,7 @@ def main():
                 os.makedirs("checkpoints", exist_ok=True)
                 checkpoint = {
                     'epoch': epoch,
-                    'model_state_dict': model.module.state_dict(),
+                    'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),
                     'train_energy': train_energy,
                     'val_energy': val_energy,
                     'train_perplexity': train_perplexity,
@@ -210,7 +235,7 @@ def main():
         os.makedirs("checkpoints", exist_ok=True)
         final_checkpoint = {
             'epoch': config.num_epochs,
-            'model_state_dict': model.module.state_dict(),
+            'model_state_dict': model.module.state_dict() if is_distributed else model.state_dict(),
             'train_energy': train_energy,
             'val_energy': val_energy,
             'train_perplexity': train_perplexity,
@@ -222,8 +247,9 @@ def main():
         print(f"\nTraining completed in {total_time:.2f} seconds")
         print("Final model saved to: checkpoints/final_model.pt")
         print("========== Training completed ==========")
-
-    dist.destroy_process_group()
+    
+    if is_distributed:
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

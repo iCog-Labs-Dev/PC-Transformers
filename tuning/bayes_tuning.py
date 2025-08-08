@@ -10,6 +10,7 @@ from tuning.trial_objective import objective
 from tuning.tuning_logs import initialize_logs, write_final_results
 import torch.distributed as dist
 import argparse
+from utils.device_utils import setup_ddp
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ Usage:  torchrun --nproc-per-node=<NUM_GPU> tuning/bayes_tuning.py
 
 """
 
-def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False):
+def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, is_distributed=False, flash=False):
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
     if local_rank == 0 or local_rank == -1:
@@ -54,7 +55,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
 
     try:
-        study.optimize(lambda trial: objective(trial, device, flash), n_trials=n_trials, show_progress_bar=(local_rank == 0))
+        study.optimize(lambda trial: objective(trial, device=device, is_distributed=is_distributed, flash=flash),
+               n_trials=n_trials,
+               show_progress_bar=(local_rank == 0))
+
         logger.info(f"[Rank {local_rank}] Bayesian tuning completed!")
     
         if local_rank == 0 and study.best_trial:
@@ -75,22 +79,16 @@ if __name__ == "__main__":
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
-        
-    if "RANK" in os.environ and torch.cuda.is_available():
-        import torch.distributed as dist
-        dist.init_process_group(backend="nccl")
-        local_rank = int(os.environ["LOCAL_RANK"])
-        device = torch.device(f"cuda:{local_rank}")
-        torch.cuda.set_device(local_rank)
-    else:
-        local_rank = -1
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    local_rank, is_distributed = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
     # Set config flag for FlashAttention
     use_flash_attention = args.flash
     
-    train_loader, valid_loader,_ = get_loaders((local_rank >= 0))
-    run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=use_flash_attention)
+    train_loader, valid_loader,_ = get_loaders(is_distributed)
+    run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=local_rank, device=device, is_distributed=is_distributed, flash=use_flash_attention)
 
-    if dist.is_initialized():
+
+    if is_distributed:
         dist.destroy_process_group()

@@ -11,21 +11,25 @@ from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 from utils.pc_utils import cleanup_memory
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
+from utils.device_utils import setup_ddp
 
 """
-This script evaluates the performance of the predictive coding transformer model.
+Evaluation Script
 
-Usage: torchrun --nproc-per-node=<NUM_GPU> eval.py
+This script evaluates a trained predictive coding transformer model on a test dataset.
+It computes cross-entropy loss, energy-based metrics, and perplexity over the test set.
+
+Evaluation is performed either on CPU, single GPU, or across multiple GPUs
+
+Usage (Multi-GPU Distributed Evaluation):
+    torchrun --nproc-per-node=<NUM_GPUS> eval.py
+
+Usage (Single GPU or CPU Evaluation):
+    python eval.py
 
 """
 
-local_rank = int(os.getenv("LOCAL_RANK", 0))
-device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
-
-local_rank = int(os.getenv("LOCAL_RANK", 0))
-device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
-
-def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
+def evaluate(model, dataloader, tokenizer, max_batches=None, device=None, rank=0):
     model.eval()
     total_energy = 0.0
     batch_count = 0
@@ -39,7 +43,13 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
     alpha = getattr(base_model.config, 'combined_internal_weight', 0.3)
     beta = getattr(base_model.config, 'combined_output_weight', 0.7)
     
-    if local_rank == 0:
+    base_model = model.module if hasattr(model, 'module') else model
+    output_pc_layer = base_model.output.pc_layer
+
+    alpha = getattr(base_model.config, 'combined_internal_weight', 0.3)
+    beta = getattr(base_model.config, 'combined_output_weight', 0.7)
+    
+    if rank == 0:
         if max_batches is None:
             print(f"Evaluating on the full test set...")
         else:
@@ -52,7 +62,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         input_ids = batch["input_ids"].to(device)
         targets = batch["target_ids"].to(device)
 
-        if local_rank == 0:
+        if rank == 0:
             if (targets == pad_token_id).sum() == 0:
                 print(f"No pad tokens detected in batch {batch_idx + 1}, check padding behavior.")
 
@@ -89,8 +99,9 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         total_energy += batch_energy
         batch_count += 1
 
-        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Energy: { batch_energy:.4f}", flush=True)
+        if rank == 0 and (batch_idx + 1) % 10 == 0:
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | CE Loss: {ce_loss.item():.4f}| Batch Energy: {batch_energy:.4f}", flush=True)
+
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -99,15 +110,15 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
 
-    
-    if local_rank == 0:
+    if rank == 0:
         print(f"Total Batches Processed: {batch_idx + 1}")
         print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
 
-    return avg_energy, avg_perplexity
+    return avg_energy, avg_ce_loss, avg_perplexity
 
 def main():
-    dist.init_process_group(backend="nccl")
+    local_rank, is_distributed = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     print(f"[Rank {local_rank}] Using device: {device}")
 
     tokenizer = load_tokenizer()
@@ -135,18 +146,22 @@ def main():
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     model = model.to(device)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-    _, _, test_loader = get_loaders(distributed = True)
+    if is_distributed:
+        model = DDP(model, device_ids=[local_rank] if torch.cuda.is_available() else None,
+                    output_device=local_rank if torch.cuda.is_available() else None)
+    _, _, test_loader = get_loaders(distributed = is_distributed)
 
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()
-    evaluate(model, test_loader, tokenizer, max_batches= None, device=device)
+    rank = dist.get_rank() if is_distributed and dist.is_initialized() else 0
+    evaluate(model, test_loader, tokenizer, max_batches=None, device=device, rank=rank)
     elapsed = time.time() - start_time
-    if local_rank == 0:
+    if rank == 0:
         print(f"Evaluation completed in {elapsed:.2f} seconds")
-        
-    dist.barrier()
-    dist.destroy_process_group()
+
+    if is_distributed:
+        dist.barrier()
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()
