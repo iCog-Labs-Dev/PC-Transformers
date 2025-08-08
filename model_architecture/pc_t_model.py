@@ -130,8 +130,8 @@ class PCTransformer(nn.Module):
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
 
         for t in range(self.config.T):
-            mu_mlp2 = self.blocks[-1].mlp.pc_layer2.get_mu("linear") if t > 0 else None
             # Execute output layer
+            mu_mlp2 = self.blocks[-1].mlp.pc_layer2.get_mu("linear") if t > 0 else None
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
@@ -141,9 +141,11 @@ class PCTransformer(nn.Module):
                 layer_type="linear",
                 t=t,
                 T=self.config.T,
-                requires_update=self.training
+                requires_update=self.training,
+                upper_mu=mu_mlp2
             )
-            
+
+            # Iterate through blocks in reverse order for parallel execution
             for idx in range(len(self.blocks) - 1, -1, -1):
                 block = self.blocks[idx]
                 next_target = (
@@ -166,11 +168,9 @@ class PCTransformer(nn.Module):
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
-                    upper_mu= mu_mlp1
+                    upper_mu=mu_mlp1
                 )
-                            
                 mu_attn_op = block.attn.pc_output.get_mu("linear") if t > 0 else None
-
                 # Execute MLP layer 1
                 execute_parallel(
                     use_cuda,
@@ -192,8 +192,11 @@ class PCTransformer(nn.Module):
                    mu_embed = self.blocks[idx - 1].mlp.pc_layer2.get_mu("linear") if t > 0 else None
                 
                 mu_attn_qkv = block.attn.pc_qkv.get_mu("linear") if t > 0 else None
-
-                futures.append(torch.jit.fork(
+    
+                # Execute attention output
+                execute_parallel(
+                    use_cuda,
+                    streams_or_futures,
                     block.attn.pc_output.forward,
                     target_activity=layer_norm1,
                     layer=block.attn.output,
@@ -202,7 +205,7 @@ class PCTransformer(nn.Module):
                     T=self.config.T,
                     requires_update=self.training,
                     upper_mu= mu_attn_qkv
-                ))
+                )
 
                 # Execute attention QKV
                 execute_parallel(
@@ -216,9 +219,8 @@ class PCTransformer(nn.Module):
                     T=self.config.T,
                     requires_update=self.training,
                     upper_mu=mu_embed,
-                    flash= getattr(self.config, 'use_flash_attention', False)
+                    flash=getattr(self.config, 'use_flash_attention', False)
                 )
-
 
             # Execute embedding layer
             execute_parallel(
