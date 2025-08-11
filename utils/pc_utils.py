@@ -74,13 +74,14 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
         with torch.no_grad():
             flat_input_ids = input_ids.reshape(-1)
             flat_update = update.reshape(-1, update.size(-1))
-            word_weight = word_layer.weight.data.index_add(0, flat_input_ids, local_lr * flat_update)
-            word_layer.weight = nn.Parameter(word_weight)
+            #word_weight = word_layer.weight.data.index_add(0, flat_input_ids, local_lr * flat_update)
+            #word_layer.weight = nn.Parameter(word_weight)
 
             flat_position_ids = position_ids.reshape(-1)
-            pos_weight = pos_layer.weight.data.index_add(0, flat_position_ids, local_lr * flat_update)
-            pos_layer.weight = nn.Parameter(pos_weight)
-
+            #pos_weight = pos_layer.weight.data.index_add(0, flat_position_ids, local_lr * flat_update)
+            #pos_layer.weight = nn.Parameter(pos_weight)
+            word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
+            pos_layer.weight.data.index_add_(0, flat_position_ids, local_lr * flat_update)
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
@@ -168,7 +169,8 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     else:
         error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T) if layer.weight.shape[0] != layer.weight.shape[1] else error
         delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-        delta_x = error_proj 
+        delta_x = error_proj
+        delta_b=layer.bias + local_lr * error.mean(dim=(0, 1)) 
     if use_lateral and layer_type in W_latents:
             W_latent = W_latents[layer_type].to(device)
             x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
@@ -183,10 +185,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
         # pc weight update
     if requires_update:
-            layer.weight = nn.Parameter(layer.weight + delta_W)
+            #layer.weight = nn.Parameter(layer.weight + delta_W)
+            layer.weight.data.add_(delta_W)
             if layer.bias is not None and update_bias:
-                layer.bias = nn.Parameter(layer.bias + local_lr * error.mean(dim=(0, 1)))
-                #layer.bias = nn.Parameter(layer.bias + delta_b * error.mean(dim=(0, 1)))
+                #layer.bias = nn.Parameter(layer.bias + local_lr * error.mean(dim=(0, 1)))
+                layer.bias.data.add_(delta_b)
     x = torch.clamp(x, -clamp_value, clamp_value)
 
     if t == T - 1:
@@ -261,9 +264,12 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         if requires_update:
             for proj in (q_proj, k_proj, v_proj):
                 delta_W = local_lr * torch.einsum("bsh,bsv->hv", error, x.detach())
-                proj.weight = nn.Parameter(proj.weight + delta_W)
+                #proj.weight = nn.Parameter(proj.weight + delta_W)
+                proj.weight.data.add_(delta_W)
                 if proj.bias is not None and update_bias:
-                    proj.bias = nn.Parameter(proj.bias + local_lr * error.mean(dim=(0, 1)))
+                    #proj.bias = nn.Parameter(proj.bias + local_lr * error.mean(dim=(0, 1)))
+                    delta_b= proj.bias + local_lr * error.mean(dim=(0, 1))
+                    proj.bias.data.add_(delta_b)
 
         if t == T - 1:
            finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
