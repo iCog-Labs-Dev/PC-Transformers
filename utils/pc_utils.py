@@ -99,9 +99,9 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
-    return mu, mu_word, mu_pos
+    return mu, mu_word, mu_pos, error
     
-def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, upper_mu):
+def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, td_err):
     """
     Perform a predictive coding update step for a linear (fully connected) layer.
 
@@ -128,14 +128,13 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     if layer_type == "fc1":
         mu = F.gelu(mu)
 
-    error = target - mu
-    U_error = torch.zeros_like(x, device=device)
-    
-    
-    if upper_mu is not None:
-         U_error = x- upper_mu
-         U_error= U_error @layer.weight.T # project the error 
-         error= error-U_error     
+    bu_err = target - mu
+    if td_err is not None:
+         td_err= td_err @layer.weight.T # project the error 
+         error= bu_err- td_err
+    else:
+        error= bu_err     
+        
     if layer.weight.shape[0] != layer.weight.shape[1]:
         error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
     else:
@@ -167,9 +166,9 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
-    return x, mu
+    return x, mu, bu_err
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, upper_mu, flash=False):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, td_err, flash=False):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
         q_proj = proj_layers.get("q_proj", None)
@@ -200,11 +199,11 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
-        error = target - mu  # B, T, D
-        U_error = torch.zeros_like(x, device=device)
-        if upper_mu is not None:
-         U_error = x- upper_mu
-         error= error-U_error  
+        bu_err = target - mu  # B, T, D
+        if td_err is not None:
+         error= bu_err - td_err
+        else:
+            error = bu_err  
           
         if dvl_grad is not None:
             B, T, H, D = dvl_grad.shape
@@ -244,7 +243,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
 
-        return x, mu
+        return x, mu, bu_err
     
 ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,

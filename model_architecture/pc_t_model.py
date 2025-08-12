@@ -131,7 +131,7 @@ class PCTransformer(nn.Module):
 
         for t in range(self.config.T):
             # Execute output layer
-            mu_mlp2 = self.blocks[-1].mlp.pc_layer2.get_mu("linear") if t > 0 else None
+            td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("linear") if t > 0 else None
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
@@ -142,7 +142,7 @@ class PCTransformer(nn.Module):
                 t=t,
                 T=self.config.T,
                 requires_update=self.training,
-                upper_mu=mu_mlp2
+                td_err= td_mlp2
             )
 
             # Iterate through blocks in reverse order for parallel execution
@@ -155,7 +155,8 @@ class PCTransformer(nn.Module):
                 )
                 
                 layer_norm2 = block.ln2(next_target)
-                mu_mlp1 = block.mlp.pc_layer1.get_mu("linear") if t > 0 else None
+                td_mlp1 = block.mlp.pc_layer1.get_td_err("linear") if t > 0 else None
+
 
                 # Execute MLP layer 2
                 execute_parallel(
@@ -168,9 +169,10 @@ class PCTransformer(nn.Module):
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
-                    upper_mu=mu_mlp1
+                    td_err= td_mlp1
                 )
-                mu_attn_op = block.attn.pc_output.get_mu("linear") if t > 0 else None
+                td_attn_op = block.attn.pc_output.get_td_err("linear") if t > 0 else None
+
                 # Execute MLP layer 1
                 execute_parallel(
                     use_cuda,
@@ -182,16 +184,17 @@ class PCTransformer(nn.Module):
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
-                    upper_mu= mu_attn_op
+                    td_err= td_attn_op
                 )
                 
                 layer_norm1 = block.ln1(block.mlp.pc_layer1.get_x("fc1"))
                 if idx == 0:
-                   mu_embed = self.embedding.pc_layer.get_mu("embed") if t > 0 else None
+                   td_embed = self.embedding.pc_layer.get_td_err("embed") if t > 0 else None
                 else:
-                   mu_embed = self.blocks[idx - 1].mlp.pc_layer2.get_mu("linear") if t > 0 else None
+                   td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("linear") if t > 0 else None
                 
-                mu_attn_qkv = block.attn.pc_qkv.get_mu("linear") if t > 0 else None
+                td_attn_qkv = block.attn.pc_qkv.get_td_err("linear") if t > 0 else None
+
     
                 # Execute attention output
                 execute_parallel(
@@ -204,7 +207,7 @@ class PCTransformer(nn.Module):
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
-                    upper_mu= mu_attn_qkv
+                    td_err= td_attn_qkv
                 )
 
                 # Execute attention QKV
@@ -218,7 +221,7 @@ class PCTransformer(nn.Module):
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
-                    upper_mu=mu_embed,
+                    td_err= td_embed,
                     flash=getattr(self.config, 'use_flash_attention', False)
                 )
 
