@@ -85,9 +85,9 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
-    return mu, mu_word, mu_pos
+    return mu, mu_word, mu_pos, error
     
-def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, upper_mu):
+def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, td_err):
     """
     Perform a predictive coding update step for a linear (fully connected) layer.
 
@@ -110,8 +110,6 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         tuple: (updated activity tensor, predicted output tensor)
     """
     device = x.device
-    if not torch.isfinite(x).all():
-        print(f"[ERROR] Non-finite x in {layer_type}: {x}")
 
     # Only enable gradients for output layer
     if layer_type == "linear_output":
@@ -120,32 +118,26 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     mu = layer(x)
     
-    if not torch.isfinite(mu).all():
-       print(f"[WARNING] Non-finite values detected in mu: {mu}")
     if layer_type == "fc1":
         mu = F.gelu(mu)
 
-    error = target - mu
-    if not torch.isfinite(error).all():
-        print(f"[ERROR] Non-finite error in {layer_type}: {error}")
-    U_error = torch.zeros_like(x, device=device)
-    if upper_mu is not None:
-         U_error = x- upper_mu
-         U_error= U_error @layer.weight.T # project the error 
-         error= error-U_error 
+    bu_err = target - mu
+    if td_err is not None:
+         #td_err = x- upper_mu
+         td_err= td_err @layer.weight.T # project the error 
+         error= bu_err - td_err 
+    else:
+        error= bu_err
          
     if layer_type == "linear_output" and energy_fn_name=="kld":
         energy = energy_fn(mu, target, energy_fn_name)
         if not torch.isfinite(energy):
-            print(f"[ERROR] Non-finite energy in {layer_type}: {energy}")
-        if not torch.isfinite(energy):
-            print(f"[WARNING] KLD energy is {energy} → using zero grad")
             delta_x = torch.zeros_like(x)
         else:
             try:
                 grad_outputs = torch.autograd.grad(energy, x, retain_graph=True, allow_unused=True)
                 delta_x = grad_outputs[0] if grad_outputs[0] is not None else torch.zeros_like(x)
-                delta_x= delta_x - U_error
+                #delta_x= delta_x - td_err
             except Exception as e:
                 print(f"[ERROR] autograd failed for x in {layer_type}: {e}")
                 delta_x = torch.zeros_like(x)
@@ -195,9 +187,9 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
-    return x, mu
+    return x, mu, bu_err
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, upper_mu, flash=False):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, td_err, flash=False):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
         q_proj = proj_layers.get("q_proj", None)
@@ -228,11 +220,12 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
      
-        error = target - mu  # B, T, D
-        U_error = torch.zeros_like(x, device=device)
-        if upper_mu is not None:
-         U_error = x- upper_mu
-         error= error-U_error  
+        bu_err = target - mu  # B, T, D
+        if td_err is not None:
+           #U_error = x- upper_mu
+            error= bu_err - td_err  
+        else: 
+            error= bu_err
           
         if dvl_grad is not None:
             B, T, H, D = dvl_grad.shape
@@ -274,7 +267,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         if t == T - 1:
            finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
 
-        return x, mu
+        return x, mu, bu_err
 
 
 # --- Energy Functions ---
@@ -284,11 +277,15 @@ ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2)*0.5,
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
-    "kld": lambda mu, x: torch.clamp(F.nll_loss(
+    "kld": lambda mu, x: torch.clamp(
+    F.kl_div(
         torch.clamp(mu, min=-100.0, max=100.0).log_softmax(dim=-1),
         x,
         reduction='batchmean'
-    ), min=0.0, max=100.0)
+    ),
+    min=0.0,
+    max=100.0
+)
 }
 
 
