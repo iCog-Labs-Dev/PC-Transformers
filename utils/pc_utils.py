@@ -128,22 +128,21 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     if layer_type == "fc1":
         mu = F.gelu(mu)
 
-    bu_err = target - mu
-    if td_err is not None:
-         td_err= td_err @layer.weight.T # project the error 
-         error= bu_err- td_err
-    else:
-        error= bu_err     
-        
+    bu_err = target - mu   
     if layer.weight.shape[0] != layer.weight.shape[1]:
-        error_proj = torch.einsum("bsh, vh -> bsv", error, layer.weight.T)  
+        error_proj = torch.einsum("bsh, vh -> bsv", bu_err, layer.weight.T)  
     else:
-        error_proj = error  
+        error_proj = bu_err 
+         
+    if td_err is not None:
+         error= error_proj - td_err
+    else:
+        error= error_proj
 
     if use_lateral and layer_type in W_latents:
         W_latent = W_latents[layer_type].to(device) 
         x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
-        delta_x = error_proj + x_latent
+        delta_x = error + x_latent
         x = x + local_lr * delta_x
 
         if requires_update:
