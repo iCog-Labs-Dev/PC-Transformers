@@ -129,7 +129,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         mu = F.gelu(mu)
 
     bu_err = target - mu      
-    error_proj = bu_err @ layer.weight.T     
+    error_proj = bu_err @ layer.weight    
     if td_err is not None:
         error= error_proj - td_err
     else:
@@ -152,7 +152,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     
     # PC Update W_layer
     if requires_update:
-        delta_W = local_lr * torch.einsum("bsh,bsv->hv", bu_err, x.detach().T) 
+        delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
         layer.weight.data.add_(delta_W)
         if layer.bias is not None and update_bias:
             delta_b= layer.bias + local_lr * bu_err.mean(dim=(0, 1))
@@ -229,7 +229,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         # PC update W_latent
         if requires_update:
             for proj in (q_proj, k_proj, v_proj):
-                delta_W = local_lr * torch.einsum("bsh,bsv->hv", bu_err, x.detach().T)
+                delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
                 proj.weight.data.add_(delta_W)
                 if proj.bias is not None and update_bias:
                     delta_b = proj.bias + local_lr * bu_err.mean(dim=(0, 1))
