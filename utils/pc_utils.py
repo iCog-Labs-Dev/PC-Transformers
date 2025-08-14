@@ -79,13 +79,12 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
         mu_word = mu_word_cache
         mu_pos = mu_pos_cache
     mu = mu_word + mu_pos
-
+    error = target - mu
     if not requires_update:
         if t == T - 1:
             finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
-        return mu, mu_word, mu_pos
-
-    error = target - mu
+        return mu, mu_word, mu_pos, error
+ 
     update = torch.clamp(error, -clamp_value, clamp_value)
     if requires_update: 
         with torch.no_grad():
@@ -93,12 +92,17 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
             flat_update = update.reshape(-1, update.size(-1))
 
             flat_position_ids = position_ids.reshape(-1)
-            word_layer.weight.data.index_add_(0, flat_input_ids, local_lr * flat_update)
-            pos_layer.weight.data.index_add_(0, flat_position_ids, local_lr * flat_update)
+            delta = local_lr * flat_update
+            delta = torch.clamp(delta, -clamp_value, clamp_value)
+            word_layer.weight.data.index_add_(0, flat_input_ids, delta)
+            pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type, energy_fn_name, is_holding_error)
-
+    # print(f"mu_word: max={mu_word.abs().max():.3f}, nan={torch.isnan(mu_word).any()}")
+    # print(f"mu_pos: max={mu_pos.abs().max():.3f}, nan={torch.isnan(mu_pos).any()}")
+    # print(f"embedding weights: max={word_layer.weight.abs().max():.3f}")
+    
     return mu, mu_word, mu_pos, error
     
 def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, td_err):
@@ -124,6 +128,7 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         tuple: (updated activity tensor, predicted output tensor)
     """
     device = x.device
+    #print(f"Initial x: mean={x.mean():.3f}, std={x.std():.3f}, nan={torch.isnan(x).any()}")
     mu = layer(x)
     if layer_type == "fc1":
         mu = F.gelu(mu)
@@ -144,22 +149,29 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         if requires_update:
             anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
             W_latents[layer_type] = W_latents[layer_type] + local_lr * anti_hebbian_latent
+            W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
     
     else:
         x= x + local_lr * error 
     
-    x = torch.clamp(x, -clamp_value, clamp_value)
+    x = torch.clamp(x, clamp_value, clamp_value)
     
     # PC Update W_layer
     if requires_update:
         delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
+        delta_W = torch.clamp(delta_W, -0.1, 0.1)
         layer.weight.data.add_(delta_W)
         if layer.bias is not None and update_bias:
-            delta_b= layer.bias + local_lr * bu_err.mean(dim=(0, 1))
+            delta_b = local_lr * bu_err.mean(dim=(0, 1))
+            delta_b = torch.clamp(delta_b, -0.1, 0.1)
             layer.bias.data.add_(delta_b)
+
     x = torch.clamp(x, -clamp_value, clamp_value)
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+    # print(f"x: mean={x.mean():.3f}, std={x.std():.3f}, nan={torch.isnan(x).any()}")
+    # print(f"layer weights: max={layer.weight.abs().max():.3f}, nan={torch.isnan(layer.weight).any()}")
+    # print(f"bias: max={layer.bias.abs().max() if layer.bias is not None else 'N/A'}")
 
     return x, mu, bu_err
 
@@ -215,12 +227,12 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             W_latent = W_latents[layer_type].to(device) 
             x_latent = x @ W_latent
             delta_x = error + x_latent
-            x = x + local_lr * delta_x
+            x = x + local_lr * delta_x 
 
             if requires_update:
                anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
                W_latents[layer_type] =W_latent + local_lr * anti_hebbian_latent
-        
+               W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
         else:
             x= x+ local_lr * error
 
@@ -230,20 +242,26 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         if requires_update:
             for proj in (q_proj, k_proj, v_proj):
                 delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
+                delta_W = torch.clamp(delta_W, -0.01, 0.01)
                 proj.weight.data.add_(delta_W)
                 if proj.bias is not None and update_bias:
-                    delta_b = proj.bias + local_lr * bu_err.mean(dim=(0, 1))
+                    delta_b = local_lr * bu_err.mean(dim=(0, 1))
+                    delta_b = torch.clamp(delta_b, -0.1, 0.1)
+                    delta_b = delta_b.view(-1)
                     proj.bias.data.add_(delta_b)
-
+ 
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
+        # print(f"mu_heads: max={mu_heads.abs().max():.3f}, nan={torch.isnan(mu_heads).any()}")
+        # print(f"DVL grad norm={dvl_grad.norm().item() if dvl_grad is not None else 0.0}")
+        # print(f"attention weights max={q_proj.weight.abs().max():.3f}, nan={torch.isnan(q_proj.weight).any()}")
 
         return x, mu, bu_err
     
 ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,
     "mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1),
-    "pc_e": lambda mu, x: ((mu - x) ** 2)*0.5,
+    "pc_e": lambda mu, x: ((torch.clamp(mu, -1e3, 1e3) - torch.clamp(x, -1e3, 1e3)) ** 2).mean(dim=-1) * 0.5,    
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
     "kld": lambda mu, x: torch.clamp(F.kl_div(
