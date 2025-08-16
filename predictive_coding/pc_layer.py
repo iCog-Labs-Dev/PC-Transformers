@@ -26,7 +26,7 @@ class PCLayer(nn.Module):
         energy_fn_name: str = "scaled_mse",
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
-        la: Optional[float] = None,
+        la: Optional[float] = 0.5,
     ):
         """
         Initialize the PCLayer.
@@ -43,7 +43,7 @@ class PCLayer(nn.Module):
         self.local_lr = local_learning_rate
         self.is_holding_error = is_holding_error
         self.update_bias = update_bias
-        self.clamp_value = 1.0
+        self.clamp_value = 4.0
         self.W_latents = nn.ParameterDict()
         self.use_lateral = True
         self._x_cache = {}
@@ -77,6 +77,7 @@ class PCLayer(nn.Module):
         self,
         target_activity: torch.Tensor,
         td_err:  Optional[torch.Tensor] = None,
+        layer_norm: Optional[nn.Module] = None,
         layer: Optional[nn.Module] = None,
         proj_layers: Optional[dict] = None,
         layer_type: str = "fc1",
@@ -128,7 +129,7 @@ class PCLayer(nn.Module):
             mu, mu_word, mu_pos, bu_err = step_embed(
                 t, T, target_activity, layer, layer_type, input_ids, position_ids,
                 self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error,
-                requires_update,
+                requires_update, layer_norm=layer_norm,
                 mu_word_cache=self._embed_cache["mu_word"] if use_cache else None,
                 mu_pos_cache=self._embed_cache["mu_pos"] if use_cache else None
             )
@@ -142,11 +143,11 @@ class PCLayer(nn.Module):
             # local_lr, clamp_value, use_lateral, is_holding_error, energy_fn
             x, mu, bu_err = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
                               self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, td_err=td_err,flash=flash)
+                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, td_err=td_err, layer_norm=layer_norm, flash=flash)
         else:
             x, mu, bu_err = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
                                self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                               self.energy_fn_name, self.update_bias, requires_update,td_err=td_err)
+                               self.energy_fn_name, self.update_bias, requires_update,td_err=td_err, layer_norm=layer_norm)
         
         self._mu_cache[layer_type] = mu.detach().clone()  
         if bu_err is not None: 

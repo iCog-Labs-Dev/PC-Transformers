@@ -38,8 +38,7 @@ def get_head_similarity(mu_heads):
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     return torch.randn(batch_size, seq_len, embedding_size, device = device)
-
-def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update, mu_word_cache=None, mu_pos_cache=None):
+def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_lr, clamp_value, energy_fn_name, is_holding_error, requires_update, layer_norm, mu_word_cache=None, mu_pos_cache=None):
     """
     Perform a predictive coding update step for the embedding layer.
     Now supports vectorized updates and caching of mu_word/mu_pos for inference.
@@ -74,12 +73,16 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
 
     if requires_update or mu_word_cache is None or mu_pos_cache is None:
         mu_word = word_layer(input_ids)
+        mu_word = torch.clamp(mu_word, -10.0, 10.0)
         mu_pos = pos_layer(position_ids)
+        mu_pos = torch.clamp(mu_pos, -10.0, 10.0)
     else:
         mu_word = mu_word_cache
         mu_pos = mu_pos_cache
     mu = mu_word + mu_pos
-    error = target - mu
+    mu_norm=layer_norm(mu)
+    
+    error = target - mu_norm
     if not requires_update:
         if t == T - 1:
             finalize_step(mu, target, mu - mu, t, layer_type, energy_fn_name, is_holding_error)
@@ -93,7 +96,7 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
 
             flat_position_ids = position_ids.reshape(-1)
             delta = local_lr * flat_update
-            delta = torch.clamp(delta, -clamp_value, clamp_value)
+            delta = torch.clamp(delta, -0.01, 0.01)
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
@@ -105,7 +108,7 @@ def step_embed(t, T, target, layer, layer_type, input_ids, position_ids, local_l
     
     return mu, mu_word, mu_pos, error
     
-def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, td_err):
+def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, td_err, layer_norm):
     """
     Perform a predictive coding update step for a linear (fully connected) layer.
 
@@ -129,10 +132,21 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     """
     device = x.device
     #print(f"Initial x: mean={x.mean():.3f}, std={x.std():.3f}, nan={torch.isnan(x).any()}")
+    if layer_norm is not None and layer_type == "fc1":
+        x = layer_norm(x)
+    else:
+        x = x
+        
     mu = layer(x)
     if layer_type == "fc1":
         mu = F.gelu(mu)
-
+        
+    if layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
+       mu = layer_norm(mu)
+        
+        
+    mu = torch.clamp(mu, -10.0, 10.0)
+    
     bu_err = target - mu      
     error_proj = bu_err @ layer.weight    
     if td_err is not None:
@@ -145,7 +159,6 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         x_latent = torch.einsum("bsh,hv->bsv", x, W_latent)
         delta_x = error + x_latent
         x = x + local_lr * delta_x
-
         if requires_update:
             anti_hebbian_latent = -torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
             W_latents[layer_type] = W_latents[layer_type] + local_lr * anti_hebbian_latent
@@ -159,11 +172,11 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     # PC Update W_layer
     if requires_update:
         delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
-        delta_W = torch.clamp(delta_W, -0.1, 0.1)
+        delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
         if layer.bias is not None and update_bias:
             delta_b = local_lr * bu_err.mean(dim=(0, 1))
-            delta_b = torch.clamp(delta_b, -0.1, 0.1)
+            delta_b = torch.clamp(delta_b, -0.01, 0.01)
             layer.bias.data.add_(delta_b)
 
     x = torch.clamp(x, -clamp_value, clamp_value)
@@ -175,9 +188,10 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
 
     return x, mu, bu_err
 
-def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, td_err, flash=False):
+def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, clamp_value, use_lateral, is_holding_error, energy_fn_name, update_bias, requires_update, layer_instance, num_heads, n_embed, la, td_err,layer_norm, flash=False):
         assert proj_layers is not None, "proj_layers dict is required for attention"
         device = x.device
+        x=layer_norm(x)
         q_proj = proj_layers.get("q_proj", None)
         k_proj = proj_layers.get("k_proj", None)
         v_proj = proj_layers.get("v_proj", None)
@@ -205,7 +219,8 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         dvl_norm = dvl_grad.norm().item() if dvl_grad is not None else 0.0
         similarity = get_head_similarity(mu_heads)
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-     
+        mu = torch.clamp(mu, -10.0, 10.0)
+        
         bu_err = target - mu  # B, T, D
         if td_err is not None:
          error= bu_err - td_err
@@ -246,7 +261,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
                 proj.weight.data.add_(delta_W)
                 if proj.bias is not None and update_bias:
                     delta_b = local_lr * bu_err.mean(dim=(0, 1))
-                    delta_b = torch.clamp(delta_b, -0.1, 0.1)
+                    delta_b = torch.clamp(delta_b, -0.01, 0.01)
                     delta_b = delta_b.view(-1)
                     proj.bias.data.add_(delta_b)
  
@@ -261,7 +276,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
 ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,
     "mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1),
-    "pc_e": lambda mu, x: ((torch.clamp(mu, -1e3, 1e3) - torch.clamp(x, -1e3, 1e3)) ** 2).mean(dim=-1) * 0.5,    
+    "pc_e": lambda mu, x: ((mu - x) ** 2).mean(dim=-1)*0.5,    
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
     "kld": lambda mu, x: torch.clamp(F.kl_div(
