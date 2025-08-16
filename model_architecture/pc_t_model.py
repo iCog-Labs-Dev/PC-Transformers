@@ -101,7 +101,7 @@ class PCTransformer(nn.Module):
                 batch_size=B,
                 seq_len=S,
                 layer=block.attn.output,
-                layer_type="linear",
+                layer_type="linear_attn",
                 device=device
             )
             block.mlp.pc_layer1.init_x(
@@ -115,7 +115,7 @@ class PCTransformer(nn.Module):
                 batch_size=B,
                 seq_len=S,
                 layer=block.mlp.fc2,
-                layer_type="linear",
+                layer_type="fc2",
                 device=device
             )
         self.output.pc_layer.init_x(
@@ -163,13 +163,14 @@ class PCTransformer(nn.Module):
                     use_cuda,
                     streams_or_futures,
                     block.mlp.pc_layer2.forward,
-                    target_activity=layer_norm2,
+                    target_activity=next_target,
                     layer=block.mlp.fc2,
-                    layer_type="linear",
+                    layer_type="fc2",
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
-                    td_err= td_mlp1
+                    td_err= td_mlp1,
+                    layer_norm=block.ln2
                 )
                 td_attn_op = block.attn.pc_output.get_td_err("linear") if t > 0 else None
 
@@ -178,13 +179,14 @@ class PCTransformer(nn.Module):
                     use_cuda,
                     streams_or_futures,
                     block.mlp.pc_layer1.forward,
-                    target_activity=block.mlp.pc_layer2.get_x("linear"),
+                    target_activity=block.mlp.pc_layer2.get_x("fc2"),
                     layer=block.mlp.fc1,
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
-                    td_err= td_attn_op
+                    td_err= td_attn_op,
+                    layer_norm=block.ln1
                 )
                 
                 layer_norm1 = block.ln1(block.mlp.pc_layer1.get_x("fc1"))
@@ -201,13 +203,14 @@ class PCTransformer(nn.Module):
                     use_cuda,
                     streams_or_futures,
                     block.attn.pc_output.forward,
-                    target_activity=layer_norm1,
+                    target_activity=block.mlp.pc_layer1.get_x("fc1"),
                     layer=block.attn.output,
-                    layer_type="linear",
+                    layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
-                    td_err= td_attn_qkv
+                    td_err= td_attn_qkv,
+                    layer_norm=block.ln1
                 )
 
                 # Execute attention QKV
@@ -215,14 +218,16 @@ class PCTransformer(nn.Module):
                     use_cuda,
                     streams_or_futures,
                     block.attn.pc_qkv.forward,
-                    target_activity=block.attn.pc_output.get_x("linear"),
+                    target_activity=block.attn.pc_output.get_x("linear_attn"),
                     proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
                     requires_update=self.training,
                     td_err= td_embed,
-                    flash=getattr(self.config, 'use_flash_attention', False)
+                    flash=getattr(self.config, 'use_flash_attention', False),
+                    layer_norm=block.ln2
+            
                 )
 
             # Execute embedding layer
@@ -237,7 +242,8 @@ class PCTransformer(nn.Module):
                 position_ids=position_ids,
                 t=t,
                 T=self.config.T,
-                requires_update=self.training
+                requires_update=self.training,
+                layer_norm= block.ln2
             )
 
             # Synchronize all parallel tasks
