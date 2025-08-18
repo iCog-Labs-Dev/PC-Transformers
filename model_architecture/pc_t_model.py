@@ -154,7 +154,9 @@ class PCTransformer(nn.Module):
                     else self.output.pc_layer.get_x("linear")
                 )
                 
-                layer_norm2 = block.ln2(next_target)
+                layer_norm2 = (block.ln2
+                   if idx < len(self.blocks) - 1
+                    else None)
                 td_mlp1 = block.mlp.pc_layer1.get_td_err("linear") if t > 0 else None
 
 
@@ -170,7 +172,7 @@ class PCTransformer(nn.Module):
                     T=self.config.T,
                     requires_update=self.training,
                     td_err= td_mlp1,
-                    layer_norm=block.ln2
+                    layer_norm=layer_norm2
                 )
                 td_attn_op = block.attn.pc_output.get_td_err("linear") if t > 0 else None
 
