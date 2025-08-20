@@ -25,12 +25,38 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
 
-def setup_ddp():
-    """Initialize DDP process group"""
-    dist.init_process_group(backend="nccl")
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    return local_rank
+# def setup_ddp():
+#     """Initialize DDP process group"""
+#     dist.init_process_group(backend="nccl")
+#     local_rank = int(os.environ["LOCAL_RANK"])
+#     torch.cuda.set_device(local_rank)
+#     return local_rank
+
+def setup_training_device():
+    """Setup device for training - supports both distributed and single-process modes"""
+    if "WORLD_SIZE" in os.environ and torch.cuda.is_available():
+        # Distributed training mode
+        dist.init_process_group(backend="nccl")
+        local_rank = int(os.environ["LOCAL_RANK"])
+        device = torch.device(f"cuda:{local_rank}")
+        torch.cuda.set_device(local_rank)
+        use_ddp = True
+        print(f"Using distributed training on device: {device} (local rank {local_rank})")
+    elif torch.cuda.is_available():
+        # Single GPU mode
+        local_rank = 0
+        device = torch.device("cuda:0")
+        use_ddp = False
+        print(f"Using single GPU: {device}")
+    else:
+        # CPU mode
+        local_rank = 0
+        device = torch.device("cpu")
+        use_ddp = False
+        print(f"Using CPU: {device}")
+
+    return local_rank, device, use_ddp
+
 
 
 def train(model, dataloader, tokenizer, config, global_step, device):
@@ -104,7 +130,8 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
-        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        if rank == 0 and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | "
                   f"Energy: {batch_energy:.4f} | "
                   f"Perplexity: {perplexity:.4f}", flush=True)
@@ -120,9 +147,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
 
 def main():
-    local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}")
-    print(f"Using device: {device} (local rank {local_rank})")
+    local_rank, device, use_ddp = setup_training_device()
 
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
@@ -151,11 +176,14 @@ def main():
     )
 
     model = PCTransformer(config).to(device)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
-    model.module.register_all_lateral_weights()
+     # Wrap with DDP only if using distributed training
+    if use_ddp:
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+        model.module.register_all_lateral_weights()
+    else:
+        model.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders(distributed=True)
-
+    train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
     start_time = time.time()
     global_step = 0
     train_energies = []
@@ -164,7 +192,9 @@ def main():
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
         print("========== Training started ==========", flush=True)
-        total_params = sum(p.numel() for p in model.parameters())
+         # Get parameters from the base model (handle both DDP and non-DDP)
+        base_model = model.module if hasattr(model, 'module') else model
+        total_params = sum(p.numel() for p in base_model.parameters())
         print(f"{total_params / 1e6:.2f} M parameters", flush=True)
 
     for epoch in range(config.num_epochs):
