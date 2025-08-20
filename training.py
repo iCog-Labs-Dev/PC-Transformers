@@ -15,7 +15,7 @@ from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-
+from utils.device_utils import setup_device, cleanup_memory
 
 """
 This script trains the predictive coding transformer model on the provided dataset.
@@ -25,12 +25,12 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
 
-def setup_ddp():
-    """Initialize DDP process group"""
-    dist.init_process_group(backend="nccl")
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    return local_rank
+# def setup_ddp():
+#     """Initialize DDP process group"""
+#     dist.init_process_group(backend="nccl")
+#     local_rank = int(os.environ["LOCAL_RANK"])
+#     torch.cuda.set_device(local_rank)
+#     return local_rank
 
 
 def train(model, dataloader, tokenizer, config, global_step, device):
@@ -104,10 +104,12 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
-        if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | "
-                  f"Energy: {batch_energy:.4f} | "
-                  f"Perplexity: {perplexity:.4f}", flush=True)
+        # if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
+        #     print(f"  Batch {batch_idx + 1}/{len(dataloader)} | "
+        #           f"Energy: {batch_energy:.4f} | "
+        #           f"Perplexity: {perplexity:.4f}", flush=True)
+        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -120,26 +122,54 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
 
 def main():
-    local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}")
+    # local_rank = setup_ddp()
+    # device = torch.device(f"cuda:{local_rank}")
+    # print(f"Using device: {device} (local rank {local_rank})")
+    local_rank, device, use_ddp = setup_device()
     print(f"Using device: {device} (local rank {local_rank})")
+    
+    if use_ddp and not dist.is_initialized():
+        dist.init_process_group(backend="nccl")
 
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
-
+    #gpu
+    # config = GPTConfig(
+    #     vocab_size = vocab_size,
+    #     block_size= 448, 
+    #     peak_learning_rate= 2e-5,
+    #     warmup_steps= 217,
+    #     n_embed=592,
+    #     dropout= 0.24684719512514441,
+    #     local_learning_rate= 0.0,
+    #     T= 10,
+    #     is_holding_error = True,
+    #     num_heads=16,
+    #     n_blocks=6,
+    #     num_epochs= 20,
+    #     update_bias= True,
+    #     use_lateral = True,
+    #     internal_energy_fn_name="mse",
+    #     output_energy_fn_name="kld",
+    #     eos_token_id=tokenizer.eos_token_id,
+    #     combined_internal_weight=0.3,
+    #     combined_output_weight=0.7,
+    #     use_flash_attention=True  
+    # )
+    #gpu
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size= 448, 
+        block_size= 256, 
         peak_learning_rate= 2e-5,
         warmup_steps= 217,
-        n_embed=592,
+        n_embed=64,
         dropout= 0.24684719512514441,
         local_learning_rate= 0.0,
-        T= 10,
+        T= 1,
         is_holding_error = True,
-        num_heads=16,
-        n_blocks=6,
-        num_epochs= 20,
+        num_heads=1,
+        n_blocks=1,
+        num_epochs= 2,
         update_bias= True,
         use_lateral = True,
         internal_energy_fn_name="mse",
@@ -149,13 +179,21 @@ def main():
         combined_output_weight=0.7,
         use_flash_attention=True  
     )
-
     model = PCTransformer(config).to(device)
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
-    model.module.register_all_lateral_weights()
+    # model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+    # model.module.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders(distributed=True)
+    # train_loader, valid_loader, _ = get_loaders(distributed=True)
 
+    if use_ddp:
+        model = DDP(model, device_ids=[local_rank], 
+                    output_device=local_rank, 
+                    find_unused_parameters=True)
+
+        model.module.register_all_lateral_weights()
+
+    train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
+    
     start_time = time.time()
     global_step = 0
     train_energies = []
@@ -223,7 +261,9 @@ def main():
         print("Final model saved to: checkpoints/final_model.pt")
         print("========== Training completed ==========")
 
-    dist.destroy_process_group()
+    # dist.destroy_process_group()
+    if use_ddp and dist.is_initialized():
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
