@@ -133,7 +133,7 @@ if __name__ == "__main__":
     
     
     # train_loader, valid_loader,_ = get_loaders((local_rank >= 0))
-    study = run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=use_flash_attention)
+    study = run_tuning(n_trials= 30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash)
 
     # if dist.is_initialized():
     #     dist.destroy_process_group()
