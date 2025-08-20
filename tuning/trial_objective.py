@@ -14,7 +14,22 @@ from tuning.dataloader import get_dynamic_batch_size, create_subset_loaders
 from tuning.tuning_logs import log_trial_to_detailed_log
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import logging
 
+# Completely disable Optuna logging at the module level to prevent any conflicts
+try:
+    import optuna
+    optuna.logging.disable_default_handler()
+    optuna.logging.set_verbosity(optuna.logging.CRITICAL)
+
+    # Disable all Optuna-related loggers
+    for logger_name in ['optuna', 'optuna.study', 'optuna.trial', 'optuna.samplers', 'optuna.pruners']:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.CRITICAL)
+        logger.disabled = True
+        logger.propagate = False
+except Exception:
+    pass
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
     obj_bytes = pickle.dumps(config_dict)
@@ -30,49 +45,43 @@ def broadcast_config(config_dict, device):
 
 def objective(trial, device = None, flash=False):
     """Bayesian Objective function"""
+     # Additional Optuna logging protection at function level
+    try:
+        import optuna
+        optuna.logging.disable_default_handler()
+        optuna.logging.set_verbosity(optuna.logging.CRITICAL)
+    except Exception:
+        pass
+
     start_time = time.time()
     model = None
     
     print(f"\nStarting Trial {trial.number}")
     
     try:
-        if "RANK" in os.environ and torch.cuda.is_available():
-            if not dist.is_initialized():
-                dist.init_process_group(backend="gloo")
-            local_rank = int(os.environ["LOCAL_RANK"])
-            device = torch.device(f"cuda:{local_rank}")
-            torch.cuda.set_device(local_rank)
-        else:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Use the device passed from the main process, don't reinitialize distributed training
+        if device is None:
+            if "RANK" in os.environ and torch.cuda.is_available():
+                local_rank = int(os.environ["LOCAL_RANK"])
+                device = torch.device(f"cuda:{local_rank}")
+            else:
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             
         tokenizer = load_tokenizer()
         vocab_size = len(tokenizer)
 
-        if dist.is_initialized():
-            if dist.get_rank() == 0:
-                config = get_dynamic_model_config(trial, vocab_size, flash=flash)
-                if config is None:
-                    return float("inf")
-                config_dict = config.__dict__
-            else:
-                config_dict = None
+        # In distributed mode, only rank 0 should be running trials 
+       
+        config = get_dynamic_model_config(trial, vocab_size, flash=flash)
+        if config is None:
+            return float("inf")
+        update_global_config(config.__dict__)
 
-            config_dict = broadcast_config(config_dict, device)
-            config = GPTConfig(**config_dict)
-            update_global_config(config.__dict__)
-        
-        else:
-            config = get_dynamic_model_config(trial, vocab_size, flash=flash)
-            if config is None:
-                return float("inf")
-            update_global_config(config.__dict__)
-
-        model = PCTransformer(config).to(device)  
-        if dist.is_initialized():
-            model = DDP(model, device_ids=[device.index], output_device=device.index)
+        model = PCTransformer(config).to(device)
+        # No need for DDP wrapping since only rank 0 runs trials
 
         batch_size = get_dynamic_batch_size(config.n_embed, config.block_size)
-        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed=dist.is_initialized())
+        train_loader, valid_loader = create_subset_loaders(batch_size=batch_size, distributed=False)
 
         if len(train_loader) == 0 or len(valid_loader) == 0:
             return float("inf")
