@@ -1,6 +1,8 @@
 import torch
 from typing import List, Callable, Any, Optional
-
+import os
+import gc
+import torch.distributed as dist
 def create_streams_or_futures(device: torch.device, num_streams: int) -> tuple[bool, List[Any]]:
     """
     Creates CUDA streams or an empty futures list based on the device.
@@ -9,7 +11,7 @@ def create_streams_or_futures(device: torch.device, num_streams: int) -> tuple[b
         device (torch.device): The device to check (CPU or CUDA).
         num_streams (int): Number of streams/futures needed.
 
-    Returns:
+
         tuple[bool, List[Any]]: A tuple containing:
             - use_cuda (bool): Whether to use CUDA streams.
             - streams_or_futures (List[Any]): List of CUDA streams or empty futures list.
@@ -67,3 +69,25 @@ def synchronize_execution(use_cuda: bool, streams_or_futures: List[Any]) -> None
             except Exception as e:
                 print(f"Error in parallel inference step: {e}")
         streams_or_futures.clear()  # Clear futures after completion
+def cleanup_memory():
+    """Comprehensive memory cleanup"""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+def setup_device():
+    if "WORLD_SIZE" in os.environ and torch.cuda.is_available():
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
+        ddp = True
+    elif torch.cuda.is_available():
+        local_rank = 0
+        device = torch.device("cuda:0")
+        ddp = False
+    else:
+        local_rank = 0
+        device = torch.device("cpu")
+        ddp = False
+    return local_rank, device, ddp
