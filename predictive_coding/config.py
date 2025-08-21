@@ -48,7 +48,7 @@ class GPTConfig:
     num_epochs: int = 5
     use_lateral: bool = True
     internal_energy_fn_name:str="pc_e",
-    output_energy_fn_name: str="kld",
+    attn_energy_fn_name: str="kld",
     eos_token_id: int = None
     use_flash_attention: bool = False
     combined_internal_weight: float = 0.3
