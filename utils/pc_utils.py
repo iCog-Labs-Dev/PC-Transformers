@@ -319,8 +319,8 @@ ENERGY_FUNCTIONS = {
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
     "kld": lambda mu, x: F.kl_div(
-    F.log_softmax(mu / temp, dim=-1),
-    F.softmax(x / temp, dim=-1),
+    F.log_softmax(mu / 1.0, dim=-1),
+    F.softmax(x / 1.0, dim=-1),
     reduction='batchmean'
 )
 }
