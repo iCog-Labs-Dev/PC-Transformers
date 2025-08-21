@@ -85,7 +85,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                 if energy is None or (isinstance(energy, float) and math.isnan(energy)):
                     continue
 
-                if module is attn.pc_qkv:
+                if hasattr(module, 'energy_fn_name') and getattr(module, 'layer_type', None) == 'attn':
                     attn_energy = energy
                 else:
                     internal_energies.append(energy)
