@@ -134,6 +134,8 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
     #print(f"Initial x: mean={x.mean():.3f}, std={x.std():.3f}, nan={torch.isnan(x).any()}")
     if layer_norm is not None and layer_type == "fc1":
         x = layer_norm(x)
+    elif layer_type=="fc2":
+        x=F.gelu(x)
     else:
         x = x
         
@@ -221,57 +223,94 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
         mu = torch.clamp(mu, -10.0, 10.0)
         
-        bu_err = target - mu  # B, T, D
-        if td_err is not None:
-         error= bu_err - td_err
-        else:
-            error = bu_err  
-          
-        if dvl_grad is not None:
-            B, T, H, D = dvl_grad.shape
-            dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
-            dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
-            error = error + la * dvl_projected
-        
-        if layer_instance is not None:
-            setattr(layer_instance, '_head_similarity', similarity)
-            setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
-            setattr(layer_instance, '_head_similarity_max', similarity.max().item())
-        
-        if use_lateral and layer_type in W_latents:
-            W_latent = W_latents[layer_type].to(device) 
-            x_latent = x @ W_latent
-            delta_x = error + x_latent
+        if energy_fn_name=="kld":
+            energy = energy_fn(mu, target, energy_fn_name)
+            if not torch.isfinite(energy).all():
+                 delta_x = torch.zeros_like(x)
+            else:
+                try:
+                    grad_qkv = torch.autograd.grad(energy, x, retain_graph=True, allow_unused=True)
+                    delta_x = grad_qkv[0] if grad_qkv[0] is not None else torch.zeros_like(x)
+                    #delta_x= delta_x - td_err
+                except Exception as e:
+                    print(f"[ERROR] autograd failed for x in {layer_type}: {e}")
+                    delta_x = torch.zeros_like(x)
+
+            if delta_x is None:
+               delta_x = torch.zeros_like(x)
+               delta_x = torch.nan_to_num(delta_x, 0.0).clamp(-1.0, 1.0)
+
             x = x + local_lr * delta_x 
+            x = torch.clamp(x, -clamp_value, clamp_value)
 
             if requires_update:
-               anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
-               W_latents[layer_type] =W_latent + local_lr * anti_hebbian_latent
-               W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
+                
+                for proj in (q_proj, k_proj, v_proj):
+                      grad_weight = torch.autograd.grad(energy, proj.weight, retain_graph=True, allow_unused=True)[0]
+                      delta_W = local_lr * grad_weight
+                      proj.weight.data.add_(delta_W)
+                      if proj.bias is not None and update_bias:
+                        grad_bias = torch.autograd.grad(energy, proj.bias, retain_graph=True, allow_unused=True)[0]
+                        delta_b = (local_lr * grad_bias).clamp(-0.01, 0.01)
+                        delta_b = delta_b.view(-1)
+                        proj.bias.data.add_(delta_b)
+                   
+        
         else:
-            x= x+ local_lr * error
+            bu_err = target - mu  # B, T, D
+            if td_err is not None:
+               error= bu_err - td_err
+            else:
+                error = bu_err  
+            
+        
+            if dvl_grad is not None:
+                B, T, H, D = dvl_grad.shape
+                dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
+                dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
+                error = error + la * dvl_projected
+        
+            if layer_instance is not None:
+                setattr(layer_instance, '_head_similarity', similarity)
+                setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
+                setattr(layer_instance, '_head_similarity_max', similarity.max().item())
+        
+            if use_lateral and layer_type in W_latents:
+                W_latent = W_latents[layer_type].to(device) 
+                x_latent = x @ W_latent
+                delta_x = error + x_latent
+                x = x + local_lr * delta_x 
 
-        x = torch.clamp(x, -clamp_value, clamp_value)
+                if requires_update:
+                   anti_hebbian_latent = - torch.einsum("bsh,bsv->hv", x.detach(), x.detach())
+                   W_latents[layer_type] =W_latent + local_lr * anti_hebbian_latent
+                   W_latents[layer_type].data = F.normalize(W_latents[layer_type].data, p=2, dim=1)
+                else:
+                   x= x+ local_lr * error
+
+            x = torch.clamp(x, -clamp_value, clamp_value)
 
         # PC update W_latent
-        if requires_update:
-            for proj in (q_proj, k_proj, v_proj):
-                delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
-                delta_W = torch.clamp(delta_W, -0.01, 0.01)
-                proj.weight.data.add_(delta_W)
-                if proj.bias is not None and update_bias:
-                    delta_b = local_lr * bu_err.mean(dim=(0, 1))
-                    delta_b = torch.clamp(delta_b, -0.01, 0.01)
-                    delta_b = delta_b.view(-1)
-                    proj.bias.data.add_(delta_b)
+            if requires_update:
+               for proj in (q_proj, k_proj, v_proj):
+                   delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x.detach())
+                   delta_W = torch.clamp(delta_W, -0.01, 0.01)
+                   proj.weight.data.add_(delta_W)
+                   if proj.bias is not None and update_bias:
+                      delta_b = local_lr * bu_err.mean(dim=(0, 1))
+                      delta_b = torch.clamp(delta_b, -0.01, 0.01)
+                      delta_b = delta_b.view(-1)
+                      proj.bias.data.add_(delta_b)
  
         if t == T - 1:
             finalize_step(mu, target, error, t, layer_type,energy_fn_name, is_holding_error)
         # print(f"mu_heads: max={mu_heads.abs().max():.3f}, nan={torch.isnan(mu_heads).any()}")
         # print(f"DVL grad norm={dvl_grad.norm().item() if dvl_grad is not None else 0.0}")
         # print(f"attention weights max={q_proj.weight.abs().max():.3f}, nan={torch.isnan(q_proj.weight).any()}")
-
-        return x, mu, bu_err
+        if energy_fn_name!="kld":
+           return x, mu, bu_err
+        else:
+            return x, mu, energy
     
 ENERGY_FUNCTIONS = {
     "scaled_mse": lambda mu, x: ((mu - x) ** 2).mean(dim=-1) * 0.05,
@@ -279,11 +318,11 @@ ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2).mean(dim=-1)*0.5,    
     "l1": lambda mu, x: (mu - x).abs().mean(dim=-1),
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
-    "kld": lambda mu, x: torch.clamp(F.kl_div(
-        mu.log_softmax(dim=-1),
-        x,
-        reduction='batchmean'
-    ), min=0.0, max=100.0)
+    "kld": lambda mu, x: F.kl_div(
+    F.log_softmax(mu / temp, dim=-1),
+    F.softmax(x / temp, dim=-1),
+    reduction='batchmean'
+)
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:

@@ -44,8 +44,8 @@ def train(model, dataloader, tokenizer, config, global_step, device):
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
 
-    alpha = getattr(config, 'combined_internal_weight', 0.3)
-    beta = getattr(config, 'combined_output_weight', 0.7)
+    alpha = getattr(config, 'combined_internal_weight', 1)
+    beta = getattr(config, 'combined_output_weight', 1)
 
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
@@ -77,7 +77,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         total_ce_loss += ce_loss.item()
 
         internal_energies = []
-        output_energy = None
+        attn_energy = None
 
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
@@ -85,8 +85,8 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                 if energy is None or (isinstance(energy, float) and math.isnan(energy)):
                     continue
 
-                if module is output_pc_layer:
-                    output_energy = energy
+                if module is attn.pc_qkv:
+                    attn_energy = energy
                 else:
                     internal_energies.append(energy)
 
@@ -96,9 +96,9 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                     _ = module._head_similarity_max
 
         avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
-        avg_output_energy = output_energy if output_energy is not None else ce_loss.item()
+        avg_attn_energy = attn_energy if attn_energy is not None else ce_loss.item()
 
-        batch_energy = alpha * avg_internal_energy +beta* avg_output_energy
+        batch_energy = alpha * avg_internal_energy +beta* avg_attn_energy
         total_energy += batch_energy
         batch_count += 1
 
@@ -143,7 +143,7 @@ def main():
         update_bias= True,
         use_lateral = True,
         internal_energy_fn_name="pc_e",
-        output_energy_fn_name="kld",
+        attn_energy_fn_name="kld",
         eos_token_id=tokenizer.eos_token_id,
         combined_internal_weight=0.3,
         combined_output_weight=0.7,
