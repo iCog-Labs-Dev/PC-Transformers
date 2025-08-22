@@ -14,7 +14,7 @@ class TransformerBlock(nn.Module):
             config: Configuration object containing model hyperparameters (e.g., n_embed).
         """
         super().__init__()
-        self.ln1 = nn.LayerNorm(config.n_embed)
+        self.ln1 = nn.RMSNorm(config.n_embed)
         self.attn = Attention(config)
-        self.ln2 = nn.LayerNorm(config.n_embed)
+        self.ln2 = nn.RMSNorm(config.n_embed)
         self.mlp = MLP(config)
