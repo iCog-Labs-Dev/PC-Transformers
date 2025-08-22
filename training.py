@@ -194,14 +194,16 @@ def main():
 
     train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
     
-    start_time = time.time()
+    
     global_step = 0
     train_energies = []
     val_energies = []
-
+    start_time = time.time()
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
         print("========== Training started ==========", flush=True)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         total_params = sum(p.numel() for p in model.parameters())
         print(f"{total_params / 1e6:.2f} M parameters", flush=True)
 
@@ -259,7 +261,8 @@ def main():
             'val_perplexity': val_perplexity
         }
         torch.save(final_checkpoint, 'checkpoints/final_model.pt')
-
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         total_time = time.time() - start_time
         print(f"\nTraining completed in {total_time:.2f} seconds")
         print("Final model saved to: checkpoints/final_model.pt")
