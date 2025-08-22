@@ -134,42 +134,19 @@ def main():
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
     #gpu
-    # config = GPTConfig(
-    #     vocab_size = vocab_size,
-    #     block_size= 448, 
-    #     peak_learning_rate= 2e-5,
-    #     warmup_steps= 217,
-    #     n_embed=592,
-    #     dropout= 0.24684719512514441,
-    #     local_learning_rate= 0.0,
-    #     T= 10,
-    #     is_holding_error = True,
-    #     num_heads=16,
-    #     n_blocks=6,
-    #     num_epochs= 20,
-    #     update_bias= True,
-    #     use_lateral = True,
-    #     internal_energy_fn_name="mse",
-    #     output_energy_fn_name="kld",
-    #     eos_token_id=tokenizer.eos_token_id,
-    #     combined_internal_weight=0.3,
-    #     combined_output_weight=0.7,
-    #     use_flash_attention=True  
-    # )
-    #gpu
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size= 256, 
+        block_size= 448, 
         peak_learning_rate= 2e-5,
         warmup_steps= 217,
-        n_embed=64,
+        n_embed=592,
         dropout= 0.24684719512514441,
         local_learning_rate= 0.0,
-        T= 1,
+        T= 10,
         is_holding_error = True,
-        num_heads=1,
-        n_blocks=1,
-        num_epochs= 1,
+        num_heads=16,
+        n_blocks=6,
+        num_epochs= 20,
         update_bias= True,
         use_lateral = True,
         internal_energy_fn_name="mse",
@@ -179,11 +156,31 @@ def main():
         combined_output_weight=0.7,
         use_flash_attention=True  
     )
+    #cpu
+    # config = GPTConfig(
+    #     vocab_size = vocab_size,
+    #     block_size= 256, 
+    #     peak_learning_rate= 2e-5,
+    #     warmup_steps= 217,
+    #     n_embed=64,
+    #     dropout= 0.24684719512514441,
+    #     local_learning_rate= 0.0,
+    #     T= 1,
+    #     is_holding_error = True,
+    #     num_heads=1,
+    #     n_blocks=1,
+    #     num_epochs= 1,
+    #     update_bias= True,
+    #     use_lateral = True,
+    #     internal_energy_fn_name="mse",
+    #     output_energy_fn_name="kld",
+    #     eos_token_id=tokenizer.eos_token_id,
+    #     combined_internal_weight=0.3,
+    #     combined_output_weight=0.7,
+    #     use_flash_attention=True  
+    # )
     model = PCTransformer(config).to(device)
-    # model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
-    # model.module.register_all_lateral_weights()
 
-    # train_loader, valid_loader, _ = get_loaders(distributed=True)
 
     if use_ddp:
         model = DDP(model, device_ids=[local_rank], 
