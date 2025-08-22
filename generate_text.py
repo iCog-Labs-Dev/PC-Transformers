@@ -100,7 +100,7 @@ def main():
     print(f"[Rank {local_rank}] Using device: {device}")
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
-
+    #gpu
     # config = GPTConfig(
     #     vocab_size = vocab_size,
     #     block_size=448,
@@ -118,6 +118,8 @@ def main():
     #     eos_token_id = tokenizer.eos_token_id,
     #     use_flash_attention=args.flash
     # )
+    
+    #cpu
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size= 256, 
