@@ -85,20 +85,27 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                 if energy is None or (isinstance(energy, float) and math.isnan(energy)):
                     continue
 
-                if hasattr(module, 'energy_fn_name') and getattr(module, 'layer_type', None) == 'attn':
-                    attn_energy = energy
+                if hasattr(module, 'layer_type') and module.layer_type == 'attn':
+                    if getattr(module, 'energy_fn_name', None) == "kld":
+                       attn_energy = energy
+                    else:
+                       internal_energies.append(energy)
                 else:
-                    internal_energies.append(energy)
-
+                      internal_energies.append(energy)
                 if hasattr(module, "_head_similarity_avg"):
                     _ = module._head_similarity_avg
                 if hasattr(module, "_head_similarity_max"):
                     _ = module._head_similarity_max
 
-        avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
-        avg_attn_energy = attn_energy if attn_energy is not None else ce_loss.item()
-
-        batch_energy = alpha * avg_internal_energy +beta* avg_attn_energy
+        tot_internal_energy = 0.5 * sum(internal_energies)  if internal_energies else ce_loss.item()
+        if attn_energy is not None:
+           avg_attn_energy = attn_energy  
+           batch_energy = alpha * avg_internal_energy + beta* avg_attn_energy
+        else:
+            batch_energy=tot_internal_energy
+        if batch_energy == 0.0:
+           batch_energy = ce_loss.item()
+           
         total_energy += batch_energy
         batch_count += 1
 
