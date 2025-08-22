@@ -311,3 +311,212 @@ def cleanup_memory():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
+
+
+def log_memory_usage(prefix="", rank=0):
+    """Log current GPU memory usage"""
+    if torch.cuda.is_available() and rank == 0:
+        allocated = torch.cuda.memory_allocated() / 1024**2  # MB
+        cached = torch.cuda.memory_reserved() / 1024**2  # MB
+        print(f"{prefix}Memory - Allocated: {allocated:.1f}MB, Cached: {cached:.1f}MB")
+        return allocated, cached
+    return 0, 0
+
+
+def estimate_model_flops(model, input_shape, vocab_size=None):
+    """
+    Estimate FLOPS for the current model architecture.
+
+    Args:
+        model: The model to analyze
+        input_shape: (batch_size, seq_len) for input
+        vocab_size: Vocabulary size for embedding lookup
+
+    Returns:
+        dict: FLOPS breakdown by component
+    """
+    batch_size, seq_len = input_shape
+    flops_breakdown = {}
+
+    # Count normalization layers and their FLOPS
+    layernorm_count = 0
+    rmsnorm_count = 0
+    hidden_size = 0
+
+    for _, module in model.named_modules():
+        if isinstance(module, torch.nn.LayerNorm):
+            layernorm_count += 1
+            if hidden_size == 0:
+                hidden_size = module.normalized_shape[0]
+        elif isinstance(module, torch.nn.RMSNorm):
+            rmsnorm_count += 1
+            if hidden_size == 0:
+                hidden_size = module.normalized_shape[0]
+
+    # Estimate FLOPS for normalization layers
+    if layernorm_count > 0:
+        # LayerNorm: mean, variance, normalize, scale, shift
+        layernorm_flops = layernorm_count * batch_size * seq_len * (5 * hidden_size + 2)
+        flops_breakdown['layernorm'] = layernorm_flops
+
+    if rmsnorm_count > 0:
+        # RMSNorm: square, mean, sqrt, divide, scale
+        rmsnorm_flops = rmsnorm_count * batch_size * seq_len * (3 * hidden_size + 2)
+        flops_breakdown['rmsnorm'] = rmsnorm_flops
+
+    # Estimate total normalization FLOPS
+    total_norm_flops = flops_breakdown.get('layernorm', 0) + flops_breakdown.get('rmsnorm', 0)
+    flops_breakdown['total_normalization'] = total_norm_flops
+
+    # Add basic model info
+    flops_breakdown['model_info'] = {
+        'layernorm_layers': layernorm_count,
+        'rmsnorm_layers': rmsnorm_count,
+        'hidden_size': hidden_size,
+        'batch_size': batch_size,
+        'seq_len': seq_len
+    }
+
+    return flops_breakdown
+
+
+def log_efficiency_metrics(model, input_shape, epoch=None, prefix="", rank=0):
+    """
+    Log memory usage and FLOPS estimates for the current model.
+
+    Args:
+        model: The model to analyze
+        input_shape: (batch_size, seq_len) for input
+        epoch: Current epoch number (optional)
+        prefix: Prefix for log messages
+        rank: Process rank for distributed training
+    """
+    if rank != 0:
+        return {}
+
+    # Memory usage
+    allocated, cached = log_memory_usage(prefix, rank)
+
+    # FLOPS estimation
+    flops_breakdown = estimate_model_flops(model, input_shape)
+
+    # Log results
+    epoch_str = f"Epoch {epoch} | " if epoch is not None else ""
+    print(f"{prefix}{epoch_str}Efficiency Metrics:")
+    print(f"  Memory: {allocated:.1f}MB allocated, {cached:.1f}MB cached")
+
+    model_info = flops_breakdown['model_info']
+    print(f"  Model: {model_info['layernorm_layers']} LayerNorm + {model_info['rmsnorm_layers']} RMSNorm layers")
+
+    if flops_breakdown['total_normalization'] > 0:
+        total_flops = flops_breakdown['total_normalization']
+        print(f"  Normalization FLOPS: {total_flops:,} ({total_flops/1e6:.1f}M)")
+
+        if 'layernorm' in flops_breakdown and 'rmsnorm' in flops_breakdown:
+            ln_flops = flops_breakdown['layernorm']
+            rms_flops = flops_breakdown['rmsnorm']
+            savings = ((ln_flops - rms_flops) / ln_flops * 100) if ln_flops > 0 else 0
+            print(f"  FLOPS Savings (RMSNorm vs LayerNorm): {savings:.1f}%")
+
+    metrics = {
+        'memory_allocated_mb': allocated,
+        'memory_cached_mb': cached,
+        'flops_breakdown': flops_breakdown,
+        'epoch': epoch
+    }
+
+    # Save metrics to file
+    save_efficiency_metrics(metrics, prefix.strip().lower().replace(" ", "_"))
+
+    return metrics
+
+
+def save_efficiency_metrics(metrics, phase="training"):
+    """
+    Save efficiency metrics to a JSON file for tracking.
+
+    Args:
+        metrics: Dictionary containing efficiency metrics
+        phase: Phase of training/evaluation (e.g., "training", "evaluation", "initial")
+    """
+    import json
+    import os
+    from datetime import datetime
+
+    # Create metrics directory
+    metrics_dir = "efficiency_metrics"
+    os.makedirs(metrics_dir, exist_ok=True)
+
+    # Create filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{metrics_dir}/{phase}_metrics_{timestamp}.json"
+
+    # Add timestamp to metrics
+    metrics['timestamp'] = timestamp
+    metrics['phase'] = phase
+
+    # Save to file
+    try:
+        with open(filename, 'w') as f:
+            json.dump(metrics, f, indent=2)
+    except Exception as e:
+        print(f"Warning: Could not save efficiency metrics to {filename}: {e}")
+
+
+def load_and_compare_metrics(metrics_dir="efficiency_metrics"):
+    """
+    Load and compare efficiency metrics from different phases.
+
+    Args:
+        metrics_dir: Directory containing metrics files
+
+    Returns:
+        Dictionary with comparison results
+    """
+    import json
+    import os
+    import glob
+
+    if not os.path.exists(metrics_dir):
+        print(f"Metrics directory {metrics_dir} not found")
+        return {}
+
+    # Load all metrics files
+    metrics_files = glob.glob(f"{metrics_dir}/*.json")
+    all_metrics = []
+
+    for file_path in metrics_files:
+        try:
+            with open(file_path, 'r') as f:
+                metrics = json.load(f)
+                all_metrics.append(metrics)
+        except Exception as e:
+            print(f"Warning: Could not load {file_path}: {e}")
+
+    if not all_metrics:
+        print("No metrics files found")
+        return {}
+
+    # Group by phase
+    phases = {}
+    for metrics in all_metrics:
+        phase = metrics.get('phase', 'unknown')
+        if phase not in phases:
+            phases[phase] = []
+        phases[phase].append(metrics)
+
+    # Calculate averages and comparisons
+    comparison = {}
+    for phase, phase_metrics in phases.items():
+        if phase_metrics:
+            avg_memory = sum(m.get('memory_allocated_mb', 0) for m in phase_metrics) / len(phase_metrics)
+            avg_flops = sum(m.get('flops_breakdown', {}).get('total_normalization', 0) for m in phase_metrics) / len(phase_metrics)
+
+            comparison[phase] = {
+                'count': len(phase_metrics),
+                'avg_memory_mb': avg_memory,
+                'avg_normalization_flops': avg_flops,
+                'latest_metrics': phase_metrics[-1]  # Most recent
+            }
+
+    return comparison

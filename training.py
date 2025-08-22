@@ -10,7 +10,7 @@ from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import get_loaders
 from utils.model_utils import load_tokenizer, reset_pc_modules
-from utils.pc_utils import cleanup_memory
+from utils.pc_utils import cleanup_memory, log_efficiency_metrics, log_memory_usage
 from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
@@ -137,8 +137,12 @@ def main():
     
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
-        print("========== Training started ==========", flush=True) 
+        print("========== Training started ==========", flush=True)
         print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
+
+        # Log initial efficiency metrics
+        sample_input_shape = (train_loader.batch_size if hasattr(train_loader, 'batch_size') else 8, config.block_size)
+        log_efficiency_metrics(model, sample_input_shape, prefix="Initial ", rank=rank)
         
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
@@ -159,7 +163,12 @@ def main():
             print(f"Epoch {epoch+1}/{config.num_epochs} | "
             f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
             f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
-            
+
+            # Log efficiency metrics every 5 epochs
+            if (epoch + 1) % 5 == 0:
+                sample_input_shape = (train_loader.batch_size if hasattr(train_loader, 'batch_size') else 8, config.block_size)
+                log_efficiency_metrics(model, sample_input_shape, epoch=epoch+1, rank=rank)
+
             if (epoch + 1) % 5 == 0:
                     os.makedirs("checkpoints", exist_ok=True)
                     checkpoint = {

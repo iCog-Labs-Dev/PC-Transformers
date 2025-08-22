@@ -8,7 +8,7 @@ from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
-from utils.pc_utils import cleanup_memory
+from utils.pc_utils import cleanup_memory, log_efficiency_metrics, log_memory_usage
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
@@ -91,6 +91,12 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
     if local_rank == 0:
         print(f"Total Batches Processed: {batch_idx + 1}")
         print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
+
+        # Log efficiency metrics for evaluation
+        sample_batch = next(iter(dataloader))
+        batch_size = sample_batch["input_ids"].size(0)
+        seq_len = sample_batch["input_ids"].size(1)
+        log_efficiency_metrics(model, (batch_size, seq_len), prefix="Evaluation ", rank=local_rank)
 
     return avg_energy, avg_ce_loss, avg_perplexity
 
