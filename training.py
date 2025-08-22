@@ -169,7 +169,7 @@ def main():
         is_holding_error = True,
         num_heads=1,
         n_blocks=1,
-        num_epochs= 2,
+        num_epochs= 1,
         update_bias= True,
         use_lateral = True,
         internal_energy_fn_name="mse",
@@ -231,9 +231,11 @@ def main():
 
             if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
                 os.makedirs("checkpoints", exist_ok=True)
+                # Get the underlying model (handle both DDP and non-DDP cases)
+                model_to_save = model.module if hasattr(model, 'module') else model
                 checkpoint = {
                     'epoch': epoch,
-                    'model_state_dict': model.module.state_dict(),
+                    'model_state_dict': model_to_save.state_dict(),
                     'train_energy': train_energy,
                     'val_energy': val_energy,
                     'train_perplexity': train_perplexity,
@@ -246,9 +248,11 @@ def main():
     if rank == 0:
         plot_metrics(train_energies, val_energies)
         os.makedirs("checkpoints", exist_ok=True)
+        # Get the underlying model (handle both DDP and non-DDP cases)
+        model_to_save = model.module if hasattr(model, 'module') else model
         final_checkpoint = {
             'epoch': config.num_epochs,
-            'model_state_dict': model.module.state_dict(),
+            'model_state_dict': model_to_save.state_dict(),
             'train_energy': train_energy,
             'val_energy': val_energy,
             'train_perplexity': train_perplexity,
