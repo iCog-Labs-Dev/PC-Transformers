@@ -211,9 +211,9 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
 
         if flash:
-            mu_heads = apply_flash_attention(Q, K, V)
+            mu_heads, mu_for_kld = apply_flash_attention(Q, K, V)
         else:
-            mu_heads = apply_standard_attention(Q, K, V)
+            mu_heads, mu_for_kld = apply_standard_attention(Q, K, V)
 
         dvl_grad = compute_DVL(mu_heads, requires_update)
         if dvl_grad is not None:
@@ -224,7 +224,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
         mu = torch.clamp(mu, -10.0, 10.0)
         
         if energy_fn_name=="kld":
-            energy = energy_fn(mu, target, energy_fn_name)
+            energy = energy_fn(mu_for_kld, mu, energy_fn_name)
             if not torch.isfinite(energy).all():
                  delta_x = torch.zeros_like(x)
             else:
@@ -320,7 +320,7 @@ ENERGY_FUNCTIONS = {
     "cosine": lambda mu, x: 1 - F.cosine_similarity(mu, x, dim=-1),
     "kld": lambda mu, x: F.kl_div(
     F.log_softmax(mu / 1.0, dim=-1),
-    F.softmax(x / 1.0, dim=-1),
+    x,
     reduction='batchmean'
 )
 }

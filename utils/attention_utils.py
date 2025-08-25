@@ -39,7 +39,7 @@ def apply_flash_attention(q, k, v, mask=None):
         attn_out = flash_attn_qkvpacked_func(qkv, 0.0, None, causal=True)
         attn_out = attn_out.to(orig_dtype)
     # Output: [B, T, num_heads, head_dim] -> [B, num_heads, T, head_dim]
-    return attn_out
+    return attn_out, qkv
 
 def apply_standard_attention(q, k, v, mask=None):
     """
@@ -56,4 +56,4 @@ def apply_standard_attention(q, k, v, mask=None):
             attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
         attn_weights = torch.softmax(attn_scores, dim=-1)
         attn_output = torch.matmul(attn_weights, v)
-    return attn_output
+    return attn_output, attn_scores
