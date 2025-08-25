@@ -122,7 +122,7 @@ class PCTransformer(nn.Module):
             batch_size=B,
             seq_len=S,
             layer=self.output.output,
-            layer_type="linear",
+            layer_type="linear_output",
             device=device
         )
 
@@ -131,14 +131,14 @@ class PCTransformer(nn.Module):
 
         for t in range(self.config.T):
             # Execute output layer
-            td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("linear") if t > 0 else None
+            td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
                 self.output.pc_layer.forward,
                 target_activity=target_logits,
                 layer=self.output.output,
-                layer_type="linear",
+                layer_type="linear_output",
                 t=t,
                 T=self.config.T,
                 requires_update=self.training,
@@ -151,13 +151,13 @@ class PCTransformer(nn.Module):
                 next_target = (
                     self.blocks[idx + 1].attn.pc_qkv.get_x("attn")
                     if idx < len(self.blocks) - 1
-                    else self.output.pc_layer.get_x("linear")
+                    else self.output.pc_layer.get_x("linear_output")
                 )
                 
                 layer_norm2 = (block.ln2
                    if idx < len(self.blocks) - 1
                     else None)
-                td_mlp1 = block.mlp.pc_layer1.get_td_err("linear") if t > 0 else None
+                td_mlp1 = block.mlp.pc_layer1.get_td_err("fc1") if t > 0 else None
 
 
                 # Execute MLP layer 2
@@ -174,7 +174,7 @@ class PCTransformer(nn.Module):
                     td_err= td_mlp1,
                     layer_norm=layer_norm2
                 )
-                td_attn_op = block.attn.pc_output.get_td_err("linear") if t > 0 else None
+                td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t > 0 else None
 
                 # Execute MLP layer 1
                 execute_parallel(
@@ -195,9 +195,9 @@ class PCTransformer(nn.Module):
                 if idx == 0:
                    td_embed = self.embedding.pc_layer.get_td_err("embed") if t > 0 else None
                 else:
-                   td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("linear") if t > 0 else None
+                   td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
                 
-                td_attn_qkv = block.attn.pc_qkv.get_td_err("linear") if t > 0 else None
+                td_attn_qkv = block.attn.pc_qkv.get_td_err("attn") if t > 0 else None
 
     
                 # Execute attention output
@@ -251,7 +251,7 @@ class PCTransformer(nn.Module):
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
 
-        output_x = self.output.pc_layer.get_x("linear")
+        output_x = self.output.pc_layer.get_x("linear_output")
         logits = output_x @ self.output.output.weight.T + self.output.output.bias
         return logits
     
