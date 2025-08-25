@@ -49,6 +49,7 @@ class GPTConfig:
     use_lateral: bool = True
     internal_energy_fn_name:str="pc_e",
     attn_energy_fn_name: str="kld",
+    output_energy_fn_name:str="ce",
     eos_token_id: int = None
     use_flash_attention: bool = False
     combined_internal_weight: float = 0.3
