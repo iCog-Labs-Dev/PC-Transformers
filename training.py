@@ -78,6 +78,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 
         internal_energies = []
         attn_energy = None
+        output_energy = None
 
         for module in model.modules():
             if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
