@@ -148,8 +148,12 @@ def step_linear(t, T, target, x, layer, W_latents, layer_type, local_lr, clamp_v
         
         
     mu = torch.clamp(mu, -10.0, 10.0)
-    
-    bu_err = target - mu      
+    if layer_type == "linear_output" and energy_fn_name == "ce":
+        mu_logit=F.softmax(mu, dim=-1)
+        bu_err=  mu_logit - target 
+    else:
+        bu_err = target - mu   
+           
     error_proj = bu_err @ layer.weight    
     if td_err is not None:
         error= error_proj - td_err
@@ -322,7 +326,12 @@ ENERGY_FUNCTIONS = {
     F.log_softmax(mu / 1.0, dim=-1),
     x,
     reduction='batchmean'
-)
+),
+    "ce": lambda mu, x: F.cross_entropy(
+    mu.view(-1, mu.size(-1)), 
+    x.argmax(dim=-1).view(-1), 
+    reduction='none'
+).view(mu.shape[:-1]).mean(dim=-1)  
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
