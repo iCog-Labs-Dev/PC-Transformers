@@ -98,11 +98,13 @@ def train(model, dataloader, tokenizer, config, global_step, device):
                     _ = module._head_similarity_max
 
         tot_internal_energy = 0.5 * sum(internal_energies)  if internal_energies else ce_loss.item()
+        batch_energy = tot_internal_energy
+        
         if attn_energy is not None:
-           avg_attn_energy = attn_energy  
-           batch_energy = alpha * avg_internal_energy + beta* avg_attn_energy
-        else:
-            batch_energy=tot_internal_energy
+           batch_energy += attn_energy
+        if output_energy is not None:
+           batch_energy += output_energy
+            
         if batch_energy == 0.0:
            batch_energy = ce_loss.item()
            
