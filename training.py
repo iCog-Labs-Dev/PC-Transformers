@@ -25,20 +25,6 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
 
-# Configure logging
-log_dir = 'logs'
-os.makedirs(log_dir, exist_ok = True)
-
-logging.basicConfig(
-    level = logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(log_dir, 'training.log')),
-        logging.StreamHandler() #printing to console/terminal as well
-    ]
-)
-logger = logging.getLogger(__name__)
-
 def setup_ddp():
     dist.init_process_group(backend="nccl")
     local_rank = int(os.environ["LOCAL_RANK"])
@@ -99,7 +85,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            logger.info(f"Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+            print(f"Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -112,7 +98,31 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 def main():
     local_rank = setup_ddp()
     device = torch.device(f"cuda:{local_rank}")
-    logger.info(f"Using device: {device} (local rank {local_rank})")
+    rank = dist.get_rank() if dist.is_initialized() else 0
+
+    # Configure logging
+    log_dir = 'logs'
+    os.makedirs(log_dir, exist_ok=True)
+
+    # build handlers and remove existing ones
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    for h in list(root_logger.handlers):
+        root_logger.removeHandler(h)
+
+    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    stream_h = logging.StreamHandler()
+    stream_h.setFormatter(fmt)
+    root_logger.addHandler(stream_h)
+
+    if rank == 0:
+        file_h = logging.FileHandler(os.path.join(log_dir, "training.log"), mode="a")
+        file_h.setFormatter(fmt)
+        root_logger.addHandler(file_h)
+
+    logger = logging.getLogger(__name__)
+
+    print(f"Using device: {device} (local rank {local_rank})")
 
     tokenizer = load_tokenizer()
     vocab_size = len(tokenizer)
@@ -150,7 +160,7 @@ def main():
     train_energies = []
     val_energies = []
     
-    rank = dist.get_rank() if dist.is_initialized() else 0
+    # rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
         logger.info(f"\n{'#' * 120}\n") # add a line of '#' characters to separate each training
         logger.info("========== Training started ==========") 
