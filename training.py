@@ -15,6 +15,8 @@ from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import json
+import logging
 
 """
 This script trains the predictive coding transformer model on the provided dataset.
@@ -84,7 +86,7 @@ def train(model, dataloader, tokenizer, config, global_step, device):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if dist.get_rank() == 0 and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}", flush=True)
+            print(f"Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
         reset_pc_modules(model)
         cleanup_memory()
@@ -97,6 +99,30 @@ def train(model, dataloader, tokenizer, config, global_step, device):
 def main():
     local_rank = setup_ddp()
     device = torch.device(f"cuda:{local_rank}")
+    rank = dist.get_rank() if dist.is_initialized() else 0
+
+    # Configure logging
+    log_dir = 'logs'
+    os.makedirs(log_dir, exist_ok=True)
+
+    # build handlers and remove existing ones
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    for h in list(root_logger.handlers):
+        root_logger.removeHandler(h)
+
+    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    stream_h = logging.StreamHandler()
+    stream_h.setFormatter(fmt)
+    root_logger.addHandler(stream_h)
+
+    if rank == 0:
+        file_h = logging.FileHandler(os.path.join(log_dir, "training.log"), mode="a")
+        file_h.setFormatter(fmt)
+        root_logger.addHandler(file_h)
+
+    logger = logging.getLogger(__name__)
+
     print(f"Using device: {device} (local rank {local_rank})")
 
     tokenizer = load_tokenizer()
@@ -121,6 +147,17 @@ def main():
         eos_token_id = tokenizer.eos_token_id,
         use_flash_attention=True
     )
+
+    if rank == 0:
+        logger.info(f"\n{'#' * 120}\n") # add a line of '#' characters to separate each training
+        logger.info("Saving the hyperparameters configuration:")
+        try:
+            cfg = config.__dict__
+        except Exception:
+            cfg = {k: getattr(config, k) for k in dir(config) if not k.startswith("_") and not callable(getattr(config, k))}
+        config_json = json.dumps(cfg, indent=6, default=str)
+        logger.info(config_json)
+    
     model = PCTransformer(config).to(device)
     model = DDP(model, device_ids=[local_rank], 
                 output_device=local_rank, 
@@ -135,17 +172,14 @@ def main():
     train_energies = []
     val_energies = []
     
-    rank = dist.get_rank() if dist.is_initialized() else 0
+    # rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
-        print("========== Training started ==========", flush=True) 
-        print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
+        logger.info("========== Training started ==========") 
+        logger.info(f"{sum(p.numel() for p in model.parameters())/1e6:.2f} M parameters")
         
     for epoch in range(config.num_epochs):
         if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
-            train_loader.sampler.set_epoch(epoch)
-        
-        if rank == 0:
-            print(f"Epoch {epoch+1}/{config.num_epochs}")
+            train_loader.sampler.set_epoch(epoch)       
         
         model.train()
         train_energy, train_perplexity, _ = train(model, train_loader, tokenizer, config, global_step, device)
@@ -156,9 +190,12 @@ def main():
         val_energies.append(val_energy)
 
         if rank == 0:
-            print(f"Epoch {epoch+1}/{config.num_epochs} | "
-            f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-            f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
+            # add horizontal line to separate each epoch
+            logger.info("-" * 100)
+            logger.info(f"Epoch {epoch+1}/{config.num_epochs}")
+            logger.info(f"{'Metrics':<20} {'Training':<15} {'Validation':<15}")
+            logger.info(f"{'Energy':<20} {train_energy:<15.4f} {val_energy:<15.4f}")
+            logger.info(f"{'Perplexity':<20} {train_perplexity:<15.4f} {val_perplexity:<15.4f}")
             
             if (epoch + 1) % 5 == 0:
                     os.makedirs("checkpoints", exist_ok=True)
@@ -172,7 +209,7 @@ def main():
                     }
                     checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
                     torch.save(checkpoint, checkpoint_path)
-                    print(f"Saved checkpoint to {checkpoint_path}")
+                    logger.info(f"Saved checkpoint to {checkpoint_path}")
 
 
     if rank == 0:
@@ -189,9 +226,9 @@ def main():
         torch.save(final_checkpoint, 'checkpoints/final_model.pt')
     
         total_time = time.time() - start_time
-        print(f"\nTraining completed in {total_time:.2f} seconds")
-        print("Final model saved to: checkpoints/final_model.pt")
-        print("========== Training completed ==========")
+        logger.info(f"Training completed in {total_time:.2f} seconds")
+        logger.info("Final model saved to: checkpoints/final_model.pt")
+        logger.info("========== Training completed ==========")
     
     dist.destroy_process_group()
 
