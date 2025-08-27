@@ -15,6 +15,7 @@ from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import json
 import logging
 
 """
@@ -146,6 +147,17 @@ def main():
         eos_token_id = tokenizer.eos_token_id,
         use_flash_attention=True
     )
+
+    if rank == 0:
+        logger.info(f"\n{'#' * 120}\n") # add a line of '#' characters to separate each training
+        logger.info("Saving the hyperparameters configuration:")
+        try:
+            cfg = config.__dict__
+        except Exception:
+            cfg = {k: getattr(config, k) for k in dir(config) if not k.startswith("_") and not callable(getattr(config, k))}
+        config_json = json.dumps(cfg, indent=6, default=str)
+        logger.info(config_json)
+    
     model = PCTransformer(config).to(device)
     model = DDP(model, device_ids=[local_rank], 
                 output_device=local_rank, 
@@ -162,7 +174,6 @@ def main():
     
     # rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
-        logger.info(f"\n{'#' * 120}\n") # add a line of '#' characters to separate each training
         logger.info("========== Training started ==========") 
         logger.info(f"{sum(p.numel() for p in model.parameters())/1e6:.2f} M parameters")
         
@@ -179,7 +190,7 @@ def main():
         val_energies.append(val_energy)
 
         if rank == 0:
-            # add horizontal bar
+            # add horizontal line to separate each epoch
             logger.info("-" * 100)
             logger.info(f"Epoch {epoch+1}/{config.num_epochs}")
             logger.info(f"{'Metrics':<20} {'Training':<15} {'Validation':<15}")
