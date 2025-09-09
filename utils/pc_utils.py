@@ -29,7 +29,7 @@ def compute_DVL(attn_v, requires_update):
 
 def get_head_similarity(mu_heads):
     B, H, T, D = mu_heads.shape
-    x = mu_heads.transpose(0, 1).flatten(2, 3)  # [H, N, D]
+    x = mu_heads.transpose(0, 1).flatten(2, 3)  # (H, B, T*D) 
     x = F.normalize(x, p=2, dim=-1)
     corr = torch.bmm(x, x.transpose(1, 2))  
     mask = ~torch.eye(corr.size(1), device=corr.device).bool()
@@ -207,9 +207,9 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             K= k_proj(x)
             V= v_proj(x)
             
-            Q = Q.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-            K = K.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
-            V = V.view(batch_size, num_heads, seq_len, head_dim).transpose(1, 2)
+            Q = Q.view(batch_size, num_heads, seq_len, head_dim)
+            K = K.view(batch_size, num_heads, seq_len, head_dim)
+            V = V.view(batch_size, num_heads, seq_len, head_dim)
 
             if flash:
                 mu_heads = apply_flash_attention(Q, K, V)
@@ -230,11 +230,11 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
                 error = bu_err  
           
             if dvl_grad is not None:
-               B, T, H, D = dvl_grad.shape
-               dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, -1)
-               dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
-               error = error + la * dvl_projected
-        
+                B, H, T, D = dvl_grad.shape               # matches compute_DVL output
+                dvl_projected = dvl_grad.permute(0, 2, 1, 3).contiguous().view(B, T, H*D)  # [B, T, embed_dim]
+                dvl_projected=dvl_projected.clamp(-1e-3, 1e-3)
+                error = error + la * dvl_projected
+                
         if layer_instance is not None:
             setattr(layer_instance, '_head_similarity', similarity)
             setattr(layer_instance, '_head_similarity_avg', similarity.mean().item())
