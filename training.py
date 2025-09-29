@@ -214,6 +214,7 @@ def main():
     start_time = time.time()
     if rank == 0:
         logger.info("========== Training started ==========") 
+        logger.info(f"Dataset: {Config.DATASET_NAME}")
         logger.info(f"{sum(p.numel() for p in model.parameters())/1e6:.2f} M parameters")
 
     for epoch in range(config.num_epochs):
