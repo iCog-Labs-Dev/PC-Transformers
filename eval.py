@@ -6,6 +6,7 @@ import os
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from Data_preprocessing.dataloader import get_loaders
+from Data_preprocessing.config import Config
 import torch.nn.functional as F
 from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
 from utils.config_utils import load_best_config
@@ -132,7 +133,7 @@ def main():
     
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size = best_config["block_size"],
+        block_size = Config.MAX_LENGTH,
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
         local_learning_rate = best_config["peak_learning_rate"],
