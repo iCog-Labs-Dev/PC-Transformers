@@ -9,6 +9,12 @@ logging.basicConfig(
 )
 
 def is_flashattention_compatible():
+    """
+    Check if the current GPU supports FlashAttention.
+    Requirements:
+    - CUDA device must be available
+    - GPU compute capability must be >= 8.0 (Ampere or newer)
+    """
     if not torch.cuda.is_available():
         return False
     major, minor = torch.cuda.get_device_capability()
@@ -19,7 +25,10 @@ def is_flashattention_compatible():
 try:
     from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
     FLASH_AVAILABLE = True
-    logging.info("FlashAttention is available and will be used.")
+    if is_flashattention_compatible():
+        logging.info("FlashAttention is available and will be used.")
+    else:
+        logging.warning("FlashAttention is available but is not compatible with the current device. Falling back to standard attention.")
 except ImportError:
     FLASH_AVAILABLE = False
     logging.warning("FlashAttention is not installed. Falling back to standard attention.")
