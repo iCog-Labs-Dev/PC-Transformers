@@ -9,6 +9,7 @@ from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from Data_preprocessing.dataloader import get_loaders
+from Data_preprocessing.config import Config
 from utils.model_utils import load_tokenizer, reset_pc_modules
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
@@ -158,7 +159,7 @@ def main():
     config = GPTConfig(
         vocab_size = vocab_size,
 
-        block_size = best_config["block_size"],
+        block_size = Config.MAX_LENGTH,
         peak_learning_rate = best_config["peak_learning_rate"],
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
