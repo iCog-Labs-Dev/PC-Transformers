@@ -36,7 +36,7 @@ def apply_flash_attention(q, k, v, mask=None):
     Returns:
         attn_output: Output tensor after attention
     """
-    if not FLASH_AVAILABLE:
+    if not FLASH_AVAILABLE or not is_compatible:
         return apply_standard_attention(q, k, v, mask)
     B, num_heads, T, head_dim = q.shape
     # FlashAttention expects [B, T, 3, num_heads, head_dim]
