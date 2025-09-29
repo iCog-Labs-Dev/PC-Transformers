@@ -8,6 +8,14 @@ logging.basicConfig(
     level=logging.INFO 
 )
 
+def is_flashattention_compatible():
+    if not torch.cuda.is_available():
+        return False
+    major, minor = torch.cuda.get_device_capability()
+    if major < 8:
+        return False
+    return True
+
 try:
     from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
     FLASH_AVAILABLE = True
