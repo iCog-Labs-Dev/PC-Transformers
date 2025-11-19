@@ -2,7 +2,7 @@
 
 FILE_ID="1yB8f1B-VVXdGRPWf2aYintDoMOmgXYRN"
 ZIP_NAME="opwb.zip"
-OUTPUT_DIR="Data_preprocessing/Data"
+OUTPUT_DIR="data_preparation/data"
 
 if ! command -v gdown &> /dev/null; then
     echo "gdown not found. Installing..."

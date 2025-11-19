@@ -9,19 +9,31 @@ def load_best_config():
 
     selected_keys = {
         "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
-        "dropout", "T", "num_heads", "n_blocks", "update_bias"
+        "dropout", "T", "num_heads", "n_blocks", "update_bias", "alpha",
+        "lr", "batch_size", "num_epochs", "internal_energy_fn_name",
+        "output_energy_fn_name", "combined_internal_weight",
+        "combined_output_weight", "use_flash_attention"
     }
 
     fallback_values = {
-        "block_size": 352,
-        "peak_learning_rate": 0.0006870706728235172,
-        "warmup_steps": 211,
+        "block_size": 64,
+        "peak_learning_rate": 0.009606017304857476,
+        "warmup_steps": 59,
         "n_embed": 512,
-        "dropout": 0.11081845099183116,
-        "T": 15,
-        "num_heads": 8,
-        "n_blocks": 4,
-        "update_bias": False
+        "dropout": 0.46876145412214615,
+        "T": 2,
+        "num_heads": 32,
+        "n_blocks": 12,
+        "update_bias": False,
+        "alpha": 0.5,
+        "lr": 0.0009606017304857476,
+        "batch_size": 8,
+        "num_epochs": 10,
+        "internal_energy_fn_name": "pc_e",
+        "output_energy_fn_name": "pc_e",
+        "combined_internal_weight": 0.8779955579743048,
+        "combined_output_weight": 0.12200444202569516,
+        "use_flash_attention": False
     }
 
     config = {}

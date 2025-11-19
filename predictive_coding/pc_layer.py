@@ -1,208 +1,203 @@
 import torch
 import torch.nn as nn
-from typing import Optional
-from utils.pc_utils import x_init, step_embed, step_linear, step_attn, finalize_step
+from typing import Optional, Dict, Tuple
 
-"""
-predictive_coding.pc_layer
-
-This module implements the PCLayer class, which provides predictive coding inference and local learning for neural network layers.
-It supports embedding, attention, and linear layers, and manages iterative inference, error computation, and lateral connections.
-"""
+from utils.pc_utils import (
+    x_init,
+    step_embed,
+    step_linear,
+    step_attn,
+    finalize_step,
+)
+from predictive_coding.lateral_connc import LateralConnections
 
 class PCLayer(nn.Module):
     """
-    Predictive Coding Layer for neural network modules.
-
-    Supports iterative inference, local learning, and optional lateral (recurrent) connections.
-    Can be used for embedding, attention, or linear layers.
+    Predictive Coding Layer wrapper that manages iterative inference state and
+    delegates computation to helper functions (step_embed, step_attn, step_linear).
     """
     def __init__(
         self,
-        T: int = 1,
-        local_learning_rate: float = 1e-3,
-        is_holding_error: bool = False,
-        update_bias: bool = True,
-        energy_fn_name: str = "scaled_mse",
+        T: int,
+        lr: float,
+        update_bias: bool,
+        energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
-        la: Optional[float] = None,
     ):
-        """
-        Initialize the PCLayer.
-
-        Args:
-            T (int): Number of inference steps.
-            local_learning_rate (float): Learning rate for local/lateral updates.
-            is_holding_error (bool): Whether to accumulate and store errors.
-            update_bias (bool): Whether to update bias terms during learning.
-            energy_fn_name (str): Name of the energy function to use for error computation.
-        """
         super().__init__()
         self.T = T
-        self.local_lr = local_learning_rate
-        self.is_holding_error = is_holding_error
+        self.local_lr = lr
         self.update_bias = update_bias
         self.clamp_value = 3.0
-        self.W_latents = nn.ParameterDict()
-        self.use_lateral = True
-        self._x_cache = {}
-        self._mu_cache={}
-        self._error_cache = {}
         self.energy_fn_name = energy_fn_name 
-        self._energy = 0.0
-        self._errors = []
         self.num_heads = num_heads
         self.n_embed = n_embed
-        self.la = la
-
+        
+        self.lateral_connections: Dict[str, LateralConnections] = {}
+        
+        self._x_cache: Dict[str, torch.Tensor] = {}
+        self._mu_cache: Dict[str, torch.Tensor] = {}
+        self._error_cache: Dict[str, torch.Tensor] = {}
+        self._embed_cache: Dict[str, any] = {"mu_word": None, "mu_pos": None, "step": -1}
+        self._energy = 0.0
+        self._errors = []
+    
     def register_lateral(self, layer_type: str, size: int):
-        """
-        Register a lateral (recurrent) weight matrix for a given layer type.
+        """Create and register lateral connections for layer_type."""
+        if layer_type not in self.lateral_connections:
+            self.lateral_connections[layer_type] = LateralConnections(size, self.local_lr)
+            self.add_module(f"lateral_{layer_type}", self.lateral_connections[layer_type])
 
-        Args:
-            layer_type (str): The type of layer (e.g., 'attn', 'fc1', 'linear').
-            size (int): The size of the square lateral weight matrix.
-        """
-        if not hasattr(self, 'W_latents'):
-            self.W_latents = {}
-
-        if layer_type not in self.W_latents:
-            device = next(self.parameters()).device if list(self.parameters()) else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            W = torch.empty(size, size, device=device)
-            nn.init.xavier_uniform_(W)
-            self.W_latents[layer_type] = nn.Parameter(W)
-
+    def _reset_step_state(self) -> None:
+        """Reset step-local accumulators, kept for future extension."""
+        return
+    
+    def _get_cached_state(self, layer_type: str):
+        return self._x_cache.get(layer_type, None)
+    
     def forward(
         self,
         target_activity: torch.Tensor,
+        layer_type: str,
+        t: int,
+        T: int,
+        requires_update: bool,
         td_err:  Optional[torch.Tensor] = None,
         layer: Optional[nn.Module] = None,
         layer_norm: Optional[nn.Module] = None,
         proj_layers: Optional[dict] = None,
-        layer_type: str = "fc1",
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
-        t=0,
-        T=1,
-        requires_update: bool = True,
         flash: bool = False,
+        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # ADD THIS
+        use_cache: bool = False, 
     ):
-        """
-        Perform a single predictive coding inference step for the layer.
-
-        Args:
-            target_activity (torch.Tensor): Target activity tensor for the layer.
-            layer (nn.Module, optional): The layer module (for linear layers).
-            proj_layers (dict, optional): Dictionary of projection layers (for attention).
-            layer_type (str): Type of layer ('embed', 'attn', 'fc1', 'linear', etc.).
-            input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
-            position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
-            t (int): Current inference step.
-            T (int): Total number of inference steps.
-            requires_update (bool): Whether to update weights.
-            flash (bool): Whether to use flash attention (if available).
-
-        Returns:
-            torch.Tensor or tuple: Updated activity tensor(s) for the layer.
-        """
-        B, S, _ = target_activity.shape    
-        x = None
-        self._energy = 0.0
-        self._errors = []
-        
+        """Perform one predictive coding inference step."""
+        self._reset_step_state()
+        x = self._get_cached_state(layer_type)
 
         if layer_type == "embed":
-            if "embed" not in self._x_cache:
-                raise ValueError("Embedding state not initialized. Call init_x first.")
-            x_word, x_pos = self._x_cache["embed"]
-        else:
-            if layer_type not in self._x_cache:
-                raise ValueError(f"{layer_type} state not initialized. Call init_x first.")
-            x = self._x_cache[layer_type]
-
-        if layer_type == "embed":
-            # Caching for mu_word and mu_pos during inference
-            if not hasattr(self, '_embed_cache'):
-                self._embed_cache = {"mu_word": None, "mu_pos": None, "step": -1}
             use_cache = (not requires_update) and (self._embed_cache["step"] == t)
             mu, mu_word, mu_pos, bu_err = step_embed(
-                t, T, target_activity, layer, layer_type, input_ids, position_ids,
-                self.local_lr, self.clamp_value, self.energy_fn_name, self.is_holding_error,
-                requires_update, layer_norm=layer_norm,
+                t,
+                T,
+                target_activity,
+                layer,
+                layer_type,
+                input_ids,
+                position_ids,
+                self.local_lr,
+                self.clamp_value,
+                self.energy_fn_name,
+                requires_update,
+                layer_norm=layer_norm,
                 mu_word_cache=self._embed_cache["mu_word"] if use_cache else None,
                 mu_pos_cache=self._embed_cache["mu_pos"] if use_cache else None
             )
-            # Update cache if not requires_update or first step
+            
+            # Update cache 
             if not requires_update or t == 0:
                 self._embed_cache["mu_word"] = mu_word
                 self._embed_cache["mu_pos"] = mu_pos
                 self._embed_cache["step"] = t
-        elif layer_type == "attn":
-            # Step attention takes arguments strictly in order: t, T, target_activity, x, W_latents, proj_layers, layer_type,
-            # local_lr, clamp_value, use_lateral, is_holding_error, energy_fn
-            x, mu, bu_err = step_attn(t, T, target_activity, x, self.W_latents, proj_layers, layer_type,
-                              self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                              self.energy_fn_name, self.update_bias, requires_update, self, self.num_heads, self.n_embed, self.la, td_err=td_err, layer_norm=layer_norm, flash=flash)
-        else:
-            x, mu, bu_err = step_linear(t, T, target_activity, x, layer, self.W_latents, layer_type,
-                               self.local_lr, self.clamp_value, self.use_lateral, self.is_holding_error,
-                               self.energy_fn_name, self.update_bias, requires_update,td_err=td_err, layer_norm=layer_norm)
+            
+            # store for later retrieval
+            self._x_cache["embed"] = (mu_word, mu_pos)
+            self._mu_cache["embed"] = mu.detach().clone()
+            if bu_err is not None:
+                self._error_cache["embed"] = bu_err.detach().clone()
+
+            # compute energy
+            error = target_activity - mu
+            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+            self._energy += energy
+            self._errors.extend(step_errors)
+            return mu_word, mu_pos
         
+        elif layer_type == "attn":
+            lateral_conn = self.lateral_connections.get(layer_type, None)
+            x, mu, bu_err, new_kv_cache = step_attn(
+                t,
+                T,
+                target_activity,
+                x,
+                lateral_conn,
+                proj_layers,
+                layer_type,
+                self.local_lr,
+                self.clamp_value,
+                self.energy_fn_name,
+                self.update_bias,
+                requires_update,
+                self.num_heads,
+                self.n_embed,
+                td_err=td_err, 
+                layer_norm=layer_norm,
+                flash=flash, 
+                kv_cache=kv_cache,  
+                use_cache=use_cache,
+            )
+            # Store cache for retrieval
+            if use_cache:
+                self._last_kv_cache = new_kv_cache
+        
+        else:
+            lateral_conn = self.lateral_connections.get(layer_type, None)
+            x, mu, bu_err = step_linear(
+                t,
+                T,
+                target_activity,
+                x,
+                layer, 
+                lateral_conn,  
+                layer_type,
+                self.local_lr, 
+                self.clamp_value, 
+                self.energy_fn_name, 
+                self.update_bias, 
+                requires_update,
+                td_err=td_err, 
+                layer_norm=layer_norm
+            )
+            
+        # cache and stats
         self._mu_cache[layer_type] = mu.detach().clone()  
         if bu_err is not None: 
          self._error_cache[layer_type] = bu_err.detach().clone()   
         
-        if self.is_holding_error:
-            error = target_activity - mu
-            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type,
-                                                self.energy_fn_name, self.is_holding_error)
-            self._energy += energy
-            self._errors.extend(step_errors)
+        error = target_activity - mu
+        energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+        self._energy += energy
+        self._errors.extend(step_errors)
 
-        if layer_type == "embed":
-            # Cache updated x for next step inference
-            self._x_cache["embed"] = (mu_word, mu_pos)
-            return mu_word, mu_pos
-        else:
-            self._x_cache[layer_type] = x
-            return x, mu
+        # update x cache
+        self._x_cache[layer_type] = x
+        return x, mu
 
     def init_x(
         self,
         batch_size: int,
         seq_len: int,
+        layer_type: str,
+        device: torch.device,
         layer: Optional[nn.Module] = None,
         proj_layers: Optional[dict] = None,
-        layer_type: str = "linear",
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
-        device: torch.device = None,
     ):
         """
-        Initialize the layer's state variables and store them in x_cache.
-
-        Args:
-            batch_size (int): Batch size.
-            seq_len (int): Sequence length.
-            layer (nn.Module, optional): The layer module (for linear layers).
-            proj_layers (dict, optional): Dictionary of projection layers (for attention).
-            layer_type (str): Type of layer ('embed', 'attn', 'fc1', 'linear', etc.).
-            input_ids (torch.Tensor, optional): Input token IDs (for embedding layers).
-            position_ids (torch.Tensor, optional): Position IDs (for embedding layers).
+        Initialize cached activity `x` for the layer type.
+        - embed: stores (x_word, x_pos) from embedding weights
+        - attn: creates random initialization shaped (B, S, H_out)
+        - linear/others: random init sized to layer input dimension
         """
-        if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            
-            # Clip input_ids to valid range
             vocab_size = layer["word"].weight.size(0)
             if input_ids.max() >= vocab_size:
                 input_ids = torch.clamp(input_ids, max=vocab_size-1)
             
-            # Position IDs should also be clipped to valid range
             max_pos = layer["pos"].weight.size(0)
             if position_ids.max() >= max_pos:
                 position_ids = torch.clamp(position_ids, max=max_pos-1)
@@ -210,100 +205,60 @@ class PCLayer(nn.Module):
             x_word = layer["word"].weight[input_ids] 
             x_pos = layer["pos"].weight[position_ids] 
             self._x_cache["embed"] = (x_word, x_pos)
+            
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
             H_out = proj_layers["v_proj"].weight.shape[0] 
             self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
             
-            if self.use_lateral:
-                self.register_lateral(layer_type, H_in)
-                
-                if layer_type in self.W_latents:
-                    self.W_latents[layer_type] = self.W_latents[layer_type].to(device)
+            self.register_lateral(layer_type, H_in)
+            if layer_type in self.lateral_connections:
+                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
+        
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
             self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
-            H_in = layer.weight.shape[1]
-
-            if self.use_lateral:
-                self.register_lateral(layer_type, H_in)
-
-                
-
+            
+            self.register_lateral(layer_type, input_dim)  
+            if layer_type in self.lateral_connections:
+                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
+    
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
-        """
-        Get the cached activity tensor for a given layer type.
-
-        Args:
-            layer_type (str): The type of layer.
-        Returns:
-            torch.Tensor or None: Cached activity tensor, or None if not present.
-        """
+        """Get the cached activity tensor for a given layer type."""
         return self._x_cache.get(layer_type, None)
+    
     def get_mu(self, layer_type: str) -> Optional[torch.Tensor]:
-        """" Get the cached mu(prediction of each layer) tensor for a given layer type.
-
-        Args:
-            layer_type (str): The type of layer.
-        Returns:
-            torch.Tensor or None: Cached prediction tensor, or None if not present.
-        """
+        """Get the cached mu (prediction) tensor for a given layer type."""
         return self._mu_cache.get(layer_type, None)
+    
     def get_td_err(self, layer_type: str) -> Optional[torch.Tensor]:
-        """" Get the cached mu(prediction of each layer) tensor for a given layer type.
-
-        Args:
-            layer_type (str): The type of layer.
-        Returns:
-            torch.Tensor or None: Cached prediction tensor, or None if not present.
-        """
+        """Get the cached top-down error tensor for a given layer type."""
         return self._error_cache.get(layer_type, None)
 
     def get_energy(self) -> Optional[float]:
-        """
-        Get the accumulated energy for the layer (if error holding is enabled).
-
-        Returns:
-            float or None: The accumulated energy value, or None if not computed.
-        """
-        return self._energy
+        """Get the accumulated energy for the layer."""
+        return float(self._energy)
 
     def clear_energy(self):
-        """
-        Clear the stored energy and cached states for the layer.
-        """
+        """Clear the stored energy and cached states for the layer."""
         self._energy = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        
     def get_errors(self) -> list:
-        """
-        Get the list of error values accumulated during inference.
-
-        Returns:
-            list: List of error dictionaries for each inference step.
-        """
+        """Get the list of error values accumulated during inference."""
         return self._errors
 
     def clear_errors(self):
-        """
-        Clear the stored errors for the layer.
-        """
+        """Clear the stored errors for the layer."""
         self._errors = []
         
     def set_learning_rate(self, lr: float):
-        """
-        Set the local learning rate for the layer.
-        This method allows dynamic adjustment of the learning rate during training or inference.
-        """
-        self.local_lr = lr
+        """Set the local learning rate for the layer."""
+        self.local_lr = float(lr)
         
     def get_learning_rate(self) -> float:
-        """
-        Get the current local learning rate for the layer.
-        
-        Returns:
-            float: The current local learning rate.
-        """
-        return self.local_lr
+        """Get the current local learning rate for the layer."""
+        return float(self.local_lr)

@@ -72,14 +72,14 @@ bash scripts/download_data.sh
 
 Make sure the correct dataset is specified in Config.DATASET_NAME:
 ```
-# inside Data_preprocessing/config.py
+# inside data_preparation/config.py
 DATASET_NAME = "ptb"   # for Penn Treebank
 # or
 DATASET_NAME = "opwb"  # for OpenWebText subset
 ```
 Then:
 ```bash
-python -m Data_preprocessing.tokenizer.gpt2_tokenizer
+python -m data_preparation.tokenizer.gpt2_tokenizer
 
 ```
 

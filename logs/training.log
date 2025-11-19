@@ -1,0 +1,33 @@
+2025-10-24 12:03:06,410 - INFO - 
+########################################################################################################################
+2025-10-24 12:03:06,410 - INFO - Using device: cpu (local rank 0)
+2025-10-24 12:03:06,410 - INFO - Saving the hyperparameters configurations:
+2025-10-24 12:03:06,410 - INFO - {
+      "vocab_size": 50259,
+      "block_size": 448,
+      "local_learning_rate": 1e-05,
+      "peak_learning_rate": 0.0005,
+      "warmup_steps": 217,
+      "la": 0.5,
+      "n_embed": 12,
+      "dropout": 0.24684719512514441,
+      "T": 10,
+      "is_holding_error": true,
+      "update_bias": false,
+      "num_heads": 6,
+      "n_blocks": 4,
+      "batch_size": 8,
+      "num_epochs": 20,
+      "use_lateral": true,
+      "internal_energy_fn_name": "pc_e",
+      "output_energy_fn_name": "pc_e",
+      "eos_token_id": 50258,
+      "use_flash_attention": true,
+      "combined_internal_weight": 0.7,
+      "combined_output_weight": 0.3
+}
+2025-10-24 12:03:07,020 - INFO - ========== Training started ==========
+2025-10-24 12:03:07,024 - INFO - 1.27 M parameters
+2025-10-24 12:03:07,024 - INFO - Epoch 1/20
+2025-10-24 12:04:20,563 - INFO -   Batch 10/5258 | Batch Energy: 1.7703 | Perplexity: 247433.8574
+2025-10-24 12:05:39,248 - INFO -   Batch 20/5258 | Batch Energy: 1.7578 | Perplexity: 150294.9301

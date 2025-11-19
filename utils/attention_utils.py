@@ -50,17 +50,18 @@ def apply_flash_attention(q, k, v, mask=None , causal=True):
 
 def apply_standard_attention(q, k, v, mask=None):
     """
-    Standard scaled dot-product attention with masking and mixed precision.
+    Standard scaled dot-product attention with masking.
     Args:
         q, k, v: Query, Key, Value tensors (B, num_heads, T, head_dim)
         mask: Optional mask tensor
     Returns:
         attn_output: Output tensor after attention
     """
-    with autocast(device_type=device, dtype=torch.float16):
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (q.size(-1) ** 0.5)
-        if mask is not None:
-            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
-        attn_weights = torch.softmax(attn_scores.float(), dim=-1).to(q.dtype)
-        attn_output = torch.matmul(attn_weights, v)
+    
+    attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (q.size(-1) ** 0.5)
+    if mask is not None:
+        attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+    attn_weights = torch.softmax(attn_scores, dim=-1)
+    attn_output = torch.matmul(attn_weights, v)
+
     return attn_output

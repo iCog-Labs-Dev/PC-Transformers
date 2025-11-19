@@ -5,15 +5,17 @@ import math
 import os
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
-from Data_preprocessing.dataloader import get_loaders
+from data_preparation.dataloader import get_loaders
 import torch.nn.functional as F
-from utils.model_utils import load_tokenizer, load_model, reset_pc_modules
+from utils.model_utils import load_model
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device, cleanup_memory
 import argparse
+from data_preparation.config import vocab_size
+
 """
 This script evaluates the performance of the predictive coding transformer model.
 
@@ -23,13 +25,11 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> eval.py
 
 local_rank, device, use_ddp = setup_device()
 
-def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
+def evaluate(model, dataloader, max_batches=None, device = None):
     model.eval()
     total_energy = 0.0
     batch_count = 0
     total_ce_loss = 0.0
-    pad_token_id = tokenizer.pad_token_id
-    vocab_size = len(tokenizer)
     
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -50,10 +50,6 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         input_ids = batch["input_ids"].to(device)
         targets = batch["target_ids"].to(device)
 
-        if local_rank == 0:
-            if (targets == pad_token_id).sum() == 0:
-                print(f"No pad tokens detected in batch {batch_idx + 1}, check padding behavior.")
-
         # Clip targets to valid range before using them for loss calculation
         if targets.max() >= vocab_size:
             targets = torch.clamp(targets, max=vocab_size-1)
@@ -63,7 +59,7 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             targets.view(-1),
-            ignore_index=pad_token_id,
+            ignore_index=0,
         )
         total_ce_loss += ce_loss.item()
 
@@ -95,11 +91,9 @@ def evaluate(model, dataloader, tokenizer, max_batches=None, device = None):
         total_energy += batch_energy
         batch_count += 1
 
+        perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f}")
-        
-        reset_pc_modules(model)
-        cleanup_memory()
+            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
    
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
@@ -123,30 +117,29 @@ def main():
     if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
-    print(f"[Rank {local_rank}] Using device: {device}")
-
-    tokenizer = load_tokenizer()
-    vocab_size = len(tokenizer)
-    
+    print(f"[Rank {local_rank}] Using device: {device}")    
     best_config = load_best_config()
     
     config = GPTConfig(
         vocab_size = vocab_size,
         block_size = best_config["block_size"],
+        lr = best_config["peak_learning_rate"],
+        peak_learning_rate = best_config["peak_learning_rate"],
+        warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        local_learning_rate = best_config["peak_learning_rate"],
         T = best_config["T"],
-        is_holding_error = True,
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
+        batch_size = 8,
         num_epochs = 1,
-        internal_energy_fn_name="pc_e",
-        output_energy_fn_name="pc_e",
-        eos_token_id = tokenizer.eos_token_id,
-        combined_internal_weight=0.3,
-        combined_output_weight=0.7,
-        update_bias = best_config["update_bias"]        
+        update_bias = best_config["update_bias"],
+        internal_energy_fn_name=best_config["internal_energy_fn_name"],
+        output_energy_fn_name=best_config["output_energy_fn_name"],
+        combined_internal_weight=best_config["combined_internal_weight"],
+        combined_output_weight=best_config["combined_output_weight"],
+        use_flash_attention=best_config["use_flash_attention"],
+        alpha = best_config["alpha"]
     )
   
     model_path = "checkpoints/final_model.pt"
@@ -158,7 +151,9 @@ def main():
 
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()
-    evaluate(model, test_loader, tokenizer, max_batches= None, device=device)
+    with torch.no_grad(): 
+        evaluate(model, test_loader, max_batches= None, device=device)
+        
     elapsed = time.time() - start_time
     if not dist.is_initialized() or dist.get_rank() == 0:
         print(f"Evaluation completed in {elapsed:.2f} seconds")  

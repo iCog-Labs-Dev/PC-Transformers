@@ -11,7 +11,7 @@ bash "$SCRIPT_DIR/download_data.sh"
 
 echo "Step 3: Running GPT-2 tokenizer..."
 source "$SCRIPT_DIR/../venv/bin/activate"
-python -m Data_preprocessing.tokenizer.gpt2_tokenizer
+python -m data_preparation.tokenizer.gpt2_tokenizer
 
 echo ""
 echo "All steps complete!"

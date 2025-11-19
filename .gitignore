@@ -3,14 +3,12 @@ __pycache__/
 *.pkl
 *.json
 *.pt
-*.txt
 !tuning/bayesian_tuning_results.txt 
 *.db
 *.whl
 pc_transformer_venv/
-data_preprocessing/
 
 venv/
 *.egg-info/
 checkpoints/
-Data_preprocessing/Data/opwb/
+data_preparation/data/opwb/

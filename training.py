@@ -8,8 +8,7 @@ import torch.distributed as dist
 from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
-from Data_preprocessing.dataloader import get_loaders
-from utils.model_utils import load_tokenizer, reset_pc_modules
+from data_preparation.dataloader import get_loaders
 from utils.config_utils import load_best_config
 from utils.pc_utils import cleanup_memory
 from eval import evaluate
@@ -19,6 +18,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_device, cleanup_memory
 import json
 import logging
+from data_preparation.config import vocab_size
 
 """
 This script trains the predictive coding transformer model on the provided dataset.
@@ -28,13 +28,11 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
 
-def train(model, dataloader, tokenizer, config, global_step, device, logger):
+def train(model, dataloader, config, global_step, device, logger):
     model.train()
     total_ce_loss = 0.0
     total_energy = 0.0
     batch_count = 0
-    pad_token_id = tokenizer.pad_token_id
-    vocab_size = len(tokenizer)
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -47,13 +45,23 @@ def train(model, dataloader, tokenizer, config, global_step, device, logger):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
 
+        # total_steps = len(dataloader) * config.num_epochs
+        
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size - 1)
 
         if global_step < config.warmup_steps:
-            lr = config.local_learning_rate + global_step / config.warmup_steps * (
-                config.peak_learning_rate - config.local_learning_rate)
+            lr = config.lr + global_step / config.warmup_steps * (
+                config.peak_learning_rate - config.lr)
         else:
+            # # Cosine decay after warmup
+            # decay_step = global_step - config.warmup_steps
+            # decay_total = total_steps - config.warmup_steps
+            # cosine_decay = 0.5 * (1 + math.cos(math.pi * decay_step / decay_total))
+            
+            # # Minimum learning rate = 10% of peak_lr
+            # min_lr = 0.1 * config.peak_learning_rate
+            # lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
             lr = config.peak_learning_rate
 
         for module in model.modules():
@@ -69,7 +77,7 @@ def train(model, dataloader, tokenizer, config, global_step, device, logger):
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             target_ids.view(-1),
-            ignore_index=pad_token_id
+            ignore_index=0
         )
         total_ce_loss += ce_loss.item()
 
@@ -113,10 +121,6 @@ def train(model, dataloader, tokenizer, config, global_step, device, logger):
             else:
                 print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
-        reset_pc_modules(model)
-        cleanup_memory()
-    
-
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
@@ -128,8 +132,6 @@ def main():
     if use_ddp and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
-    tokenizer = load_tokenizer()
-    vocab_size = len(tokenizer)
     rank = dist.get_rank() if dist.is_initialized() else 0
 
     best_config = load_best_config()   
@@ -157,26 +159,24 @@ def main():
    
     config = GPTConfig(
         vocab_size = vocab_size,
-
         block_size = best_config["block_size"],
+        lr = best_config["lr"],
         peak_learning_rate = best_config["peak_learning_rate"],
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        local_learning_rate = 1e-5,
         T = best_config["T"],
-        is_holding_error = True,
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
-        num_epochs = 20, 
+        batch_size = best_config["batch_size"],
+        num_epochs = best_config["num_epochs"], 
         update_bias = best_config["update_bias"],
-        use_lateral = True,
-        internal_energy_fn_name="pc_e",
-        output_energy_fn_name="pc_e",
-        eos_token_id=tokenizer.eos_token_id,
-        combined_internal_weight=0.7,
-        combined_output_weight=0.3,
-        use_flash_attention=True  
+        internal_energy_fn_name=best_config["internal_energy_fn_name"],
+        output_energy_fn_name=best_config["output_energy_fn_name"],
+        combined_internal_weight=best_config["combined_internal_weight"],
+        combined_output_weight=best_config["combined_output_weight"],
+        use_flash_attention=best_config["use_flash_attention"],
+        alpha = best_config["alpha"]
     )
     
     # Create a separate logger for hyperparameters
@@ -210,6 +210,9 @@ def main():
     global_step = 0
     train_energies = []
     val_energies = []
+    train_perplexities = [] 
+    val_perplexities = []
+
     start_time = time.time()
     if rank == 0:
         logger.info("========== Training started ==========") 
@@ -224,16 +227,19 @@ def main():
 
         model.train()
         train_energy, train_perplexity, global_step = train(
-            model, train_loader, tokenizer, config, global_step, device, logger
+            model, train_loader, config, global_step, device, logger
         )
         train_energies.append(train_energy)
+        train_perplexities.append(train_perplexity)
 
         model.eval()
-        val_energy, val_perplexity = evaluate(
-            model, valid_loader, tokenizer, max_batches=None, device=device
-        )
+        with torch.no_grad():
+            val_energy, val_perplexity = evaluate(
+                model, valid_loader, max_batches=None, device=device
+            )
         
         val_energies.append(val_energy)
+        val_perplexities.append(val_perplexity)
 
         if rank == 0:
             logger.info(f"Epoch {epoch + 1}/{config.num_epochs} | "
@@ -257,7 +263,13 @@ def main():
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
 
     if rank == 0:
-        plot_metrics(train_energies, val_energies)
+        plot_metrics(
+            train_energies,
+            val_energies,
+            train_perplexities,
+            val_perplexities
+        )
+
         os.makedirs("checkpoints", exist_ok=True)
         # Get the underlying model (handle both DDP and non-DDP cases)
         model_to_save = model.module if hasattr(model, 'module') else model
