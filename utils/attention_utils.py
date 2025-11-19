@@ -18,7 +18,7 @@ except ImportError:
     
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def apply_flash_attention(q, k, v, mask=None):
+def apply_flash_attention(q, k, v, mask=None , causal=True):
     """
     Apply FlashAttention if available, else fallback to standard attention.
     Args:
@@ -27,6 +27,13 @@ def apply_flash_attention(q, k, v, mask=None):
     Returns:
         attn_output: Output tensor after attention
     """
+    if mask is not None:
+        casual_flag = False
+        use_mask = mask
+    else:
+        casual_flag = bool(causal)
+        use_mask = None
+
     if not FLASH_AVAILABLE:
         return apply_standard_attention(q, k, v, mask)
     B, num_heads, T, head_dim = q.shape
@@ -36,7 +43,7 @@ def apply_flash_attention(q, k, v, mask=None):
     with autocast(device_type=device, dtype=torch.float16):
         if qkv.dtype not in [torch.float16, torch.bfloat16]:
             qkv = qkv.to(torch.float16)
-        attn_out = flash_attn_qkvpacked_func(qkv, 0.0, None, causal=True)
+        attn_out = flash_attn_qkvpacked_func(qkv, 0.0, None, causal=casual_flag)
         attn_out = attn_out.to(orig_dtype)
     # Output: [B, T, num_heads, head_dim] -> [B, num_heads, T, head_dim]
     return attn_out

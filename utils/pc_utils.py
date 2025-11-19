@@ -226,7 +226,7 @@ def step_attn(t, T, target, x, W_latents, proj_layers, layer_type, local_lr, cla
             # !! Causal Mask
             if flash:
                 # TODO: add support for causal masking in flash attention
-                mu_heads = apply_flash_attention(Q, K, V)
+                mu_heads = apply_flash_attention(Q, K, V , causal=True)
             else:
                 mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
 
