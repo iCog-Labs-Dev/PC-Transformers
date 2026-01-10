@@ -57,13 +57,15 @@ def step_embed(
             
             # Frequency-Normalized Updates (In-Batch Mean Scaling)
             # This ensures that the update magnitude is independent of token frequency.
-            word_counts = torch.bincount(flat_input_ids, minlength=vocab_size)
-            pos_counts = torch.bincount(flat_position_ids, minlength=max_pos)
+            word_counts = torch.bincount(flat_input_ids, minlength=vocab_size).float().to(delta.device)
+            pos_counts = torch.bincount(flat_position_ids, minlength=max_pos).float().to(delta.device)
             
-            # Map counts back to flattened indices and normalize delta
-            # counts[flat_input_ids] gives the frequency of each token in the batch at its respective position
-            word_delta = delta / word_counts[flat_input_ids].unsqueeze(1).float()
-            pos_delta = delta / pos_counts[flat_position_ids].unsqueeze(1).float()
+            # Robustness: prevent division by zero and ensure correct mapping
+            word_counts = word_counts.clamp(min=1)
+            pos_counts = pos_counts.clamp(min=1)
+            
+            word_delta = delta / word_counts[flat_input_ids].unsqueeze(1)
+            pos_delta = delta / pos_counts[flat_position_ids].unsqueeze(1)
             
             word_layer.weight.data.index_add_(0, flat_input_ids, word_delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, pos_delta)
