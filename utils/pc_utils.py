@@ -55,8 +55,20 @@ def step_embed(
             delta = local_lr * flat_update
             delta = torch.clamp(delta, -0.01, 0.01)
             
-            word_layer.weight.data.index_add_(0, flat_input_ids, delta)
-            pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
+            # Frequency-Normalized Updates (In-Batch Mean Scaling)
+            # This ensures that the update magnitude is independent of token frequency.
+            word_counts = torch.bincount(flat_input_ids, minlength=vocab_size).float().to(delta.device)
+            pos_counts = torch.bincount(flat_position_ids, minlength=max_pos).float().to(delta.device)
+            
+            # Robustness: prevent division by zero and ensure correct mapping
+            word_counts = word_counts.clamp(min=1)
+            pos_counts = pos_counts.clamp(min=1)
+            
+            word_delta = delta / word_counts[flat_input_ids].unsqueeze(1)
+            pos_delta = delta / pos_counts[flat_position_ids].unsqueeze(1)
+            
+            word_layer.weight.data.index_add_(0, flat_input_ids, word_delta)
+            pos_layer.weight.data.index_add_(0, flat_position_ids, pos_delta)
             
     if t == T - 1:
            finalize_step(mu, target, error, t, layer_type, energy_fn_name)
