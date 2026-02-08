@@ -29,11 +29,15 @@ class PCOptimizer:
         beta1: float = 0.9,
         beta2: float = 0.999,
         eps: float = 1e-8,
+        sign_value: float = -1.0,
+        weight_bound: float = 0.0,
     ) -> None:
         self.opt_name = opt_name.lower()
         self.beta1 = float(beta1)
         self.beta2 = float(beta2)
         self.eps = float(eps)
+        self.sign_value = float(sign_value)
+        self.weight_bound = float(weight_bound)
         self._state: Dict[int, Any] = {}
 
     def _init_state(self, param: torch.Tensor):
@@ -66,6 +70,7 @@ class PCOptimizer:
             return
 
         update = update.to(param.device, dtype=param.dtype)
+        update = update * self.sign_value
         lr = float(lr)
 
         state = self._state.get(id(param))
@@ -91,6 +96,8 @@ class PCOptimizer:
             if clamp_value is not None:
                 delta = torch.clamp(delta, -abs(clamp_value), abs(clamp_value))
                 new_param = param + delta
+            if self.weight_bound > 0.0:
+                new_param = torch.clamp(new_param, -self.weight_bound, self.weight_bound)
             param.data.copy_(new_param)
 
         self._state[id(param)] = new_state

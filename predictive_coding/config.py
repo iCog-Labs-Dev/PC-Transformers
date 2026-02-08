@@ -26,6 +26,8 @@ class GPTConfig:
         optimizer_beta1 (float): Adam beta1 coefficient.
         optimizer_beta2 (float): Adam beta2 coefficient.
         optimizer_eps (float): Adam epsilon.
+        optimizer_sign_value (float): Sign applied to updates (-1 for ascent).
+        optimizer_weight_bound (float): Optional weight clamp bound (0 disables).
     """
     vocab_size: int
     block_size: int
@@ -50,3 +52,5 @@ class GPTConfig:
     optimizer_beta1: float
     optimizer_beta2: float
     optimizer_eps: float
+    optimizer_sign_value: float
+    optimizer_weight_bound: float

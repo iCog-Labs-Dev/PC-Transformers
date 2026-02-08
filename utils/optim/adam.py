@@ -23,8 +23,8 @@ def step_update(param, update, g1, g2, eta, beta1, beta2, time_step, eps):
     _g2 = beta2 * g2 + (1.0 - beta2) * torch.square(update)
     beta1_t = torch.tensor(beta1, device=param.device, dtype=param.dtype)
     beta2_t = torch.tensor(beta2, device=param.device, dtype=param.dtype)
-    g1_unb = _g1 / (1.0 - torch.pow(beta1_t, time_step))
-    g2_unb = _g2 / (1.0 - torch.pow(beta2_t, time_step))
+    g1_unb = _g1 / (1.0 - torch.pow(beta1_t, time_step).to(param.dtype))
+    g2_unb = _g2 / (1.0 - torch.pow(beta2_t, time_step).to(param.dtype))
     _param = param - eta * g1_unb / (torch.sqrt(g2_unb) + eps)
     return _param, _g1, _g2
 

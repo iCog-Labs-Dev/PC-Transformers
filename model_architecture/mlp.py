@@ -22,6 +22,8 @@ class MLP(nn.Module):
             optimizer_beta1=config.optimizer_beta1,
             optimizer_beta2=config.optimizer_beta2,
             optimizer_eps=config.optimizer_eps,
+            optimizer_sign_value=config.optimizer_sign_value,
+            optimizer_weight_bound=config.optimizer_weight_bound,
         )
 
         self.pc_layer1 = PCLayer(
@@ -33,4 +35,6 @@ class MLP(nn.Module):
             optimizer_beta1=config.optimizer_beta1,
             optimizer_beta2=config.optimizer_beta2,
             optimizer_eps=config.optimizer_eps,
+            optimizer_sign_value=config.optimizer_sign_value,
+            optimizer_weight_bound=config.optimizer_weight_bound,
         )

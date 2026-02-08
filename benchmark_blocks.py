@@ -55,6 +55,8 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
             optimizer_beta1 = best_config["optimizer_beta1"],
             optimizer_beta2 = best_config["optimizer_beta2"],
             optimizer_eps = best_config["optimizer_eps"],
+            optimizer_sign_value = best_config["optimizer_sign_value"],
+            optimizer_weight_bound = best_config["optimizer_weight_bound"],
         )
         
         # Initialize model

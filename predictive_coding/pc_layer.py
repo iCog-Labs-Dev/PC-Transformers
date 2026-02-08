@@ -29,6 +29,8 @@ class PCLayer(nn.Module):
         optimizer_beta1: float = 0.9,
         optimizer_beta2: float = 0.999,
         optimizer_eps: float = 1e-8,
+        optimizer_sign_value: float = -1.0,
+        optimizer_weight_bound: float = 0.0,
     ):
         super().__init__()
         self.T = T
@@ -44,6 +46,8 @@ class PCLayer(nn.Module):
             beta1=optimizer_beta1,
             beta2=optimizer_beta2,
             eps=optimizer_eps,
+            sign_value=optimizer_sign_value,
+            weight_bound=optimizer_weight_bound,
         )
         
         self.lateral_connections: Dict[str, LateralConnections] = {}
