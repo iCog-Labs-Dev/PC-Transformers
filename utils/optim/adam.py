@@ -1,6 +1,6 @@
 import torch
 
-
+#adam 
 def step_update(param, update, g1, g2, eta, beta1, beta2, time_step, eps):
     """
     Runs one step of Adam over a set of parameters given updates.
