@@ -15,4 +15,8 @@ class OutputLayer(nn.Module):
             lr=config.lr,
             update_bias = config.update_bias,
             energy_fn_name=config.output_energy_fn_name,
+            optimizer_name=config.optimizer_name,
+            optimizer_beta1=config.optimizer_beta1,
+            optimizer_beta2=config.optimizer_beta2,
+            optimizer_eps=config.optimizer_eps,
         )

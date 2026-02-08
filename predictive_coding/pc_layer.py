@@ -9,6 +9,7 @@ from utils.pc_utils import (
     step_attn,
     finalize_step,
 )
+from utils.optim.optim_utils import PCOptimizer
 from predictive_coding.lateral_connc import LateralConnections
 
 class PCLayer(nn.Module):
@@ -24,6 +25,10 @@ class PCLayer(nn.Module):
         energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
+        optimizer_name: str = "adam",
+        optimizer_beta1: float = 0.9,
+        optimizer_beta2: float = 0.999,
+        optimizer_eps: float = 1e-8,
     ):
         super().__init__()
         self.T = T
@@ -33,6 +38,13 @@ class PCLayer(nn.Module):
         self.energy_fn_name = energy_fn_name 
         self.num_heads = num_heads
         self.n_embed = n_embed
+
+        self.optimizer = PCOptimizer(
+            opt_name=optimizer_name,
+            beta1=optimizer_beta1,
+            beta2=optimizer_beta2,
+            eps=optimizer_eps,
+        )
         
         self.lateral_connections: Dict[str, LateralConnections] = {}
         
@@ -90,6 +102,7 @@ class PCLayer(nn.Module):
                 self.energy_fn_name,
                 requires_update,
                 layer_norm=layer_norm,
+                optimizer=self.optimizer,
             )            
             # store for later retrieval
             self._x_cache["embed"] = (mu_word, mu_pos)
@@ -126,6 +139,7 @@ class PCLayer(nn.Module):
                 flash=flash, 
                 kv_cache=kv_cache,  
                 use_cache=use_cache,
+                optimizer=self.optimizer,
             )
             # Store cache for retrieval
             if use_cache:
@@ -147,13 +161,14 @@ class PCLayer(nn.Module):
                 self.update_bias, 
                 requires_update,
                 td_err=td_err, 
-                layer_norm=layer_norm
+                layer_norm=layer_norm,
+                optimizer=self.optimizer,
             )
             
         # cache and stats
         self._mu_cache[layer_type] = mu.detach().clone()  
-        if bu_err is not None: 
-         self._error_cache[layer_type] = bu_err.detach().clone()   
+        if bu_err is not None:
+            self._error_cache[layer_type] = bu_err.detach().clone()
         
         error = target_activity - mu
         energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
@@ -247,6 +262,8 @@ class PCLayer(nn.Module):
     def set_learning_rate(self, lr: float):
         """Set the local learning rate for the layer."""
         self.local_lr = float(lr)
+        for lateral in self.lateral_connections.values():
+            lateral.set_learning_rate(lr)
         
     def get_learning_rate(self) -> float:
         """Get the current local learning rate for the layer."""

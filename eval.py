@@ -130,7 +130,11 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        alpha = best_config["alpha"],
+        optimizer_name = best_config["optimizer_name"],
+        optimizer_beta1 = best_config["optimizer_beta1"],
+        optimizer_beta2 = best_config["optimizer_beta2"],
+        optimizer_eps = best_config["optimizer_eps"],
     )
   
     model_path = "checkpoints/final_model.pt"

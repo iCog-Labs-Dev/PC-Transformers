@@ -26,6 +26,10 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     combined_output_weight = 1.0 - combined_internal_weight
     num_epochs = num_epochs = 10
     alpha = 0.5
+    optimizer_name = "adam"
+    optimizer_beta1 = 0.9
+    optimizer_beta2 = 0.999
+    optimizer_eps = 1e-8
     
     return GPTConfig(
         vocab_size=vocab_size,
@@ -46,7 +50,11 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         combined_internal_weight = combined_internal_weight,
         combined_output_weight = combined_output_weight,
         use_flash_attention=flash,
-        alpha=alpha
+        alpha=alpha,
+        optimizer_name=optimizer_name,
+        optimizer_beta1=optimizer_beta1,
+        optimizer_beta2=optimizer_beta2,
+        optimizer_eps=optimizer_eps,
     )
 
 def update_global_config(config):
@@ -56,7 +64,8 @@ def update_global_config(config):
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
         'update_bias', 'T', 'internal_energy_fn_name', 'output_energy_fn_name',
         'batch_size', 'num_epochs', 'combined_internal_weight', 
-        'combined_output_weight', 'alpha'
+        'combined_output_weight', 'alpha',
+        'optimizer_name', 'optimizer_beta1', 'optimizer_beta2', 'optimizer_eps'
     ]
     
     for key in config_keys:
