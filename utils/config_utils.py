@@ -36,7 +36,7 @@ def load_best_config():
         "combined_internal_weight": 0.8779955579743048,
         "combined_output_weight": 0.12200444202569516,
         "use_flash_attention": False,
-        "optimizer_name": "adam",
+        "optimizer_name": "sgd",
         "optimizer_beta1": 0.9,
         "optimizer_beta2": 0.999,
         "optimizer_eps": 1e-8,
