@@ -6,7 +6,11 @@ from utils.pc_utils import (
     x_init,
     step_embed,
     step_linear,
-    step_attn,
+    step_x_query,
+    step_x_key,
+    step_x_value,
+    step_x_score,
+    step_x_A,
     finalize_step,
 )
 from utils.optim.optim_utils import PCOptimizer
@@ -15,7 +19,7 @@ from predictive_coding.lateral_connc import LateralConnections
 class PCLayer(nn.Module):
     """
     Predictive Coding Layer wrapper that manages iterative inference state and
-    delegates computation to helper functions (step_embed, step_attn, step_linear).
+    delegates computation to helper functions (step_embed, decomposed attention steps, step_linear).
     """
     def __init__(
         self,
@@ -57,6 +61,7 @@ class PCLayer(nn.Module):
         self._error_cache: Dict[str, torch.Tensor] = {}
         self._energy = 0.0
         self._errors = []
+        self._last_kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
     
     def register_lateral(self, layer_type: str, size: int):
         """Create and register lateral connections for layer_type."""
@@ -120,34 +125,131 @@ class PCLayer(nn.Module):
             self._energy += energy
             self._errors.extend(step_errors)
             return mu_word, mu_pos
-        
-        elif layer_type == "attn":
+
+        elif layer_type in {"x_query", "x_key", "x_value"}:
             lateral_conn = self.lateral_connections.get(layer_type, None)
-            x, mu, bu_err, new_kv_cache = step_attn(
+            if layer is None:
+                raise ValueError(f"layer must be provided for layer_type={layer_type}")
+
+            if layer_type == "x_query":
+                x, mu, bu_err = step_x_query(
+                    t,
+                    T,
+                    target_activity,
+                    x,
+                    layer,
+                    lateral_conn,
+                    layer_type,
+                    self.local_lr,
+                    self.clamp_value,
+                    self.energy_fn_name,
+                    self.update_bias,
+                    requires_update,
+                    td_err=td_err,
+                    layer_norm=layer_norm,
+                    optimizer=self.optimizer,
+                )
+            elif layer_type == "x_key":
+                x, mu, bu_err = step_x_key(
+                    t,
+                    T,
+                    target_activity,
+                    x,
+                    layer,
+                    lateral_conn,
+                    layer_type,
+                    self.local_lr,
+                    self.clamp_value,
+                    self.energy_fn_name,
+                    self.update_bias,
+                    requires_update,
+                    td_err=td_err,
+                    layer_norm=layer_norm,
+                    optimizer=self.optimizer,
+                )
+            else:
+                x, mu, bu_err = step_x_value(
+                    t,
+                    T,
+                    target_activity,
+                    x,
+                    layer,
+                    lateral_conn,
+                    layer_type,
+                    self.local_lr,
+                    self.clamp_value,
+                    self.energy_fn_name,
+                    self.update_bias,
+                    requires_update,
+                    td_err=td_err,
+                    layer_norm=layer_norm,
+                    optimizer=self.optimizer,
+                )
+
+            # KV cache support: treat mu of x_key/x_value as K/V
+            if use_cache and layer_type in {"x_key", "x_value"}:
+                cached_k, cached_v = kv_cache if kv_cache is not None else (None, None)
+                # If we already updated partial cache this step, prefer it
+                if self._last_kv_cache is not None:
+                    cached_k = self._last_kv_cache[0] if self._last_kv_cache[0] is not None else cached_k
+                    cached_v = self._last_kv_cache[1] if self._last_kv_cache[1] is not None else cached_v
+
+                if layer_type == "x_key":
+                    new_k = mu.detach()
+                    k_total = torch.cat([cached_k, new_k], dim=1) if cached_k is not None else new_k
+                    self._last_kv_cache = (k_total, cached_v)
+                else:
+                    new_v = mu.detach()
+                    v_total = torch.cat([cached_v, new_v], dim=1) if cached_v is not None else new_v
+                    self._last_kv_cache = (cached_k, v_total)
+
+        elif layer_type == "x_score":
+            lateral_conn = self.lateral_connections.get(layer_type, None)
+            if layer is None:
+                raise ValueError("x_score requires a layer (weights/bias)")
+            x, mu, bu_err = step_x_score(
                 t,
                 T,
                 target_activity,
                 x,
+                layer,
                 lateral_conn,
-                proj_layers,
                 layer_type,
                 self.local_lr,
                 self.clamp_value,
                 self.energy_fn_name,
                 self.update_bias,
                 requires_update,
-                self.num_heads,
-                self.n_embed,
-                td_err=td_err, 
+                td_err=td_err,
                 layer_norm=layer_norm,
-                flash=flash, 
-                kv_cache=kv_cache,  
-                use_cache=use_cache,
                 optimizer=self.optimizer,
             )
-            # Store cache for retrieval
-            if use_cache:
-                self._last_kv_cache = new_kv_cache
+
+        elif layer_type == "x_A":
+            lateral_conn = self.lateral_connections.get(layer_type, None)
+            x_score = self._x_cache.get("x_score", None)
+            if layer is None:
+                raise ValueError("x_A requires a layer (weights/bias)")
+            if x_score is None:
+                raise ValueError("x_A requires cached x from x_score")
+            x, mu, bu_err = step_x_A(
+                t,
+                T,
+                target_activity,
+                x,
+                layer,
+                lateral_conn,
+                layer_type,
+                self.local_lr,
+                self.clamp_value,
+                self.energy_fn_name,
+                self.update_bias,
+                requires_update,
+                x_score=x_score,
+                td_err=td_err,
+                layer_norm=layer_norm,
+                optimizer=self.optimizer,
+            )
         
         else:
             lateral_conn = self.lateral_connections.get(layer_type, None)
@@ -197,7 +299,7 @@ class PCLayer(nn.Module):
         """
         Initialize cached activity `x` for the layer type.
         - embed: stores (x_word, x_pos) from embedding weights
-        - attn: creates random initialization shaped (B, S, H_out)
+        - x_query/x_key/x_value/x_score/x_A: random init shaped (B, S, n_embed)
         - linear/others: random init sized to layer input dimension
         """
         if layer_type == "embed":
@@ -213,16 +315,21 @@ class PCLayer(nn.Module):
             x_word = layer["word"].weight[input_ids] 
             x_pos = layer["pos"].weight[position_ids] 
             self._x_cache["embed"] = (x_word, x_pos)
-            
-        elif layer_type == "attn":
-            assert proj_layers is not None, "Attention layer requires proj_layers"
-            H_in = proj_layers["q_proj"].weight.shape[1]
-            H_out = proj_layers["v_proj"].weight.shape[0] 
-            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
-            
-            self.register_lateral(layer_type, H_in)
+
+        elif layer_type in {"x_query", "x_key", "x_value", "x_score", "x_A"}:
+            if layer is not None:
+                input_dim = layer.weight.shape[1]
+            elif self.n_embed is not None:
+                input_dim = int(self.n_embed)
+            elif proj_layers is not None and "q_proj" in proj_layers:
+                input_dim = proj_layers["q_proj"].weight.shape[1]
+            else:
+                raise ValueError("Attention sub-layer init requires layer or n_embed")
+
+            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
+            self.register_lateral(layer_type, input_dim)
             if layer_type in self.lateral_connections:
-                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
+                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device)
         
         else:  
             assert layer is not None, "Linear layer requires layer parameter"

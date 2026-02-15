@@ -10,6 +10,21 @@ def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.dev
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     return torch.randn(batch_size, seq_len, embedding_size, device = device)
 
+def init_x_query(batch_size: int, seq_len: int, n_embed: int, device: torch.device = None) -> torch.Tensor:
+    return x_init(batch_size, seq_len, n_embed, device)
+
+def init_x_key(batch_size: int, seq_len: int, n_embed: int, device: torch.device = None) -> torch.Tensor:
+    return x_init(batch_size, seq_len, n_embed, device)
+
+def init_x_value(batch_size: int, seq_len: int, n_embed: int, device: torch.device = None) -> torch.Tensor:
+    return x_init(batch_size, seq_len, n_embed, device)
+
+def init_x_score(batch_size: int, seq_len: int, n_embed: int, device: torch.device = None) -> torch.Tensor:
+    return x_init(batch_size, seq_len, n_embed, device)
+
+def init_x_A(batch_size: int, seq_len: int, n_embed: int, device: torch.device = None) -> torch.Tensor:
+    return x_init(batch_size, seq_len, n_embed, device)
+
 def step_embed(
     t: int,
     T: int,
@@ -151,163 +166,277 @@ def step_linear(
 
     return x, mu, bu_err
 
-def step_attn(
+def _step_projected_latent(
+    *,
     t: int,
     T: int,
     target: torch.Tensor,
     x: torch.Tensor,
-    lateral_conn: Optional[Any],
-    proj_layers: dict,
+    layer: nn.Linear,
+    lateral_conn: Any,
     layer_type: str,
     local_lr: float,
     clamp_value: float,
     energy_fn_name: str,
     update_bias: bool,
     requires_update: bool,
-    num_heads: int,
-    n_embed: int,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module],
-    flash: bool = False,
-    kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    use_cache: bool = False,
-    optimizer: Optional[PCOptimizer] = None,
-    ):
-    """
-    Predictive coding step for attention with KV caching support.
-    Returns (updated_x, mu, bu_err).
-    - proj_layers must contain 'q_proj','k_proj','v_proj' modules
-    """
-    assert proj_layers is not None, "proj_layers dict is required for attention"
+    optimizer: Optional[PCOptimizer],
+):
+    x_input = layer_norm(x) if layer_norm is not None else x
+    mu = layer(x_input)
+    bu_err = target - mu
 
-    device = x.device
-    
-    x_norm=layer_norm(x) if layer_norm is not None else x
-        
-    q_proj = proj_layers["q_proj"]
-    k_proj = proj_layers["k_proj"]
-    v_proj = proj_layers["v_proj"]
-    assert q_proj is not None and k_proj is not None and v_proj is not None, "Missing Q/K/V projections"  
-        
-    batch_size, seq_len, embed_dim = target.shape
-    head_dim = n_embed // num_heads
-   
-    Q= q_proj(x_norm)
-    
-    # KV Cache logic: only compute K,V for new tokens if cache exists
-    if use_cache and kv_cache is not None:
-        K_new = k_proj(x_norm)
-        V_new = v_proj(x_norm)
-        
-        K_cached, V_cached = kv_cache
-        K = torch.cat([K_cached, K_new], dim=1)
-        V = torch.cat([V_cached, V_new], dim=1)
-    else:
-        # Compute full K, V
-        K = k_proj(x_norm)
-        V = v_proj(x_norm)
-    
-    new_kv_cache = (K.detach(), V.detach()) if use_cache else None
-    Q = Q.view(batch_size, num_heads, seq_len, head_dim)
-    K = K.view(batch_size, num_heads, -1, head_dim)
-    V = V.view(batch_size, num_heads, -1, head_dim)
-        
-    #create causal mask (1=keep, 0=mask)
-    kv_len = K.size(2)
-    causal_mask = torch.tril(torch.ones(seq_len, kv_len, device=device)).unsqueeze(0).unsqueeze(0)
+    error_proj = bu_err @ layer.weight
+    error = error_proj - td_err if td_err is not None else error_proj
 
-    # !! Causal Mask
-    if flash:
-        mu_heads = apply_flash_attention(Q, K, V, mask=causal_mask)
-    else:
-        mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
-    
-    mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-    
-    bu_err = target - mu  # B, T, D
-    error = bu_err - td_err if td_err is not None else bu_err  
-                
-    if lateral_conn is not None:
-        delta_x = lateral_conn.forward(x, error)
-        x = x + local_lr * delta_x
-        
-        if requires_update:
-            lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=clamp_value)
-    else:
-        x = x + local_lr * error
+    # Always use lateral connections when updating
+    if lateral_conn is None:
+        raise ValueError(f"Lateral connection is required for layer_type={layer_type}")
+
+    delta_x = lateral_conn.forward(x, error)
+    x = x + local_lr * delta_x
+    if requires_update:
+        lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 
-    # PC update W_latent
     if requires_update:
-        with torch.no_grad():
-            B, S = batch_size, seq_len
+        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
+        if optimizer is not None:
+            optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
+        else:
+            layer.weight.data.add_(torch.clamp(local_lr * update_w, -0.01, 0.01))
 
-            K_update = K[:, :, -seq_len:, :]
-            V_update = V[:, :, -seq_len:, :]
-
-            update_q = torch.zeros_like(q_proj.weight)
-            update_k = torch.zeros_like(k_proj.weight)
-            update_v = torch.zeros_like(v_proj.weight)
-
-            update_b_q = torch.zeros_like(q_proj.bias) if q_proj.bias is not None else None
-            update_b_k = torch.zeros_like(k_proj.bias) if k_proj.bias is not None else None
-            update_b_v = torch.zeros_like(v_proj.bias) if v_proj.bias is not None else None
-
-            # Multi-head Q, K, V updates
-            for h in range(num_heads):
-                q_slice = Q[:, h, :, :]  # [B, S, head_dim]
-                k_slice = K_update[:, h, :, :]
-                v_slice = V_update[:, h, :, :]
-
-                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x_norm) / (B * S)
-                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x_norm) / (B * S)
-                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x_norm) / (B * S)
-
-                start = h * head_dim
-                end = (h + 1) * head_dim
-
-                update_q[start:end, :] = dW_q_h
-                update_k[start:end, :] = dW_k_h
-                update_v[start:end, :] = dW_v_h
-
-                if update_bias:
-                    if update_b_q is not None:
-                        update_b_q[start:end] = q_slice.mean(dim=(0, 1)) / (B * S)
-                    if update_b_k is not None:
-                        update_b_k[start:end] = k_slice.mean(dim=(0, 1)) / (B * S)
-                    if update_b_v is not None:
-                        update_b_v[start:end] = v_slice.mean(dim=(0, 1)) / (B * S)
-
+        if layer.bias is not None and update_bias:
+            update_b = bu_err.mean(dim=(0, 1))
             if optimizer is not None:
-                optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=clamp_value)
-                optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=clamp_value)
-                optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=clamp_value)
-
-                if update_bias:
-                    if update_b_q is not None:
-                        optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=clamp_value)
-                    if update_b_k is not None:
-                        optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=clamp_value)
-                    if update_b_v is not None:
-                        optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=clamp_value)
+                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
             else:
-                q_proj.weight.data.add_(torch.clamp(local_lr * update_q, -clamp_value, clamp_value))
-                k_proj.weight.data.add_(torch.clamp(local_lr * update_k, -clamp_value, clamp_value))
-                v_proj.weight.data.add_(torch.clamp(local_lr * update_v, -clamp_value, clamp_value))
+                layer.bias.data.add_(torch.clamp(local_lr * update_b, -0.01, 0.01))
 
-                if update_bias:
-                    if update_b_q is not None:
-                        q_proj.bias.data.add_(torch.clamp(local_lr * update_b_q, -clamp_value, clamp_value))
-                    if update_b_k is not None:
-                        k_proj.bias.data.add_(torch.clamp(local_lr * update_b_k, -clamp_value, clamp_value))
-                    if update_b_v is not None:
-                        v_proj.bias.data.add_(torch.clamp(local_lr * update_b_v, -clamp_value, clamp_value))
- 
     if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
-     
-    return x, mu, bu_err, new_kv_cache
+        finalize_step(mu, target, bu_err, t, layer_type, energy_fn_name)
+
+    return x, mu, bu_err
+
+
+def step_x_query(
+    t: int,
+    T: int,
+    target: torch.Tensor,
+    x: torch.Tensor,
+    layer: nn.Linear,
+    lateral_conn: Any,
+    layer_type: str,
+    local_lr: float,
+    clamp_value: float,
+    energy_fn_name: str,
+    update_bias: bool,
+    requires_update: bool,
+    td_err: Optional[torch.Tensor],
+    layer_norm: Optional[nn.Module],
+    optimizer: Optional[PCOptimizer] = None,
+):
+    return _step_projected_latent(
+        t=t,
+        T=T,
+        target=target,
+        x=x,
+        layer=layer,
+        lateral_conn=lateral_conn,
+        layer_type=layer_type,
+        local_lr=local_lr,
+        clamp_value=clamp_value,
+        energy_fn_name=energy_fn_name,
+        update_bias=update_bias,
+        requires_update=requires_update,
+        td_err=td_err,
+        layer_norm=layer_norm,
+        optimizer=optimizer,
+    )
+
+
+def step_x_key(
+    t: int,
+    T: int,
+    target: torch.Tensor,
+    x: torch.Tensor,
+    layer: nn.Linear,
+    lateral_conn: Any,
+    layer_type: str,
+    local_lr: float,
+    clamp_value: float,
+    energy_fn_name: str,
+    update_bias: bool,
+    requires_update: bool,
+    td_err: Optional[torch.Tensor],
+    layer_norm: Optional[nn.Module],
+    optimizer: Optional[PCOptimizer] = None,
+):
+    return _step_projected_latent(
+        t=t,
+        T=T,
+        target=target,
+        x=x,
+        layer=layer,
+        lateral_conn=lateral_conn,
+        layer_type=layer_type,
+        local_lr=local_lr,
+        clamp_value=clamp_value,
+        energy_fn_name=energy_fn_name,
+        update_bias=update_bias,
+        requires_update=requires_update,
+        td_err=td_err,
+        layer_norm=layer_norm,
+        optimizer=optimizer,
+    )
+
+
+def step_x_value(
+    t: int,
+    T: int,
+    target: torch.Tensor,
+    x: torch.Tensor,
+    layer: nn.Linear,
+    lateral_conn: Any,
+    layer_type: str,
+    local_lr: float,
+    clamp_value: float,
+    energy_fn_name: str,
+    update_bias: bool,
+    requires_update: bool,
+    td_err: Optional[torch.Tensor],
+    layer_norm: Optional[nn.Module],
+    optimizer: Optional[PCOptimizer] = None,
+):
+    return _step_projected_latent(
+        t=t,
+        T=T,
+        target=target,
+        x=x,
+        layer=layer,
+        lateral_conn=lateral_conn,
+        layer_type=layer_type,
+        local_lr=local_lr,
+        clamp_value=clamp_value,
+        energy_fn_name=energy_fn_name,
+        update_bias=update_bias,
+        requires_update=requires_update,
+        td_err=td_err,
+        layer_norm=layer_norm,
+        optimizer=optimizer,
+    )
+
+
+def step_x_score(
+    t: int,
+    T: int,
+    target: torch.Tensor,
+    x: torch.Tensor,
+    layer: nn.Linear,
+    lateral_conn: Any,
+    layer_type: str,
+    local_lr: float,
+    clamp_value: float,
+    energy_fn_name: str,
+    update_bias: bool,
+    requires_update: bool,
+    td_err: Optional[torch.Tensor],
+    layer_norm: Optional[nn.Module] = None,
+    optimizer: Optional[PCOptimizer] = None,
+):
+    x_input = layer_norm(x) if layer_norm is not None else x
+    mu = layer(x_input)
+    bu_err = target - mu
+
+    error_proj = bu_err @ layer.weight
+    error = error_proj - td_err if td_err is not None else error_proj
+
+    if lateral_conn is None:
+        raise ValueError(f"Lateral connection is required for layer_type={layer_type}")
+
+    delta_x = lateral_conn.forward(x, error)
+    x = x + local_lr * delta_x
+    if requires_update:
+        lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
+
+    x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
+
+    if requires_update:
+        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
+        if optimizer is not None:
+            optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
+        else:
+            layer.weight.data.add_(torch.clamp(local_lr * update_w, -0.01, 0.01))
+
+        if layer.bias is not None and update_bias:
+            update_b = bu_err.mean(dim=(0, 1))
+            if optimizer is not None:
+                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
+            else:
+                layer.bias.data.add_(torch.clamp(local_lr * update_b, -0.01, 0.01))
+
+    if t == T - 1:
+        finalize_step(mu, target, bu_err, t, layer_type, energy_fn_name)
+    return x, mu, bu_err
+
+
+def step_x_A(
+    t: int,
+    T: int,
+    target: torch.Tensor,
+    x: torch.Tensor,
+    layer: nn.Linear,
+    lateral_conn: Any,
+    layer_type: str,
+    local_lr: float,
+    clamp_value: float,
+    energy_fn_name: str,
+    update_bias: bool,
+    requires_update: bool,
+    x_score: torch.Tensor,
+    td_err: Optional[torch.Tensor],
+    layer_norm: Optional[nn.Module] = None,
+    optimizer: Optional[PCOptimizer] = None,
+):
+    # step_x_A: x is initialized/overwritten as softmax(x_score) (as requested)
+    x = torch.softmax(x_score, dim=-1)
+    x_input = layer_norm(x) if layer_norm is not None else x
+    mu = layer(x_input)
+    bu_err = target - mu
+
+    error_proj = bu_err @ layer.weight
+    error = error_proj - td_err if td_err is not None else error_proj
+
+    if lateral_conn is None:
+        raise ValueError(f"Lateral connection is required for layer_type={layer_type}")
+
+    delta_x = lateral_conn.forward(x, error)
+    x = x + local_lr * delta_x
+    if requires_update:
+        lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
+
+    x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
+
+    if requires_update:
+        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
+        if optimizer is not None:
+            optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
+        else:
+            layer.weight.data.add_(torch.clamp(local_lr * update_w, -0.01, 0.01))
+
+        if layer.bias is not None and update_bias:
+            update_b = bu_err.mean(dim=(0, 1))
+            if optimizer is not None:
+                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
+            else:
+                layer.bias.data.add_(torch.clamp(local_lr * update_b, -0.01, 0.01))
+
+    if t == T - 1:
+        finalize_step(mu, target, bu_err, t, layer_type, energy_fn_name)
+    return x, mu, bu_err
     
 ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    

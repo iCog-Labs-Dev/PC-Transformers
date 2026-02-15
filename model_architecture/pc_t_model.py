@@ -4,7 +4,6 @@ from .embedding import Embedding_Layer
 from .transformer_block import TransformerBlock
 from utils.pc_utils import ids_to_one_hot
 from .output import OutputLayer
-from utils.device_utils import create_streams_or_futures, execute_parallel, synchronize_execution
 
 class PCTransformer(nn.Module):
     """
@@ -28,7 +27,8 @@ class PCTransformer(nn.Module):
         This enables lateral connections for local learning in each layer.
         """
         for block in self.blocks:
-            block.attn.pc_qkv.register_lateral("attn", block.attn.q.in_features)
+            for lt in ["x_query", "x_key", "x_value", "x_score", "x_A"]:
+                block.attn.pc_qkv.register_lateral(lt, block.attn.q.in_features)
             block.attn.pc_output.register_lateral("linear", block.attn.output.in_features)
             block.mlp.pc_layer1.register_lateral("fc1", block.mlp.fc1.in_features)
             block.mlp.pc_layer2.register_lateral("linear", block.mlp.fc2.in_features)
@@ -88,12 +88,52 @@ class PCTransformer(nn.Module):
             block.attn.pc_qkv.init_x(
                 batch_size=B,
                 seq_len=S,
-                layer_type="attn",
-                device = device,
-                layer = None,
-                proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
-                input_ids = None,
-                position_ids = None,
+                layer_type="x_query",
+                device=device,
+                layer=block.attn.q,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+            )
+            block.attn.pc_qkv.init_x(
+                batch_size=B,
+                seq_len=S,
+                layer_type="x_key",
+                device=device,
+                layer=block.attn.k,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+            )
+            block.attn.pc_qkv.init_x(
+                batch_size=B,
+                seq_len=S,
+                layer_type="x_value",
+                device=device,
+                layer=block.attn.v,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+            )
+            block.attn.pc_qkv.init_x(
+                batch_size=B,
+                seq_len=S,
+                layer_type="x_score",
+                device=device,
+                layer=block.attn.score,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+            )
+            block.attn.pc_qkv.init_x(
+                batch_size=B,
+                seq_len=S,
+                layer_type="x_A",
+                device=device,
+                layer=block.attn.A,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
             )
             block.attn.pc_output.init_x(
                 batch_size=B,
@@ -136,36 +176,29 @@ class PCTransformer(nn.Module):
             position_ids = None,
         )
 
-        # Initialize streams or futures for parallel execution
-        use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
-
         for t in range(self.config.T):
             # Execute output layer
             td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
-            execute_parallel(
-                use_cuda,
-                streams_or_futures,
-                self.output.pc_layer.forward,
+            self.output.pc_layer.forward(
                 target_activity=target_logits,
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
                 requires_update=True,
-                td_err= td_mlp2,
+                td_err=td_mlp2,
                 layer=self.output.output,
                 layer_norm=None,
                 proj_layers=None,
                 input_ids=None,
                 position_ids=None,
-                flash=False
-
+                flash=False,
             )
 
-            # Iterate through blocks in reverse order for parallel execution
+            # Iterate through blocks in reverse order (sequential to preserve dependencies)
             for idx in range(len(self.blocks) - 1, -1, -1):
                 block = self.blocks[idx]
                 next_target = (
-                    self.blocks[idx + 1].attn.pc_qkv.get_x("attn")
+                    self.blocks[idx + 1].attn.pc_qkv.get_x("x_query")
                     if idx < len(self.blocks) - 1
                     else self.output.pc_layer.get_x("linear_output")
                 )
@@ -176,120 +209,185 @@ class PCTransformer(nn.Module):
                 td_mlp1 = block.mlp.pc_layer1.get_td_err("fc1") if t > 0 else None
 
                 # Execute MLP layer 2
-                execute_parallel(
-                    use_cuda,
-                    streams_or_futures,
-                    block.mlp.pc_layer2.forward,
+                block.mlp.pc_layer2.forward(
                     target_activity=next_target,
                     layer_type="fc2",
                     t=t,
                     T=self.config.T,
                     requires_update=True,
-                    td_err= td_mlp1,
+                    td_err=td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
-                    flash=False
-
+                    flash=False,
                 )
+
                 td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t > 0 else None
 
                 # Execute MLP layer 1
-                execute_parallel(
-                    use_cuda,
-                    streams_or_futures,
-                    block.mlp.pc_layer1.forward,
+                block.mlp.pc_layer1.forward(
                     target_activity=block.mlp.pc_layer2.get_x("fc2"),
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
                     requires_update=True,
-                    td_err= td_attn_op,
+                    td_err=td_attn_op,
                     layer=block.mlp.fc1,
-                    layer_norm=block.ln1, 
+                    layer_norm=block.ln1,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
-                    flash=False
-
+                    flash=False,
                 )
                 
                 if idx == 0:
                    td_embed = self.embedding.pc_layer.get_td_err("embed") if t > 0 else None
                 else:
                    td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
-                
-                td_attn_qkv = block.attn.pc_qkv.get_td_err("attn") if t > 0 else None
 
-    
-                # Execute attention output
-                execute_parallel(
-                    use_cuda,
-                    streams_or_futures,
-                    block.attn.pc_output.forward,
+                # linear_attn td_err comes from {x_A, x_value} (previous iteration)
+                td_x_A = block.attn.pc_qkv.get_td_err("x_A") if t > 0 else None
+                td_x_value = block.attn.pc_qkv.get_td_err("x_value") if t > 0 else None
+                td_linear_attn = None
+                if td_x_A is not None and td_x_value is not None:
+                    td_linear_attn = 0.5 * (td_x_A + td_x_value)
+                elif td_x_A is not None:
+                    td_linear_attn = td_x_A
+                elif td_x_value is not None:
+                    td_linear_attn = td_x_value
+
+                # Execute attention output (linear_attn)
+                block.attn.pc_output.forward(
                     target_activity=block.mlp.pc_layer1.get_x("fc1"),
                     layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
                     requires_update=True,
-                    td_err= td_attn_qkv,
-                    layer=block.attn.output, 
+                    td_err=td_linear_attn,
+                    layer=block.attn.output,
                     layer_norm=block.ln1,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
-                    flash=False
-
+                    flash=False,
                 )
 
-                # Execute attention QKV
-                execute_parallel(
-                    use_cuda,
-                    streams_or_futures,
-                    block.attn.pc_qkv.forward,
+                # x_value target linear_attn, td_error from embed
+                block.attn.pc_qkv.forward(
                     target_activity=block.attn.pc_output.get_x("linear_attn"),
-                    layer_type="attn",
+                    layer_type="x_value",
                     t=t,
                     T=self.config.T,
                     requires_update=True,
-                    td_err= td_embed,
-                    layer = None,
+                    td_err=td_embed,
+                    layer=block.attn.v,
                     layer_norm=block.ln2,
-                    proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                    proj_layers=None,
                     input_ids=None,
                     position_ids=None,
-                    flash=getattr(self.config, 'use_flash_attention', False),
-                    use_cache=use_kv_cache,  
-                    kv_cache=block.attn.kv_cache if use_kv_cache else None, 
+                    flash=False,
+                    use_cache=use_kv_cache,
+                    kv_cache=block.attn.kv_cache if use_kv_cache else None,
+                )
+
+                # x_query target x_score, td_error from embed
+                block.attn.pc_qkv.forward(
+                    target_activity=block.attn.pc_qkv.get_x("x_score"),
+                    layer_type="x_query",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=True,
+                    td_err=td_embed,
+                    layer=block.attn.q,
+                    layer_norm=block.ln2,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    flash=False,
+                )
+
+                # x_key target x_score, td_error from embed
+                block.attn.pc_qkv.forward(
+                    target_activity=block.attn.pc_qkv.get_x("x_score"),
+                    layer_type="x_key",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=True,
+                    td_err=td_embed,
+                    layer=block.attn.k,
+                    layer_norm=block.ln2,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    flash=False,
+                    use_cache=use_kv_cache,
+                    kv_cache=block.attn.kv_cache if use_kv_cache else None,
+                )
+
+                # x_score target x_A, td_error from {x_query, x_key} (previous iteration)
+                td_x_query = block.attn.pc_qkv.get_td_err("x_query") if t > 0 else None
+                td_x_key = block.attn.pc_qkv.get_td_err("x_key") if t > 0 else None
+                td_x_score = None
+                if td_x_query is not None and td_x_key is not None:
+                    td_x_score = 0.5 * (td_x_query + td_x_key)
+                elif td_x_query is not None:
+                    td_x_score = td_x_query
+                elif td_x_key is not None:
+                    td_x_score = td_x_key
+
+                block.attn.pc_qkv.forward(
+                    target_activity=block.attn.pc_qkv.get_x("x_A"),
+                    layer_type="x_score",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=True,
+                    td_err=td_x_score,
+                    layer=block.attn.score,
+                    layer_norm=block.ln2,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    flash=False,
+                )
+
+                # x_A target linear_attn, td_error from x_score (previous iteration)
+                td_from_x_score = block.attn.pc_qkv.get_td_err("x_score") if t > 0 else None
+                block.attn.pc_qkv.forward(
+                    target_activity=block.attn.pc_output.get_x("linear_attn"),
+                    layer_type="x_A",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=True,
+                    td_err=td_from_x_score,
+                    layer=block.attn.A,
+                    layer_norm=block.ln2,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    flash=False,
                 )
 
                 # Update cache after last iteration
                 if use_kv_cache and t == self.config.T - 1:
                     block.attn.kv_cache = block.attn.pc_qkv._last_kv_cache
     
-            # Execute embedding layer
-            execute_parallel(
-                use_cuda,
-                streams_or_futures,
-                self.embedding.pc_layer.forward,
-                target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
+            # Execute embedding layer (provides td_err used by x_query/x_key/x_value)
+            self.embedding.pc_layer.forward(
+                target_activity=self.blocks[0].attn.pc_qkv.get_x("x_query"),
                 layer_type="embed",
                 t=t,
                 T=self.config.T,
                 requires_update=True,
-                td_err = None,
+                td_err=None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-                layer_norm= block.ln2,
+                layer_norm=self.blocks[0].ln2,
                 proj_layers=None,
                 input_ids=input_ids,
                 position_ids=position_ids,
-                flash=False
+                flash=False,
             )
-
-            # Synchronize all parallel tasks
-            synchronize_execution(use_cuda, streams_or_futures)
         logits = self.output.pc_layer.get_mu("linear_output")
         return logits
     

@@ -18,6 +18,9 @@ class Attention(nn.Module):
         self.q = nn.Linear(config.n_embed, config.n_embed)
         self.k = nn.Linear(config.n_embed, config.n_embed)
         self.v = nn.Linear(config.n_embed, config.n_embed)
+        # Decomposed attention latent projections
+        self.score = nn.Linear(config.n_embed, config.n_embed)
+        self.A = nn.Linear(config.n_embed, config.n_embed)
         self.output = nn.Linear(config.n_embed, config.n_embed)
 
         self.pc_qkv = PCLayer(
