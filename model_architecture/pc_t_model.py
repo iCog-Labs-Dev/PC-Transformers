@@ -365,13 +365,62 @@ class PCTransformer(nn.Module):
                 # x_score target x_A, td_error from {x_query, x_key} (previous iteration)
                 td_x_query = block.attn.pc_qkv.get_td_err("x_query") if t > 0 else None
                 td_x_key = block.attn.pc_qkv.get_td_err("x_key") if t > 0 else None
+                # Project (B,S,n_embed) errors into score space (B,nh,S,kv):
+                # d(QK^T) ≈ dQ K^T + Q dK^T
                 td_x_score = None
-                if td_x_query is not None and td_x_key is not None:
-                    td_x_score = 0.5 * (td_x_query + td_x_key)
-                elif td_x_query is not None:
-                    td_x_score = td_x_query
-                elif td_x_key is not None:
-                    td_x_score = td_x_key
+                if td_x_query is not None or td_x_key is not None:
+                    mu_q = block.attn.pc_qkv.get_mu("x_query")
+                    if mu_q is None:
+                        mu_q = block.attn.pc_qkv.get_x("x_query")
+
+                    mu_k = block.attn.pc_qkv.get_mu("x_key")
+                    if mu_k is None:
+                        mu_k = block.attn.pc_qkv.get_x("x_key")
+
+                    # Use cached K when available
+                    if use_kv_cache and block.attn.kv_cache is not None and block.attn.kv_cache[0] is not None:
+                        k_total = block.attn.kv_cache[0]
+                    else:
+                        k_total = mu_k
+
+                    if mu_q is not None and k_total is not None:
+                        Bq, S_q, n_embed = mu_q.shape
+                        nh = self.config.num_heads
+                        head_dim = n_embed // nh
+
+                        Qh = mu_q.view(Bq, S_q, nh, head_dim).transpose(1, 2).contiguous()  # (B,nh,S,hd)
+                        Kh = k_total.view(Bq, -1, nh, head_dim).transpose(1, 2).contiguous()  # (B,nh,kv,hd)
+
+                        td_from_q = None
+                        td_from_k = None
+
+                        if td_x_query is not None:
+                            dQh = td_x_query.view(Bq, S_q, nh, head_dim).transpose(1, 2).contiguous()
+                            td_from_q = torch.matmul(dQh, Kh.transpose(-2, -1))  # (B,nh,S,kv)
+
+                        if td_x_key is not None:
+                            # If KV cache is used, td_x_key only covers current step K; approximate by using it directly
+                            dKh_step = td_x_key.view(Bq, S_q, nh, head_dim).transpose(1, 2).contiguous()  # (B,nh,S,hd)
+                            # Expand/pad dK along kv_len if needed
+                            kv_len = Kh.size(2)
+                            if dKh_step.size(2) != kv_len:
+                                if dKh_step.size(2) < kv_len:
+                                    pad = kv_len - dKh_step.size(2)
+                                    pad_t = torch.zeros(Bq, nh, pad, head_dim, device=dKh_step.device, dtype=dKh_step.dtype)
+                                    dKh = torch.cat([dKh_step, pad_t], dim=2)
+                                else:
+                                    dKh = dKh_step[:, :, :kv_len, :]
+                            else:
+                                dKh = dKh_step
+
+                            td_from_k = torch.matmul(Qh, dKh.transpose(-2, -1))  # (B,nh,S,kv)
+
+                        if td_from_q is not None and td_from_k is not None:
+                            td_x_score = 0.5 * (td_from_q + td_from_k)
+                        elif td_from_q is not None:
+                            td_x_score = td_from_q
+                        elif td_from_k is not None:
+                            td_x_score = td_from_k
 
                 block.attn.pc_qkv.forward(
                     target_activity=block.attn.pc_qkv.get_x("x_A"),
