@@ -61,6 +61,7 @@ class PCLayer(nn.Module):
         self._mu_cache: Dict[str, torch.Tensor] = {}
         self._error_cache: Dict[str, torch.Tensor] = {}
         self._energy = 0.0
+        self._energy_by_layer_type: Dict[str, float] = {}
         self._errors = []
         self._last_kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
     
@@ -124,6 +125,7 @@ class PCLayer(nn.Module):
             error = target_activity - mu
             energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
             self._energy += energy
+            self._energy_by_layer_type[layer_type] = self._energy_by_layer_type.get(layer_type, 0.0) + float(energy)
             self._errors.extend(step_errors)
             return mu_word, mu_pos
 
@@ -334,6 +336,7 @@ class PCLayer(nn.Module):
             error = target_activity - mu
             energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
         self._energy += energy
+        self._energy_by_layer_type[layer_type] = self._energy_by_layer_type.get(layer_type, 0.0) + float(energy)
         self._errors.extend(step_errors)
 
         # update x cache
@@ -427,9 +430,14 @@ class PCLayer(nn.Module):
         """Get the accumulated energy for the layer."""
         return float(self._energy)
 
+    def get_energy_breakdown(self) -> Dict[str, float]:
+        """Get accumulated energy per latent state (keyed by layer_type)."""
+        return dict(self._energy_by_layer_type)
+
     def clear_energy(self):
         """Clear the stored energy and cached states for the layer."""
         self._energy = 0.0
+        self._energy_by_layer_type.clear()
         self._x_cache.clear()
         self._mu_cache.clear()
         

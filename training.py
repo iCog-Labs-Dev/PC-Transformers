@@ -117,6 +117,32 @@ def train(model, dataloader, config, global_step, device, logger):
             else:
                 print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
+            # Per-latent energy logging (helps identify which latent state explodes).
+            energy_items = []
+            for name, mod in model.named_modules():
+                if isinstance(mod, PCLayer) and hasattr(mod, "get_energy_breakdown"):
+                    breakdown = mod.get_energy_breakdown()
+                    for layer_type, e in breakdown.items():
+                        key = f"{name}:{layer_type}" if name else layer_type
+                        energy_items.append((key, float(e)))
+
+            if energy_items:
+                def _sort_key(item):
+                    e = item[1]
+                    if math.isnan(e):
+                        return (2, 0.0)
+                    if math.isinf(e):
+                        return (1, e)
+                    return (0, e)
+
+                energy_items.sort(key=_sort_key, reverse=True)
+                lines = [f"    {k} = {e:.6f}" for k, e in energy_items]
+                msg = "  Latent Energy Breakdown (high->low):\n" + "\n".join(lines)
+                if logger:
+                    logger.info(msg)
+                else:
+                    print(msg)
+
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")

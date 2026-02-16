@@ -88,6 +88,29 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
         if not dist.is_initialized() or dist.get_rank() == 0:
             print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+
+            if (batch_idx + 1) % 10 == 0:
+                energy_items = []
+                for name, mod in model.named_modules():
+                    if isinstance(mod, PCLayer) and hasattr(mod, "get_energy_breakdown"):
+                        breakdown = mod.get_energy_breakdown()
+                        for layer_type, e in breakdown.items():
+                            key = f"{name}:{layer_type}" if name else layer_type
+                            energy_items.append((key, float(e)))
+
+                if energy_items:
+                    def _sort_key(item):
+                        e = item[1]
+                        if math.isnan(e):
+                            return (2, 0.0)
+                        if math.isinf(e):
+                            return (1, e)
+                        return (0, e)
+
+                    energy_items.sort(key=_sort_key, reverse=True)
+                    print("  Latent Energy Breakdown (high->low):")
+                    for k, e in energy_items:
+                        print(f"    {k} = {e:.6f}")
    
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
