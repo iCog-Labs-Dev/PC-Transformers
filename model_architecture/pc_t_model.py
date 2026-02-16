@@ -311,7 +311,7 @@ class PCTransformer(nn.Module):
 
                 # x_query target x_score, td_error from embed
                 block.attn.pc_qkv.forward(
-                    target_activity=block.attn.pc_qkv.get_x("x_score"),
+                    target_activity=block.attn.pc_qkv.get_x("x_query"),
                     layer_type="x_query",
                     t=t,
                     T=self.config.T,
@@ -327,7 +327,7 @@ class PCTransformer(nn.Module):
 
                 # x_key target x_score, td_error from embed
                 block.attn.pc_qkv.forward(
-                    target_activity=block.attn.pc_qkv.get_x("x_score"),
+                    target_activity=block.attn.pc_qkv.get_x("x_key"),
                     layer_type="x_key",
                     t=t,
                     T=self.config.T,
