@@ -27,7 +27,7 @@ class PCTransformer(nn.Module):
         This enables lateral connections for local learning in each layer.
         """
         for block in self.blocks:
-            for lt in ["x_query", "x_key", "x_value", "x_score", "x_A"]:
+            for lt in ["x_query", "x_key", "x_value"]:
                 block.attn.pc_qkv.register_lateral(lt, block.attn.q.in_features)
             block.attn.pc_output.register_lateral("linear", block.attn.output.in_features)
             block.mlp.pc_layer1.register_lateral("fc1", block.mlp.fc1.in_features)
@@ -218,7 +218,7 @@ class PCTransformer(nn.Module):
                     td_err=td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
-                    proj_layers=None,
+                    proj_layers={"residual": block.attn.pc_output.get_x("linear_attn")},
                     input_ids=None,
                     position_ids=None,
                     flash=False,
@@ -259,6 +259,18 @@ class PCTransformer(nn.Module):
                     td_linear_attn = td_x_value
 
                 # Execute attention output (linear_attn)
+                # linear_attn is computed as A @ V using cached mu from pc_qkv.
+                mu_A = block.attn.pc_qkv.get_mu("x_A")
+                if mu_A is None:
+                    mu_A = block.attn.pc_qkv.get_x("x_A")
+
+                if use_kv_cache and getattr(block.attn.pc_qkv, "_last_kv_cache", None) is not None and block.attn.pc_qkv._last_kv_cache[1] is not None:
+                    mu_V = block.attn.pc_qkv._last_kv_cache[1]
+                else:
+                    mu_V = block.attn.pc_qkv.get_mu("x_value")
+                    if mu_V is None:
+                        mu_V = block.attn.pc_qkv.get_x("x_value")
+
                 block.attn.pc_output.forward(
                     target_activity=block.mlp.pc_layer1.get_x("fc1"),
                     layer_type="linear_attn",
@@ -268,7 +280,12 @@ class PCTransformer(nn.Module):
                     td_err=td_linear_attn,
                     layer=block.attn.output,
                     layer_norm=block.ln1,
-                    proj_layers=None,
+                    proj_layers={
+                        "mu_A": mu_A,
+                        "mu_V": mu_V,
+                        "num_heads": self.config.num_heads,
+                        "residual": block.attn.pc_qkv.get_x("x_query"),
+                    },
                     input_ids=None,
                     position_ids=None,
                     flash=False,
@@ -350,12 +367,14 @@ class PCTransformer(nn.Module):
                     input_ids=None,
                     position_ids=None,
                     flash=False,
+                    use_cache=use_kv_cache,
+                    kv_cache=block.attn.kv_cache if use_kv_cache else None,
                 )
 
                 # x_A target linear_attn, td_error from x_score (previous iteration)
                 td_from_x_score = block.attn.pc_qkv.get_td_err("x_score") if t > 0 else None
                 block.attn.pc_qkv.forward(
-                    target_activity=block.attn.pc_output.get_x("linear_attn"),
+                    target_activity=block.attn.pc_qkv.get_x("x_A"),
                     layer_type="x_A",
                     t=t,
                     T=self.config.T,

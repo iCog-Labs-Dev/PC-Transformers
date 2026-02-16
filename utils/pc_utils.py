@@ -104,6 +104,7 @@ def step_linear(
     requires_update: bool,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module], 
+    residual: Optional[torch.Tensor] = None,
     optimizer: Optional[PCOptimizer] = None,
    ):
     """
@@ -118,16 +119,20 @@ def step_linear(
         x_input = x
         
     mu = layer(x_input)
+
+    # Residual connection for transformer-style MLP: add skip after fc2.
+    if residual is not None and layer_type == "fc2":
+        mu = mu + residual
         
     if layer_type == "fc1":
         mu = F.gelu(mu)
     elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
         mu = layer_norm(mu)
             
-    if layer_type=="linear_output":
-        bu_err= target - F.softmax(mu, dim=-1) 
-    else:    
-        bu_err = target - mu 
+    if layer_type == "linear_output":
+        bu_err = target - F.softmax(mu, dim=-1)
+    else:
+        bu_err = target - mu
         
     # project bottom-up error through weights
     error_proj= bu_err @ layer.weight      
@@ -335,52 +340,93 @@ def step_x_score(
     T: int,
     target: torch.Tensor,
     x: torch.Tensor,
-    layer: nn.Linear,
-    lateral_conn: Any,
+    layer: nn.Module,
+    lateral_conn: Optional[Any],
     layer_type: str,
     local_lr: float,
     clamp_value: float,
     energy_fn_name: str,
     update_bias: bool,
     requires_update: bool,
+    *,
+    mu_q: torch.Tensor,
+    mu_k: torch.Tensor,
+    mu_v: torch.Tensor,
+    num_heads: int,
+    use_cache: bool,
+    kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]],
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module] = None,
     optimizer: Optional[PCOptimizer] = None,
 ):
-    x_input = layer_norm(x) if layer_norm is not None else x
-    mu = layer(x_input)
-    bu_err = target - mu
+    # x_score: latent state x predicts mu = layer(x). Target is computed from QK^T.
+    # Shapes in cache are (B, S, n_embed) for Q/K/V, reshaped to heads here.
+    if layer is None:
+        raise ValueError("x_score requires a non-None layer so mu = layer(x)")
+    if mu_q.dim() != 3 or mu_k.dim() != 3 or mu_v.dim() != 3:
+        raise ValueError("mu_q/mu_k/mu_v must be shaped (B, S, n_embed)")
 
-    error_proj = bu_err @ layer.weight
-    error = error_proj - td_err if td_err is not None else error_proj
+    batch_size, seq_len, n_embed = mu_q.shape
+    if n_embed % num_heads != 0:
+        raise ValueError("n_embed must be divisible by num_heads")
+    head_dim = n_embed // num_heads
 
-    if lateral_conn is None:
-        raise ValueError(f"Lateral connection is required for layer_type={layer_type}")
+    # KV cache: kv tensors are stored as (B, kv_len, n_embed)
+    cached_k, cached_v = kv_cache if kv_cache is not None else (None, None)
+    if use_cache and cached_k is not None:
+        k_total = cached_k
+    else:
+        k_total = mu_k
+    if use_cache and cached_v is not None:
+        v_total = cached_v
+    else:
+        v_total = mu_v
 
-    delta_x = lateral_conn.forward(x, error)
-    x = x + local_lr * delta_x
-    if requires_update:
-        lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
+    # Always return a refreshed cache (detached) when caching is enabled
+    new_kv_cache = (k_total.detach(), v_total.detach()) if use_cache else None
 
+    Q = mu_q.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2).contiguous()  # (B, nh, S, hd)
+    K = k_total.view(batch_size, -1, num_heads, head_dim).transpose(1, 2).contiguous()   # (B, nh, kv, hd)
+
+    kv_len = K.size(2)
+
+    # Causal mask (1=keep, 0=mask). For cached KV, shift the diagonal so the single
+    # query token can attend to all previous KV positions.
+    diagonal = kv_len - seq_len
+    causal_mask = torch.tril(
+        torch.ones(seq_len, kv_len, device=mu_q.device, dtype=torch.bool),
+        diagonal=diagonal,
+    ).unsqueeze(0).unsqueeze(0)
+
+    target_scores = torch.matmul(Q, K.transpose(-2, -1)) / (head_dim**0.5)  # (B, nh, S, kv)
+    target_scores = target_scores.masked_fill(~causal_mask, float("-inf"))
+
+    # Resize x to match kv_len if KV length changed
+    if x.shape != target_scores.shape:
+        if x.dim() != 4 or x.shape[:3] != target_scores.shape[:3]:
+            x = torch.zeros_like(target_scores)
+        else:
+            x_kv = x.shape[-1]
+            if x_kv < kv_len:
+                pad = kv_len - x_kv
+                x_pad = torch.zeros(*x.shape[:-1], pad, device=x.device, dtype=x.dtype)
+                x = torch.cat([x, x_pad], dim=-1)
+            elif x_kv > kv_len:
+                x = x[..., :kv_len]
+
+    mu = layer(x)
+    bu_err = target_scores - mu
+
+    update_err = bu_err - td_err if td_err is not None else bu_err
+    x = x + local_lr * update_err
+
+    # Avoid NaNs from inf by clipping finite values only
+    x = torch.nan_to_num(x, nan=0.0, posinf=clamp_value, neginf=-clamp_value)
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 
-    if requires_update:
-        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
-        if optimizer is not None:
-            optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
-        else:
-            layer.weight.data.add_(torch.clamp(local_lr * update_w, -0.01, 0.01))
-
-        if layer.bias is not None and update_bias:
-            update_b = bu_err.mean(dim=(0, 1))
-            if optimizer is not None:
-                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
-            else:
-                layer.bias.data.add_(torch.clamp(local_lr * update_b, -0.01, 0.01))
-
     if t == T - 1:
-        finalize_step(mu, target, bu_err, t, layer_type, energy_fn_name)
-    return x, mu, bu_err
+        finalize_step(mu, target_scores, bu_err, t, layer_type, energy_fn_name)
+    return x, mu, bu_err, new_kv_cache
 
 
 def step_x_A(
@@ -388,8 +434,8 @@ def step_x_A(
     T: int,
     target: torch.Tensor,
     x: torch.Tensor,
-    layer: nn.Linear,
-    lateral_conn: Any,
+    layer: nn.Module,
+    lateral_conn: Optional[Any],
     layer_type: str,
     local_lr: float,
     clamp_value: float,
@@ -401,41 +447,95 @@ def step_x_A(
     layer_norm: Optional[nn.Module] = None,
     optimizer: Optional[PCOptimizer] = None,
 ):
-    # step_x_A: x is initialized/overwritten as softmax(x_score) (as requested)
-    x = torch.softmax(x_score, dim=-1)
-    x_input = layer_norm(x) if layer_norm is not None else x
-    mu = layer(x_input)
-    bu_err = target - mu
+    # x_A: latent state x predicts mu = softmax(layer(x)). Target is softmax(x_score).
+    if layer is None:
+        raise ValueError("x_A requires a non-None layer so mu = layer(x)")
 
-    error_proj = bu_err @ layer.weight
-    error = error_proj - td_err if td_err is not None else error_proj
+    target_A = torch.softmax(x_score, dim=-1)
 
-    if lateral_conn is None:
-        raise ValueError(f"Lateral connection is required for layer_type={layer_type}")
+    # Resize x to match target kv_len if KV length changed
+    if x.shape != target_A.shape:
+        if x.dim() != 4 or x.shape[:3] != target_A.shape[:3]:
+            x = torch.zeros_like(target_A)
+        else:
+            x_kv = x.shape[-1]
+            kv_len = target_A.shape[-1]
+            if x_kv < kv_len:
+                pad = kv_len - x_kv
+                x_pad = torch.zeros(*x.shape[:-1], pad, device=x.device, dtype=x.dtype)
+                x = torch.cat([x, x_pad], dim=-1)
+            elif x_kv > kv_len:
+                x = x[..., :kv_len]
 
-    delta_x = lateral_conn.forward(x, error)
-    x = x + local_lr * delta_x
-    if requires_update:
-        lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
+    mu_logits = layer(x)
+    mu = torch.softmax(mu_logits, dim=-1)
 
+    bu_err = target_A - mu
+    update_err = bu_err - td_err if td_err is not None else bu_err
+    x = x + local_lr * update_err
+
+    x = torch.nan_to_num(x, nan=0.0, posinf=clamp_value, neginf=-clamp_value)
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 
-    if requires_update:
-        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
-        if optimizer is not None:
-            optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
-        else:
-            layer.weight.data.add_(torch.clamp(local_lr * update_w, -0.01, 0.01))
+    if t == T - 1:
+        finalize_step(mu, target_A, bu_err, t, layer_type, energy_fn_name)
+    return x, mu, bu_err
 
-        if layer.bias is not None and update_bias:
-            update_b = bu_err.mean(dim=(0, 1))
-            if optimizer is not None:
-                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
-            else:
-                layer.bias.data.add_(torch.clamp(local_lr * update_b, -0.01, 0.01))
+
+def step_linear_attn(
+    *,
+    t: int,
+    T: int,
+    target: torch.Tensor,
+    x: Optional[torch.Tensor],
+    mu_A: torch.Tensor,
+    mu_V: torch.Tensor,
+    num_heads: int,
+    local_lr: float,
+    clamp_value: float,
+    energy_fn_name: str,
+    td_err: Optional[torch.Tensor],
+    residual: Optional[torch.Tensor] = None,
+):
+    """Compute attention output as A @ V using cached mu tensors.
+
+    - mu_A: (B, nh, S, kv_len)
+    - mu_V: (B, kv_len, n_embed)
+    Returns (x, mu, bu_err)
+    """
+    if mu_A.dim() != 4 or mu_V.dim() != 3:
+        raise ValueError("mu_A must be (B, nh, S, kv_len) and mu_V must be (B, kv_len, n_embed)")
+
+    batch_size, nh, seq_len, kv_len = mu_A.shape
+    if nh != num_heads:
+        raise ValueError("mu_A num_heads mismatch")
+    _, kv_len_v, n_embed = mu_V.shape
+    if kv_len_v != kv_len:
+        raise ValueError("mu_V kv_len must match mu_A")
+    if n_embed % num_heads != 0:
+        raise ValueError("n_embed must be divisible by num_heads")
+
+    head_dim = n_embed // num_heads
+    V = mu_V.view(batch_size, kv_len, num_heads, head_dim).transpose(1, 2).contiguous()  # (B, nh, kv, hd)
+
+    context = torch.matmul(mu_A, V)  # (B, nh, S, hd)
+    mu = context.transpose(1, 2).contiguous().view(batch_size, seq_len, n_embed)  # (B, S, n_embed)
+
+    # Residual connection for transformer-style attention: add skip after attention.
+    if residual is not None:
+        mu = mu + residual
+
+    bu_err = target - mu
+    update_err = bu_err - td_err if td_err is not None else bu_err
+
+    if x is None:
+        x = mu.detach().clone()
+    x = x + local_lr * update_err
+    x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 
     if t == T - 1:
-        finalize_step(mu, target, bu_err, t, layer_type, energy_fn_name)
+        finalize_step(mu, target, bu_err, t, "linear_attn", energy_fn_name)
+
     return x, mu, bu_err
     
 ENERGY_FUNCTIONS = {

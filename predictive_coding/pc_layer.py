@@ -11,6 +11,7 @@ from utils.pc_utils import (
     step_x_value,
     step_x_score,
     step_x_A,
+    step_linear_attn,
     finalize_step,
 )
 from utils.optim.optim_utils import PCOptimizer
@@ -204,47 +205,69 @@ class PCLayer(nn.Module):
                     self._last_kv_cache = (cached_k, v_total)
 
         elif layer_type == "x_score":
-            lateral_conn = self.lateral_connections.get(layer_type, None)
             if layer is None:
-                raise ValueError("x_score requires a layer (weights/bias)")
-            x, mu, bu_err = step_x_score(
+                raise ValueError("x_score requires a non-None layer")
+            # x_score is derived from cached mu_Q and mu_K (and optional KV cache).
+            mu_q = self._mu_cache.get("x_query", None)
+            mu_k = self._mu_cache.get("x_key", None)
+            mu_v = self._mu_cache.get("x_value", None)
+            if mu_q is None or mu_k is None or mu_v is None:
+                raise ValueError("x_score requires cached mu for x_query/x_key/x_value")
+
+            # Prefer the in-step assembled cache if present.
+            kv_for_score = None
+            if use_cache:
+                if self._last_kv_cache is not None and (self._last_kv_cache[0] is not None or self._last_kv_cache[1] is not None):
+                    kv_for_score = self._last_kv_cache
+                else:
+                    kv_for_score = kv_cache
+
+            x, mu, bu_err, new_kv_cache = step_x_score(
                 t,
                 T,
                 target_activity,
                 x,
-                layer,
-                lateral_conn,
-                layer_type,
-                self.local_lr,
-                self.clamp_value,
-                self.energy_fn_name,
-                self.update_bias,
-                requires_update,
+                layer=layer,
+                lateral_conn=None,
+                layer_type=layer_type,
+                local_lr=self.local_lr,
+                clamp_value=self.clamp_value,
+                energy_fn_name=self.energy_fn_name,
+                update_bias=self.update_bias,
+                requires_update=requires_update,
+                mu_q=mu_q,
+                mu_k=mu_k,
+                mu_v=mu_v,
+                num_heads=int(self.num_heads) if self.num_heads is not None else 1,
+                use_cache=use_cache,
+                kv_cache=kv_for_score,
                 td_err=td_err,
                 layer_norm=layer_norm,
                 optimizer=self.optimizer,
             )
 
+            if use_cache and new_kv_cache is not None:
+                self._last_kv_cache = new_kv_cache
+
         elif layer_type == "x_A":
-            lateral_conn = self.lateral_connections.get(layer_type, None)
-            x_score = self._x_cache.get("x_score", None)
             if layer is None:
-                raise ValueError("x_A requires a layer (weights/bias)")
+                raise ValueError("x_A requires a non-None layer")
+            x_score = self._x_cache.get("x_score", None)
             if x_score is None:
                 raise ValueError("x_A requires cached x from x_score")
             x, mu, bu_err = step_x_A(
-                t,
-                T,
-                target_activity,
-                x,
-                layer,
-                lateral_conn,
-                layer_type,
-                self.local_lr,
-                self.clamp_value,
-                self.energy_fn_name,
-                self.update_bias,
-                requires_update,
+                t=t,
+                T=T,
+                target=target_activity,
+                x=x,
+                layer=layer,
+                lateral_conn=None,
+                layer_type=layer_type,
+                local_lr=self.local_lr,
+                clamp_value=self.clamp_value,
+                energy_fn_name=self.energy_fn_name,
+                update_bias=self.update_bias,
+                requires_update=requires_update,
                 x_score=x_score,
                 td_err=td_err,
                 layer_norm=layer_norm,
@@ -252,32 +275,64 @@ class PCLayer(nn.Module):
             )
         
         else:
-            lateral_conn = self.lateral_connections.get(layer_type, None)
-            x, mu, bu_err = step_linear(
-                t,
-                T,
-                target_activity,
-                x,
-                layer, 
-                lateral_conn,  
-                layer_type,
-                self.local_lr, 
-                self.clamp_value, 
-                self.energy_fn_name, 
-                self.update_bias, 
-                requires_update,
-                td_err=td_err, 
-                layer_norm=layer_norm,
-                optimizer=self.optimizer,
-            )
+            if layer_type == "linear_attn":
+                # Compute attention output = A @ V using mu from upstream layer (pc_qkv).
+                if proj_layers is None:
+                    raise ValueError("linear_attn requires proj_layers with mu_A and mu_V")
+                mu_A = proj_layers.get("mu_A", None)
+                mu_V = proj_layers.get("mu_V", None)
+                num_heads = int(proj_layers.get("num_heads", self.num_heads or 1))
+                if mu_A is None or mu_V is None:
+                    raise ValueError("proj_layers must include mu_A and mu_V for linear_attn")
+
+                x, mu, bu_err = step_linear_attn(
+                    t=t,
+                    T=T,
+                    target=target_activity,
+                    x=x,
+                    mu_A=mu_A,
+                    mu_V=mu_V,
+                    num_heads=num_heads,
+                    local_lr=self.local_lr,
+                    clamp_value=self.clamp_value,
+                    energy_fn_name=self.energy_fn_name,
+                    td_err=td_err,
+                    residual=proj_layers.get("residual", None),
+                )
+            else:
+                lateral_conn = self.lateral_connections.get(layer_type, None)
+                x, mu, bu_err = step_linear(
+                    t,
+                    T,
+                    target_activity,
+                    x,
+                    layer, 
+                    lateral_conn,  
+                    layer_type,
+                    self.local_lr, 
+                    self.clamp_value, 
+                    self.energy_fn_name, 
+                    self.update_bias, 
+                    requires_update,
+                    td_err=td_err, 
+                    layer_norm=layer_norm,
+                    residual=(proj_layers.get("residual", None) if (proj_layers is not None and layer_type == "fc2") else None),
+                    optimizer=self.optimizer,
+                )
             
         # cache and stats
         self._mu_cache[layer_type] = mu.detach().clone()  
         if bu_err is not None:
             self._error_cache[layer_type] = bu_err.detach().clone()
         
-        error = target_activity - mu
-        energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+        if layer_type in {"x_score", "x_A"} and bu_err is not None:
+            # bu_err is computed against the internally resized target used by the step.
+            error = bu_err
+            target_for_energy = mu + bu_err
+            energy, step_errors = finalize_step(mu, target_for_energy, error, t, layer_type, self.energy_fn_name)
+        else:
+            error = target_activity - mu
+            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
         self._energy += energy
         self._errors.extend(step_errors)
 
@@ -316,13 +371,12 @@ class PCLayer(nn.Module):
             x_pos = layer["pos"].weight[position_ids] 
             self._x_cache["embed"] = (x_word, x_pos)
 
-        elif layer_type in {"x_query", "x_key", "x_value", "x_score", "x_A"}:
+        elif layer_type in {"x_query", "x_key", "x_value"}:
+            # Standard latent tensors shaped (B, S, n_embed)
             if layer is not None:
                 input_dim = layer.weight.shape[1]
             elif self.n_embed is not None:
                 input_dim = int(self.n_embed)
-            elif proj_layers is not None and "q_proj" in proj_layers:
-                input_dim = proj_layers["q_proj"].weight.shape[1]
             else:
                 raise ValueError("Attention sub-layer init requires layer or n_embed")
 
@@ -330,6 +384,23 @@ class PCLayer(nn.Module):
             self.register_lateral(layer_type, input_dim)
             if layer_type in self.lateral_connections:
                 self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device)
+
+        elif layer_type == "x_score":
+            # Attention scores tensor shaped (B, nh, S, S)
+            if self.num_heads is None:
+                raise ValueError("x_score init requires num_heads")
+            nh = int(self.num_heads)
+            self._x_cache[layer_type] = torch.zeros(batch_size, nh, seq_len, seq_len, device=device)
+
+        elif layer_type == "x_A":
+            # Attention logits tensor shaped (B, nh, S, S), init so softmax is causal-uniform.
+            if self.num_heads is None:
+                raise ValueError("x_A init requires num_heads")
+            nh = int(self.num_heads)
+            causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool))
+            logits = torch.zeros(seq_len, seq_len, device=device)
+            logits = logits.masked_fill(~causal_mask, -1e4)
+            self._x_cache[layer_type] = logits.unsqueeze(0).unsqueeze(0).expand(batch_size, nh, seq_len, seq_len).contiguous()
         
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
