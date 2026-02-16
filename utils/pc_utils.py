@@ -399,7 +399,9 @@ def step_x_score(
     ).unsqueeze(0).unsqueeze(0)
 
     target_scores = torch.matmul(Q, K.transpose(-2, -1)) / (head_dim**0.5)  # (B, nh, S, kv)
-    target_scores = target_scores.masked_fill(~causal_mask, float("-inf"))
+    # Use a large finite negative instead of -inf to avoid inf energy.
+    neg_large = -1e4 if target_scores.dtype in (torch.float16, torch.bfloat16) else -1e9
+    target_scores = target_scores.masked_fill(~causal_mask, neg_large)
 
     # Resize x to match kv_len if KV length changed
     if x.shape != target_scores.shape:

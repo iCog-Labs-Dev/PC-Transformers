@@ -65,7 +65,10 @@ def apply_standard_attention(q, k, v, mask=None):
     
     attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (q.size(-1) ** 0.5)
     if mask is not None:
-        attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+        # Use a large finite negative instead of -inf to avoid propagating inf into
+        # energy computations (especially under mixed precision).
+        neg_large = -1e4 if attn_scores.dtype in (torch.float16, torch.bfloat16) else -1e9
+        attn_scores = attn_scores.masked_fill(mask == 0, neg_large)
     attn_weights = torch.softmax(attn_scores, dim=-1)
     attn_output = torch.matmul(attn_weights, v)
 
