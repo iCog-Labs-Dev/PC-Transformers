@@ -251,10 +251,29 @@ class PCTransformer(nn.Module):
                 td_x_A = block.attn.pc_qkv.get_td_err("x_A") if t > 0 else None
                 td_x_value = block.attn.pc_qkv.get_td_err("x_value") if t > 0 else None
                 td_linear_attn = None
-                if td_x_A is not None and td_x_value is not None:
-                    td_linear_attn = 0.5 * (td_x_A + td_x_value)
-                elif td_x_A is not None:
-                    td_linear_attn = td_x_A
+                # Project td_x_A (B,nh,S,kv) to (B,S,n_embed) via V so it can be combined.
+                td_from_x_A = None
+                if td_x_A is not None:
+                    # Prefer cached V_total if available, else current x_value
+                    if use_kv_cache and getattr(block.attn.pc_qkv, "_last_kv_cache", None) is not None and block.attn.pc_qkv._last_kv_cache[1] is not None:
+                        v_total_for_td = block.attn.pc_qkv._last_kv_cache[1]
+                    else:
+                        v_total_for_td = block.attn.pc_qkv.get_mu("x_value")
+                        if v_total_for_td is None:
+                            v_total_for_td = block.attn.pc_qkv.get_x("x_value")
+
+                    if v_total_for_td is not None and td_x_A.dim() == 4 and v_total_for_td.dim() == 3:
+                        Bv, kv_len, n_embed = v_total_for_td.shape
+                        nh = self.config.num_heads
+                        head_dim = n_embed // nh
+                        Vh = v_total_for_td.view(Bv, kv_len, nh, head_dim).transpose(1, 2).contiguous()  # (B,nh,kv,hd)
+                        ctx_err = torch.matmul(td_x_A, Vh)  # (B,nh,S,hd)
+                        td_from_x_A = ctx_err.transpose(1, 2).contiguous().view(Bv, ctx_err.size(2), n_embed)
+
+                if td_from_x_A is not None and td_x_value is not None:
+                    td_linear_attn = 0.5 * (td_from_x_A + td_x_value)
+                elif td_from_x_A is not None:
+                    td_linear_attn = td_from_x_A
                 elif td_x_value is not None:
                     td_linear_attn = td_x_value
 
