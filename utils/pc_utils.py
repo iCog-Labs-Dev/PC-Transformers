@@ -416,11 +416,22 @@ def step_x_score(
             elif x_kv > kv_len:
                 x = x[..., :kv_len]
 
+    # Keep masked scores fixed so they don't dominate energy or drift.
+    # In this model x_score layer is Identity, so mu will inherit this mask too.
+    x = x.masked_fill(~causal_mask, neg_large)
+
     mu = layer(x)
     bu_err = target_scores - mu
 
+    # Ignore masked positions in the PC update/error/energy.
+    bu_err = bu_err.masked_fill(~causal_mask, 0.0)
+
     update_err = bu_err - td_err if td_err is not None else bu_err
+    update_err = update_err.masked_fill(~causal_mask, 0.0)
     x = x + local_lr * update_err
+
+    # Re-apply mask after update so masked entries remain at neg_large.
+    x = x.masked_fill(~causal_mask, neg_large)
 
     # Avoid NaNs from inf by clipping finite values only
     x = torch.nan_to_num(x, nan=0.0, posinf=clamp_value, neginf=-clamp_value)
