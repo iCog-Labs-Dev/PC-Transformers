@@ -519,6 +519,11 @@ def step_linear_attn(
     if mu_A.dim() != 4 or mu_V.dim() != 3:
         raise ValueError("mu_A must be (B, nh, S, kv_len) and mu_V must be (B, kv_len, n_embed)")
 
+    # mu_A should be an attention probability matrix. If logits were passed in (common at t=0
+    # if the schedule hasn't updated x_A yet), normalize here to avoid huge A@V outputs.
+    if mu_A.min().item() < -1e-4 or mu_A.max().item() > 1.0001:
+        mu_A = torch.softmax(mu_A, dim=-1)
+
     batch_size, nh, seq_len, kv_len = mu_A.shape
     if nh != num_heads:
         raise ValueError("mu_A num_heads mismatch")

@@ -280,8 +280,19 @@ class PCTransformer(nn.Module):
                 # Execute attention output (linear_attn)
                 # linear_attn is computed as A @ V using cached mu from pc_qkv.
                 mu_A = block.attn.pc_qkv.get_mu("x_A")
+                x_A_logits = block.attn.pc_qkv.get_x("x_A")
+                # At t=0, mu_A may not exist yet; never feed raw logits into A@V.
                 if mu_A is None:
-                    mu_A = block.attn.pc_qkv.get_x("x_A")
+                    if x_A_logits is None:
+                        raise ValueError("x_A must be initialized before linear_attn")
+                    mu_A = torch.softmax(block.attn.A(x_A_logits), dim=-1)
+                else:
+                    # Defensive: if mu_A looks like logits, re-softmax it.
+                    if mu_A.min().item() < -1e-4 or mu_A.max().item() > 1.0001:
+                        if x_A_logits is None:
+                            mu_A = torch.softmax(mu_A, dim=-1)
+                        else:
+                            mu_A = torch.softmax(block.attn.A(x_A_logits), dim=-1)
 
                 if use_kv_cache and getattr(block.attn.pc_qkv, "_last_kv_cache", None) is not None and block.attn.pc_qkv._last_kv_cache[1] is not None:
                     mu_V = block.attn.pc_qkv._last_kv_cache[1]
