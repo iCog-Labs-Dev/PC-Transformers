@@ -27,7 +27,7 @@ class PCLayer(nn.Module):
         energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
-        optimizer_name: str = "adam",
+        optimizer_name: str = "sgd",
         optimizer_beta1: float = 0.9,
         optimizer_beta2: float = 0.999,
         optimizer_eps: float = 1e-8,
