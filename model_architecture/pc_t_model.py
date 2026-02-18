@@ -100,90 +100,91 @@ class PCTransformer(nn.Module):
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
         # Build projection latents q_* first (static, no updates)
-        q_current = self.embedding.pc_layer.init_q(
-            batch_size=B,
-            seq_len=S,
-            layer_type="q_embed",
-            device=device,
-            layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-            proj_layers=None,
-            input_ids=input_ids,
-            position_ids=position_ids,
-            source_tensor=None,
-            layer_norm=None,
-            flash=False,
-        )
-
-        for block in self.blocks:
-            q_attn_out = block.attn.pc_qkv.init_q(
+        with torch.no_grad():
+            q_current = self.embedding.pc_layer.init_q(
                 batch_size=B,
                 seq_len=S,
-                layer_type="q_attn",
+                layer_type="q_embed",
                 device=device,
-                layer=None,
-                proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
+                proj_layers=None,
+                input_ids=input_ids,
+                position_ids=position_ids,
+                source_tensor=None,
+                layer_norm=None,
+                flash=False,
+            )
+
+            for block in self.blocks:
+                q_attn_out = block.attn.pc_qkv.init_q(
+                    batch_size=B,
+                    seq_len=S,
+                    layer_type="q_attn",
+                    device=device,
+                    layer=None,
+                    proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                    input_ids=None,
+                    position_ids=None,
+                    source_tensor=q_current,
+                    layer_norm=block.ln2,
+                    flash=getattr(self.config, 'use_flash_attention', False),
+                )
+
+                q_linear_attn_out = block.attn.pc_output.init_q(
+                    batch_size=B,
+                    seq_len=S,
+                    layer_type="q_linear_attn",
+                    device=device,
+                    layer=block.attn.output,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    source_tensor=q_attn_out,
+                    layer_norm=block.ln1,
+                    flash=False,
+                )
+
+                q_fc1_out = block.mlp.pc_layer1.init_q(
+                    batch_size=B,
+                    seq_len=S,
+                    layer_type="q_fc1",
+                    device=device,
+                    layer=block.mlp.fc1,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    source_tensor=q_linear_attn_out,
+                    layer_norm=block.ln1,
+                    flash=False,
+                )
+
+                q_current = block.mlp.pc_layer2.init_q(
+                    batch_size=B,
+                    seq_len=S,
+                    layer_type="q_fc2",
+                    device=device,
+                    layer=block.mlp.fc2,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    source_tensor=q_fc1_out,
+                    layer_norm=block.ln2,
+                    flash=False,
+                )
+
+            _ = self.output.pc_layer.init_q(
+                batch_size=B,
+                seq_len=S,
+                layer_type="q_linear_output",
+                device=device,
+                layer=self.output.output,
+                proj_layers=None,
                 input_ids=None,
                 position_ids=None,
                 source_tensor=q_current,
-                layer_norm=block.ln2,
-                flash=getattr(self.config, 'use_flash_attention', False),
-            )
-
-            q_linear_attn_out = block.attn.pc_output.init_q(
-                batch_size=B,
-                seq_len=S,
-                layer_type="q_linear_attn",
-                device=device,
-                layer=block.attn.output,
-                proj_layers=None,
-                input_ids=None,
-                position_ids=None,
-                source_tensor=q_attn_out,
-                layer_norm=block.ln1,
+                layer_norm=None,
                 flash=False,
             )
-
-            q_fc1_out = block.mlp.pc_layer1.init_q(
-                batch_size=B,
-                seq_len=S,
-                layer_type="q_fc1",
-                device=device,
-                layer=block.mlp.fc1,
-                proj_layers=None,
-                input_ids=None,
-                position_ids=None,
-                source_tensor=q_linear_attn_out,
-                layer_norm=block.ln1,
-                flash=False,
-            )
-
-            q_current = block.mlp.pc_layer2.init_q(
-                batch_size=B,
-                seq_len=S,
-                layer_type="q_fc2",
-                device=device,
-                layer=block.mlp.fc2,
-                proj_layers=None,
-                input_ids=None,
-                position_ids=None,
-                source_tensor=q_fc1_out,
-                layer_norm=block.ln2,
-                flash=False,
-            )
-
-        _ = self.output.pc_layer.init_q(
-            batch_size=B,
-            seq_len=S,
-            layer_type="q_linear_output",
-            device=device,
-            layer=self.output.output,
-            proj_layers=None,
-            input_ids=None,
-            position_ids=None,
-            source_tensor=q_current,
-            layer_norm=None,
-            flash=False,
-        )
 
         # Initialize all predictive coding layers
         self.embedding.pc_layer.init_x(
@@ -296,7 +297,7 @@ class PCTransformer(nn.Module):
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=(t == self.config.T - 1),
                 td_err= td_mlp2,
                 layer=self.output.output,
                 layer_norm=None,
@@ -330,7 +331,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc2",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=(t == self.config.T - 1),
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
@@ -351,7 +352,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=(t == self.config.T - 1),
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
                     layer_norm=block.ln1, 
@@ -379,7 +380,7 @@ class PCTransformer(nn.Module):
                     layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=(t == self.config.T - 1),
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
                     layer_norm=block.ln1,
@@ -399,7 +400,7 @@ class PCTransformer(nn.Module):
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=(t == self.config.T - 1),
                     td_err= td_embed,
                     layer = None,
                     layer_norm=block.ln2,
@@ -424,7 +425,7 @@ class PCTransformer(nn.Module):
                 layer_type="embed",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=(t == self.config.T - 1),
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
                 layer_norm= block.ln2,

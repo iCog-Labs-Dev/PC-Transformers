@@ -11,6 +11,7 @@ def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.dev
     return torch.zeros(batch_size, seq_len, embedding_size, device=device)
 
 
+@torch.no_grad()
 def step_q_embed(
     layer: dict,
     input_ids: torch.Tensor,
@@ -34,6 +35,7 @@ def step_q_embed(
     return q_embed, q_word, q_pos
 
 
+@torch.no_grad()
 def step_q_attn(
     x: torch.Tensor,
     proj_layers: dict,
@@ -69,6 +71,7 @@ def step_q_attn(
     return q_attn, attn_context
 
 
+@torch.no_grad()
 def step_q_linear(
     x: torch.Tensor,
     layer: nn.Module,

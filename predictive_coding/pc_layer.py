@@ -3,7 +3,6 @@ import torch.nn as nn
 from typing import Optional, Dict, Tuple
 
 from utils.pc_utils import (
-    x_init,
     step_q_embed,
     step_q_attn,
     step_q_linear,
@@ -210,31 +209,17 @@ class PCLayer(nn.Module):
         - linear/others: random init sized to layer input dimension
         """
         if layer_type == "embed":
-            if "q_embed" in self._q_cache:
-                self._x_cache["embed"] = self._q_cache["q_embed"]
-                return
-
-            assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            vocab_size = layer["word"].weight.size(0)
-            if input_ids.max() >= vocab_size:
-                input_ids = torch.clamp(input_ids, max=vocab_size-1)
-            
-            max_pos = layer["pos"].weight.size(0)
-            if position_ids.max() >= max_pos:
-                position_ids = torch.clamp(position_ids, max=max_pos-1)
-            
-            x_word = layer["word"].weight[input_ids] 
-            x_pos = layer["pos"].weight[position_ids] 
-            self._x_cache["embed"] = (x_word, x_pos)
+            if "q_embed" not in self._q_cache:
+                raise RuntimeError("q_embed is missing. Call init_q('q_embed', ...) before init_x('embed', ...)")
+            self._x_cache["embed"] = self._q_cache["q_embed"]
+            return
             
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
-            if "q_attn" in self._q_cache:
-                self._x_cache["attn"] = self._q_cache["q_attn"].detach().to(device)
-            else:
-                H_out = proj_layers["v_proj"].weight.shape[0]
-                self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
+            if "q_attn" not in self._q_cache:
+                raise RuntimeError("q_attn is missing. Call init_q('q_attn', ...) before init_x('attn', ...)")
+            self._x_cache["attn"] = self._q_cache["q_attn"].detach().to(device)
             
             self.register_lateral(layer_type, H_in)
             if layer_type in self.lateral_connections:
@@ -243,11 +228,9 @@ class PCLayer(nn.Module):
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             q_key = self._q_key_for_x_layer(layer_type)
-            if q_key in self._q_cache:
-                self._x_cache[layer_type] = self._q_cache[q_key].detach().to(device)
-            else:
-                input_dim = layer.weight.shape[1]
-                self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
+            if q_key not in self._q_cache:
+                raise RuntimeError(f"{q_key} is missing. Call init_q('{q_key}', ...) before init_x('{layer_type}', ...)")
+            self._x_cache[layer_type] = self._q_cache[q_key].detach().to(device)
             
             input_dim = layer.weight.shape[1]
             self.register_lateral(layer_type, input_dim)  
