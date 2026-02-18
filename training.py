@@ -34,7 +34,6 @@ def train(model, dataloader, config, global_step, device, logger):
     total_ce_loss = 0.0
     total_energy = 0.0
     batch_count = 0
-    total_steps = len(dataloader) * config.num_epochs
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -52,17 +51,19 @@ def train(model, dataloader, config, global_step, device, logger):
             lr = config.lr + global_step / config.warmup_steps * (
                 config.peak_learning_rate - config.lr)
         else:
-            decay_step = global_step - config.warmup_steps
-            decay_total = max(total_steps - config.warmup_steps, 1)
-            cosine_decay = 0.5 * (1 + math.cos(math.pi * min(decay_step, decay_total) / decay_total))
+            # # Cosine decay after warmup
+            # decay_step = global_step - config.warmup_steps
+            # decay_total = total_steps - config.warmup_steps
+            # cosine_decay = 0.5 * (1 + math.cos(math.pi * decay_step / decay_total))
+            
+            # # Minimum learning rate = 10% of peak_lr
+            # min_lr = 0.1 * config.peak_learning_rate
+            # lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
+            lr = config.peak_learning_rate
 
-            min_lr = 0.1 * config.peak_learning_rate
-            lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
-
-        pc_lr = lr * float(getattr(config, "alpha", 1.0))
         for module in model.modules():
             if hasattr(module, 'local_lr'):
-                module.set_learning_rate(pc_lr)
+                module.set_learning_rate(lr)
                 
         global_step += 1
         if target_ids.max() >= vocab_size:
@@ -172,13 +173,7 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"],
-        optimizer_name = best_config["optimizer_name"],
-        optimizer_beta1 = best_config["optimizer_beta1"],
-        optimizer_beta2 = best_config["optimizer_beta2"],
-        optimizer_eps = best_config["optimizer_eps"],
-        optimizer_sign_value = best_config["optimizer_sign_value"],
-        optimizer_weight_bound = best_config["optimizer_weight_bound"],
+        alpha = best_config["alpha"]
     )
     
     # Create a separate logger for hyperparameters
