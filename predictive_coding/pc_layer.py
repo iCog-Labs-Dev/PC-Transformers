@@ -123,9 +123,10 @@ class PCLayer(nn.Module):
             if bu_err is not None:
                 self._error_cache["embed"] = bu_err.detach().clone()
 
-            # compute energy
-            error = target_activity - mu
-            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+            # compute energy using the same representation as the error term
+            mu_for_energy = layer_norm(mu) if layer_norm is not None else mu
+            error = target_activity - mu_for_energy
+            energy, step_errors = finalize_step(mu_for_energy, target_activity, error, t, layer_type, self.energy_fn_name)
             self._energy += energy
             self._errors.extend(step_errors)
             return mu_word, mu_pos
@@ -183,8 +184,11 @@ class PCLayer(nn.Module):
         if bu_err is not None:
             self._error_cache[layer_type] = bu_err.detach().clone()
         
-        error = target_activity - mu
-        energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+        mu_for_energy = mu
+        if layer_type == "linear_output":
+            mu_for_energy = F.softmax(mu, dim=-1)
+        error = target_activity - mu_for_energy
+        energy, step_errors = finalize_step(mu_for_energy, target_activity, error, t, layer_type, self.energy_fn_name)
         self._energy += energy
         self._errors.extend(step_errors)
 
