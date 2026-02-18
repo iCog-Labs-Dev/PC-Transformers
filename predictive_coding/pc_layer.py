@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import Optional, Dict, Tuple
 
 from utils.pc_utils import (
@@ -248,10 +249,13 @@ class PCLayer(nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
         source_tensor: Optional[torch.Tensor] = None,
+        target_activity: Optional[torch.Tensor] = None,
+        td_err: Optional[torch.Tensor] = None,
         layer_norm: Optional[nn.Module] = None,
         flash: bool = False,
+        requires_update: bool = False,
     ):
-        """Initialize projection latent q-cache for each layer type (no parameter updates)."""
+        """Initialize projection latent q-cache for each layer type (optional parameter updates)."""
         _ = batch_size
         _ = seq_len
 
@@ -260,11 +264,35 @@ class PCLayer(nn.Module):
             assert isinstance(layer, dict), "q_embed requires embedding layer dict"
             q_embed, q_word, q_pos = step_q_embed(layer=layer, input_ids=input_ids, position_ids=position_ids)
             self._q_cache["q_embed"] = (q_word.detach().to(device), q_pos.detach().to(device))
+            if requires_update:
+                target = target_activity if target_activity is not None else q_embed.detach()
+                error = target - q_embed
+                if td_err is not None:
+                    error = error - td_err
+                with torch.no_grad():
+                    flat_input_ids = input_ids.reshape(-1)
+                    flat_update = error.reshape(-1, error.size(-1))
+                    flat_position_ids = position_ids.reshape(-1)
+
+                    word_layer: nn.Embedding = layer["word"]
+                    pos_layer: nn.Embedding = layer["pos"]
+
+                    update_word = torch.zeros_like(word_layer.weight)
+                    update_pos = torch.zeros_like(pos_layer.weight)
+                    update_word.index_add_(0, flat_input_ids, flat_update)
+                    update_pos.index_add_(0, flat_position_ids, flat_update)
+
+                    self.optimizer.step_param(word_layer.weight, update_word, self.local_lr, clamp_value=0.01)
+                    self.optimizer.step_param(pos_layer.weight, update_pos, self.local_lr, clamp_value=0.01)
+
+                q_embed, q_word, q_pos = step_q_embed(layer=layer, input_ids=input_ids, position_ids=position_ids)
+                self._q_cache["q_embed"] = (q_word.detach().to(device), q_pos.detach().to(device))
             return q_embed.detach().to(device)
 
         if layer_type == "q_attn":
             assert source_tensor is not None, "q_attn requires source_tensor"
             assert proj_layers is not None, "q_attn requires proj_layers"
+            x_norm = layer_norm(source_tensor) if layer_norm is not None else source_tensor
             q_attn, q_out = step_q_attn(
                 x=source_tensor,
                 proj_layers=proj_layers,
@@ -274,6 +302,47 @@ class PCLayer(nn.Module):
                 flash=flash,
             )
             self._q_cache["q_attn"] = q_attn.detach().to(device)
+            if requires_update:
+                target = target_activity if target_activity is not None else source_tensor
+                bu_err = target - q_out
+                if td_err is not None:
+                    bu_err = bu_err - td_err
+                B, S = bu_err.shape[:2]
+                scale = max(B * S, 1)
+
+                q_proj = proj_layers["q_proj"]
+                k_proj = proj_layers["k_proj"]
+                v_proj = proj_layers["v_proj"]
+
+                update_q = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
+                update_k = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
+                update_v = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
+
+                self.optimizer.step_param(q_proj.weight, update_q, self.local_lr, clamp_value=0.01)
+                self.optimizer.step_param(k_proj.weight, update_k, self.local_lr, clamp_value=0.01)
+                self.optimizer.step_param(v_proj.weight, update_v, self.local_lr, clamp_value=0.01)
+
+                if self.update_bias:
+                    update_b_q = bu_err.mean(dim=(0, 1)) if q_proj.bias is not None else None
+                    update_b_k = bu_err.mean(dim=(0, 1)) if k_proj.bias is not None else None
+                    update_b_v = bu_err.mean(dim=(0, 1)) if v_proj.bias is not None else None
+
+                    if update_b_q is not None:
+                        self.optimizer.step_param(q_proj.bias, update_b_q, self.local_lr, clamp_value=0.01)
+                    if update_b_k is not None:
+                        self.optimizer.step_param(k_proj.bias, update_b_k, self.local_lr, clamp_value=0.01)
+                    if update_b_v is not None:
+                        self.optimizer.step_param(v_proj.bias, update_b_v, self.local_lr, clamp_value=0.01)
+
+                q_attn, q_out = step_q_attn(
+                    x=source_tensor,
+                    proj_layers=proj_layers,
+                    num_heads=self.num_heads,
+                    n_embed=self.n_embed,
+                    layer_norm=layer_norm,
+                    flash=flash,
+                )
+                self._q_cache["q_attn"] = q_attn.detach().to(device)
             return q_out.detach().to(device)
 
         assert source_tensor is not None, f"{layer_type} requires source_tensor"
@@ -286,6 +355,35 @@ class PCLayer(nn.Module):
             layer_norm=layer_norm,
         )
         self._q_cache[layer_type] = q_latent.detach().to(device)
+        if requires_update:
+            if layer_norm is not None and base_layer_type == "fc1":
+                x_input = layer_norm(source_tensor)
+            elif base_layer_type == "fc2":
+                x_input = F.gelu(source_tensor)
+            else:
+                x_input = source_tensor
+
+            target = target_activity if target_activity is not None else source_tensor
+            bu_err = target - q_out
+            if td_err is not None:
+                bu_err = bu_err - td_err
+
+            B, S = bu_err.shape[:2]
+            scale = max(B * S, 1)
+            update_w = torch.einsum("bsv,bsh->vh", bu_err, x_input.detach()) / scale
+            self.optimizer.step_param(layer.weight, update_w, self.local_lr, clamp_value=0.01)
+
+            if self.update_bias and layer.bias is not None:
+                update_b = bu_err.mean(dim=(0, 1))
+                self.optimizer.step_param(layer.bias, update_b, self.local_lr, clamp_value=0.01)
+
+            q_latent, q_out = step_q_linear(
+                x=source_tensor,
+                layer=layer,
+                layer_type=base_layer_type,
+                layer_norm=layer_norm,
+            )
+            self._q_cache[layer_type] = q_latent.detach().to(device)
         return q_out.detach().to(device)
     
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
