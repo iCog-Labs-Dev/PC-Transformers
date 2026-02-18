@@ -317,7 +317,7 @@ def step_attn(
         x = x + local_lr * delta_x
         
         if requires_update:
-            lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=clamp_value)
+            lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
     else:
         x = x + local_lr * error
 
@@ -328,66 +328,39 @@ def step_attn(
         with torch.no_grad():
             B, S = batch_size, seq_len
 
-            K_update = K[:, :, -seq_len:, :]
-            V_update = V[:, :, -seq_len:, :]
+            scale = max(B * S, 1)
+            update_q = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
+            update_k = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
+            update_v = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
 
-            update_q = torch.zeros_like(q_proj.weight)
-            update_k = torch.zeros_like(k_proj.weight)
-            update_v = torch.zeros_like(v_proj.weight)
-
-            update_b_q = torch.zeros_like(q_proj.bias) if q_proj.bias is not None else None
-            update_b_k = torch.zeros_like(k_proj.bias) if k_proj.bias is not None else None
-            update_b_v = torch.zeros_like(v_proj.bias) if v_proj.bias is not None else None
-
-            # Multi-head Q, K, V updates
-            for h in range(num_heads):
-                q_slice = Q[:, h, :, :]  # [B, S, head_dim]
-                k_slice = K_update[:, h, :, :]
-                v_slice = V_update[:, h, :, :]
-
-                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x_norm) / (B * S)
-                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x_norm) / (B * S)
-                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x_norm) / (B * S)
-
-                start = h * head_dim
-                end = (h + 1) * head_dim
-
-                update_q[start:end, :] = dW_q_h
-                update_k[start:end, :] = dW_k_h
-                update_v[start:end, :] = dW_v_h
-
-                if update_bias:
-                    if update_b_q is not None:
-                        update_b_q[start:end] = q_slice.mean(dim=(0, 1)) / (B * S)
-                    if update_b_k is not None:
-                        update_b_k[start:end] = k_slice.mean(dim=(0, 1)) / (B * S)
-                    if update_b_v is not None:
-                        update_b_v[start:end] = v_slice.mean(dim=(0, 1)) / (B * S)
+            update_b_q = bu_err.mean(dim=(0, 1)) if (update_bias and q_proj.bias is not None) else None
+            update_b_k = bu_err.mean(dim=(0, 1)) if (update_bias and k_proj.bias is not None) else None
+            update_b_v = bu_err.mean(dim=(0, 1)) if (update_bias and v_proj.bias is not None) else None
 
             if optimizer is not None:
-                optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=clamp_value)
-                optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=clamp_value)
-                optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=clamp_value)
+                optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=0.01)
+                optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=0.01)
+                optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=0.01)
 
                 if update_bias:
                     if update_b_q is not None:
-                        optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=clamp_value)
+                        optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=0.01)
                     if update_b_k is not None:
-                        optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=clamp_value)
+                        optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=0.01)
                     if update_b_v is not None:
-                        optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=clamp_value)
+                        optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=0.01)
             else:
-                q_proj.weight.data.add_(torch.clamp(local_lr * update_q, -clamp_value, clamp_value))
-                k_proj.weight.data.add_(torch.clamp(local_lr * update_k, -clamp_value, clamp_value))
-                v_proj.weight.data.add_(torch.clamp(local_lr * update_v, -clamp_value, clamp_value))
+                q_proj.weight.data.add_(torch.clamp(local_lr * update_q, -0.01, 0.01))
+                k_proj.weight.data.add_(torch.clamp(local_lr * update_k, -0.01, 0.01))
+                v_proj.weight.data.add_(torch.clamp(local_lr * update_v, -0.01, 0.01))
 
                 if update_bias:
                     if update_b_q is not None:
-                        q_proj.bias.data.add_(torch.clamp(local_lr * update_b_q, -clamp_value, clamp_value))
+                        q_proj.bias.data.add_(torch.clamp(local_lr * update_b_q, -0.01, 0.01))
                     if update_b_k is not None:
-                        k_proj.bias.data.add_(torch.clamp(local_lr * update_b_k, -clamp_value, clamp_value))
+                        k_proj.bias.data.add_(torch.clamp(local_lr * update_b_k, -0.01, 0.01))
                     if update_b_v is not None:
-                        v_proj.bias.data.add_(torch.clamp(local_lr * update_b_v, -clamp_value, clamp_value))
+                        v_proj.bias.data.add_(torch.clamp(local_lr * update_b_v, -0.01, 0.01))
  
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name)
