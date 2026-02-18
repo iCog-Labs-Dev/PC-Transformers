@@ -59,9 +59,10 @@ def train(model, dataloader, config, global_step, device, logger):
             min_lr = 0.1 * config.peak_learning_rate
             lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
 
+        pc_lr = lr * float(getattr(config, "alpha", 1.0))
         for module in model.modules():
             if hasattr(module, 'local_lr'):
-                module.set_learning_rate(lr)
+                module.set_learning_rate(pc_lr)
                 
         global_step += 1
         if target_ids.max() >= vocab_size:

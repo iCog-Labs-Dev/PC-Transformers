@@ -22,6 +22,9 @@ class PCTransformer(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
         self.output = OutputLayer(config)
         self._debug_init_print_count = 0
+        self._clamped_input_ids = None
+        self._clamped_target_ids = None
+        self._infer_target_logits = None
 
     @staticmethod
     def _norm_value(value):
@@ -31,6 +34,23 @@ class PCTransformer(nn.Module):
         if torch.is_tensor(value):
             return value.float().norm().item()
         return 0.0
+
+    def clamp_input(self, input_ids: torch.Tensor, vocab_size: int) -> torch.Tensor:
+        if input_ids.max() >= vocab_size:
+            input_ids = torch.clamp(input_ids, max=vocab_size - 1)
+        self._clamped_input_ids = input_ids
+        return input_ids
+
+    def clamp_target(self, target_ids: torch.Tensor, vocab_size: int, as_one_hot: bool = False) -> torch.Tensor:
+        if target_ids.max() >= vocab_size:
+            target_ids = torch.clamp(target_ids, max=vocab_size - 1)
+        self._clamped_target_ids = target_ids
+        if as_one_hot:
+            return ids_to_one_hot(target_ids, vocab_size).to(target_ids.device)
+        return target_ids
+
+    def clamp_infer_target(self, target_logits: torch.Tensor) -> None:
+        self._infer_target_logits = target_logits
 
     def register_all_lateral_weights(self):
         """
@@ -71,15 +91,12 @@ class PCTransformer(nn.Module):
         B, S = input_ids.shape
         device = input_ids.device
         vocab_size = self.output.config.vocab_size
-        
-        # Clip input_ids and target_ids to valid range before using them
-        if input_ids.max() >= vocab_size:
-            input_ids = torch.clamp(input_ids, max=vocab_size-1)
-        
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size-1)
-        
-        target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
+
+        # Clamp input/targets (NGC-style explicit clamp flow)
+        input_ids = self.clamp_input(input_ids, vocab_size)
+        target_ids = self.clamp_target(target_ids, vocab_size, as_one_hot=False)
+        target_logits = self.clamp_target(target_ids, vocab_size, as_one_hot=True).to(device)
+        self.clamp_infer_target(target_logits)
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
         # Build projection latents q_* first (static, no updates)
@@ -264,6 +281,11 @@ class PCTransformer(nn.Module):
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
 
         for t in range(self.config.T):
+            # Re-clamp per-step (equivalent of clamp_input/clamp_target inside iterative inference)
+            input_ids = self.clamp_input(input_ids, vocab_size)
+            target_logits = self.clamp_target(target_ids, vocab_size, as_one_hot=True).to(device)
+            self.clamp_infer_target(target_logits)
+
             # Execute output layer
             td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
             execute_parallel(
