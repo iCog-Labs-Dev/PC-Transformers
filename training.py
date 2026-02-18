@@ -34,6 +34,7 @@ def train(model, dataloader, config, global_step, device, logger):
     total_ce_loss = 0.0
     total_energy = 0.0
     batch_count = 0
+    total_steps = len(dataloader) * config.num_epochs
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -51,15 +52,12 @@ def train(model, dataloader, config, global_step, device, logger):
             lr = config.lr + global_step / config.warmup_steps * (
                 config.peak_learning_rate - config.lr)
         else:
-            # # Cosine decay after warmup
-            # decay_step = global_step - config.warmup_steps
-            # decay_total = total_steps - config.warmup_steps
-            # cosine_decay = 0.5 * (1 + math.cos(math.pi * decay_step / decay_total))
-            
-            # # Minimum learning rate = 10% of peak_lr
-            # min_lr = 0.1 * config.peak_learning_rate
-            # lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
-            lr = config.peak_learning_rate
+            decay_step = global_step - config.warmup_steps
+            decay_total = max(total_steps - config.warmup_steps, 1)
+            cosine_decay = 0.5 * (1 + math.cos(math.pi * min(decay_step, decay_total) / decay_total))
+
+            min_lr = 0.1 * config.peak_learning_rate
+            lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
 
         for module in model.modules():
             if hasattr(module, 'local_lr'):
