@@ -4,6 +4,9 @@ from typing import Optional, Dict, Tuple
 
 from utils.pc_utils import (
     x_init,
+    step_q_embed,
+    step_q_attn,
+    step_q_linear,
     step_embed,
     step_linear,
     step_attn,
@@ -53,10 +56,16 @@ class PCLayer(nn.Module):
         self.lateral_connections: Dict[str, LateralConnections] = {}
         
         self._x_cache: Dict[str, torch.Tensor] = {}
+        self._q_cache: Dict[str, torch.Tensor] = {}
         self._mu_cache: Dict[str, torch.Tensor] = {}
         self._error_cache: Dict[str, torch.Tensor] = {}
         self._energy = 0.0
         self._errors = []
+
+    def _q_key_for_x_layer(self, layer_type: str) -> str:
+        if layer_type == "embed":
+            return "q_embed"
+        return f"q_{layer_type}"
     
     def register_lateral(self, layer_type: str, size: int):
         """Create and register lateral connections for layer_type."""
@@ -201,6 +210,10 @@ class PCLayer(nn.Module):
         - linear/others: random init sized to layer input dimension
         """
         if layer_type == "embed":
+            if "q_embed" in self._q_cache:
+                self._x_cache["embed"] = self._q_cache["q_embed"]
+                return
+
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
             vocab_size = layer["word"].weight.size(0)
             if input_ids.max() >= vocab_size:
@@ -217,8 +230,11 @@ class PCLayer(nn.Module):
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
-            H_out = proj_layers["v_proj"].weight.shape[0] 
-            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
+            if "q_attn" in self._q_cache:
+                self._x_cache["attn"] = self._q_cache["q_attn"].detach().to(device)
+            else:
+                H_out = proj_layers["v_proj"].weight.shape[0]
+                self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
             
             self.register_lateral(layer_type, H_in)
             if layer_type in self.lateral_connections:
@@ -226,16 +242,76 @@ class PCLayer(nn.Module):
         
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
-            input_dim = layer.weight.shape[1]
-            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
+            q_key = self._q_key_for_x_layer(layer_type)
+            if q_key in self._q_cache:
+                self._x_cache[layer_type] = self._q_cache[q_key].detach().to(device)
+            else:
+                input_dim = layer.weight.shape[1]
+                self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
             
+            input_dim = layer.weight.shape[1]
             self.register_lateral(layer_type, input_dim)  
             if layer_type in self.lateral_connections:
                 self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
+
+    def init_q(
+        self,
+        batch_size: int,
+        seq_len: int,
+        layer_type: str,
+        device: torch.device,
+        layer: Optional[nn.Module] = None,
+        proj_layers: Optional[dict] = None,
+        input_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        source_tensor: Optional[torch.Tensor] = None,
+        layer_norm: Optional[nn.Module] = None,
+        flash: bool = False,
+    ):
+        """Initialize projection latent q-cache for each layer type (no parameter updates)."""
+        _ = batch_size
+        _ = seq_len
+
+        if layer_type == "q_embed":
+            assert input_ids is not None and position_ids is not None, "q_embed requires input_ids and position_ids"
+            assert isinstance(layer, dict), "q_embed requires embedding layer dict"
+            q_embed, q_word, q_pos = step_q_embed(layer=layer, input_ids=input_ids, position_ids=position_ids)
+            self._q_cache["q_embed"] = (q_word.detach().to(device), q_pos.detach().to(device))
+            return q_embed.detach().to(device)
+
+        if layer_type == "q_attn":
+            assert source_tensor is not None, "q_attn requires source_tensor"
+            assert proj_layers is not None, "q_attn requires proj_layers"
+            q_attn, q_out = step_q_attn(
+                x=source_tensor,
+                proj_layers=proj_layers,
+                num_heads=self.num_heads,
+                n_embed=self.n_embed,
+                layer_norm=layer_norm,
+                flash=flash,
+            )
+            self._q_cache["q_attn"] = q_attn.detach().to(device)
+            return q_out.detach().to(device)
+
+        assert source_tensor is not None, f"{layer_type} requires source_tensor"
+        assert layer is not None, f"{layer_type} requires layer"
+        base_layer_type = layer_type.replace("q_", "")
+        q_latent, q_out = step_q_linear(
+            x=source_tensor,
+            layer=layer,
+            layer_type=base_layer_type,
+            layer_norm=layer_norm,
+        )
+        self._q_cache[layer_type] = q_latent.detach().to(device)
+        return q_out.detach().to(device)
     
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         """Get the cached activity tensor for a given layer type."""
         return self._x_cache.get(layer_type, None)
+
+    def get_q(self, layer_type: str) -> Optional[torch.Tensor]:
+        """Get the cached projection latent tensor for a given q layer type."""
+        return self._q_cache.get(layer_type, None)
     
     def get_mu(self, layer_type: str) -> Optional[torch.Tensor]:
         """Get the cached mu (prediction) tensor for a given layer type."""
@@ -254,6 +330,7 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        self._q_cache.clear()
         
     def get_errors(self) -> list:
         """Get the list of error values accumulated during inference."""

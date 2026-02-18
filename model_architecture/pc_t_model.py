@@ -21,6 +21,16 @@ class PCTransformer(nn.Module):
         self.embedding = Embedding_Layer(config)
         self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
         self.output = OutputLayer(config)
+        self._debug_init_print_count = 0
+
+    @staticmethod
+    def _norm_value(value):
+        if isinstance(value, (tuple, list)):
+            parts = [v.float().norm().item() for v in value if torch.is_tensor(v)]
+            return sum(parts)
+        if torch.is_tensor(value):
+            return value.float().norm().item()
+        return 0.0
 
     def register_all_lateral_weights(self):
         """
@@ -71,6 +81,92 @@ class PCTransformer(nn.Module):
         
         target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
+
+        # Build projection latents q_* first (static, no updates)
+        q_current = self.embedding.pc_layer.init_q(
+            batch_size=B,
+            seq_len=S,
+            layer_type="q_embed",
+            device=device,
+            layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
+            proj_layers=None,
+            input_ids=input_ids,
+            position_ids=position_ids,
+            source_tensor=None,
+            layer_norm=None,
+            flash=False,
+        )
+
+        for block in self.blocks:
+            q_attn_out = block.attn.pc_qkv.init_q(
+                batch_size=B,
+                seq_len=S,
+                layer_type="q_attn",
+                device=device,
+                layer=None,
+                proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                input_ids=None,
+                position_ids=None,
+                source_tensor=q_current,
+                layer_norm=block.ln2,
+                flash=getattr(self.config, 'use_flash_attention', False),
+            )
+
+            q_linear_attn_out = block.attn.pc_output.init_q(
+                batch_size=B,
+                seq_len=S,
+                layer_type="q_linear_attn",
+                device=device,
+                layer=block.attn.output,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+                source_tensor=q_attn_out,
+                layer_norm=block.ln1,
+                flash=False,
+            )
+
+            q_fc1_out = block.mlp.pc_layer1.init_q(
+                batch_size=B,
+                seq_len=S,
+                layer_type="q_fc1",
+                device=device,
+                layer=block.mlp.fc1,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+                source_tensor=q_linear_attn_out,
+                layer_norm=block.ln1,
+                flash=False,
+            )
+
+            q_current = block.mlp.pc_layer2.init_q(
+                batch_size=B,
+                seq_len=S,
+                layer_type="q_fc2",
+                device=device,
+                layer=block.mlp.fc2,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+                source_tensor=q_fc1_out,
+                layer_norm=block.ln2,
+                flash=False,
+            )
+
+        _ = self.output.pc_layer.init_q(
+            batch_size=B,
+            seq_len=S,
+            layer_type="q_linear_output",
+            device=device,
+            layer=self.output.output,
+            proj_layers=None,
+            input_ids=None,
+            position_ids=None,
+            source_tensor=q_current,
+            layer_norm=None,
+            flash=False,
+        )
 
         # Initialize all predictive coding layers
         self.embedding.pc_layer.init_x(
@@ -135,6 +231,34 @@ class PCTransformer(nn.Module):
             input_ids = None,
             position_ids = None,
         )
+
+        if self._debug_init_print_count < 2:
+            print(
+                f"[InitDebug] embed q={self._norm_value(self.embedding.pc_layer.get_q('q_embed')):.6f} "
+                f"x={self._norm_value(self.embedding.pc_layer.get_x('embed')):.6f}"
+            )
+            for idx, block in enumerate(self.blocks):
+                print(
+                    f"[InitDebug] block{idx} attn q={self._norm_value(block.attn.pc_qkv.get_q('q_attn')):.6f} "
+                    f"x={self._norm_value(block.attn.pc_qkv.get_x('attn')):.6f}"
+                )
+                print(
+                    f"[InitDebug] block{idx} linear_attn q={self._norm_value(block.attn.pc_output.get_q('q_linear_attn')):.6f} "
+                    f"x={self._norm_value(block.attn.pc_output.get_x('linear_attn')):.6f}"
+                )
+                print(
+                    f"[InitDebug] block{idx} fc1 q={self._norm_value(block.mlp.pc_layer1.get_q('q_fc1')):.6f} "
+                    f"x={self._norm_value(block.mlp.pc_layer1.get_x('fc1')):.6f}"
+                )
+                print(
+                    f"[InitDebug] block{idx} fc2 q={self._norm_value(block.mlp.pc_layer2.get_q('q_fc2')):.6f} "
+                    f"x={self._norm_value(block.mlp.pc_layer2.get_x('fc2')):.6f}"
+                )
+            print(
+                f"[InitDebug] output q={self._norm_value(self.output.pc_layer.get_q('q_linear_output')):.6f} "
+                f"x={self._norm_value(self.output.pc_layer.get_x('linear_output')):.6f}"
+            )
+            self._debug_init_print_count += 1
 
         # Initialize streams or futures for parallel execution
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)

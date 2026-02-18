@@ -8,7 +8,90 @@ from utils.optim.optim_utils import PCOptimizer
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
-    return torch.randn(batch_size, seq_len, embedding_size, device = device)
+    return torch.zeros(batch_size, seq_len, embedding_size, device=device)
+
+
+def step_q_embed(
+    layer: dict,
+    input_ids: torch.Tensor,
+    position_ids: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Projection-only embedding step (no updates). Returns (q_embed, q_word, q_pos)."""
+    word_layer: nn.Embedding = layer["word"]
+    pos_layer: nn.Embedding = layer["pos"]
+
+    vocab_size = word_layer.weight.size(0)
+    if input_ids.max() >= vocab_size:
+        input_ids = torch.clamp(input_ids, max=vocab_size - 1)
+
+    max_pos = pos_layer.weight.size(0)
+    if position_ids.max() >= max_pos:
+        position_ids = torch.clamp(position_ids, max=max_pos - 1)
+
+    q_word = word_layer(input_ids)
+    q_pos = pos_layer(position_ids)
+    q_embed = q_word + q_pos
+    return q_embed, q_word, q_pos
+
+
+def step_q_attn(
+    x: torch.Tensor,
+    proj_layers: dict,
+    num_heads: int,
+    n_embed: int,
+    layer_norm: Optional[nn.Module] = None,
+    flash: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Projection-only attention step (no updates). Returns (q_attn, attn_context)."""
+    assert proj_layers is not None, "proj_layers dict is required for q attention"
+
+    x_norm = layer_norm(x) if layer_norm is not None else x
+    q_proj = proj_layers["q_proj"]
+    k_proj = proj_layers["k_proj"]
+    v_proj = proj_layers["v_proj"]
+
+    batch_size, seq_len, embed_dim = x.shape
+    head_dim = n_embed // num_heads
+
+    Q = q_proj(x_norm).view(batch_size, num_heads, seq_len, head_dim)
+    K = k_proj(x_norm).view(batch_size, num_heads, seq_len, head_dim)
+    V = v_proj(x_norm).view(batch_size, num_heads, seq_len, head_dim)
+
+    causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device)).unsqueeze(0).unsqueeze(0)
+
+    if flash:
+        mu_heads = apply_flash_attention(Q, K, V, mask=causal_mask)
+    else:
+        mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
+
+    attn_context = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+    q_attn = x
+    return q_attn, attn_context
+
+
+def step_q_linear(
+    x: torch.Tensor,
+    layer: nn.Module,
+    layer_type: str,
+    layer_norm: Optional[nn.Module] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Projection-only linear step (no updates). Returns (q_linear_input, projected_output)."""
+    if layer_norm is not None and layer_type == "fc1":
+        x_input = layer_norm(x)
+    elif layer_type == "fc2":
+        x_input = F.gelu(x)
+    else:
+        x_input = x
+
+    mu = layer(x_input)
+
+    if layer_type == "fc1":
+        mu = F.gelu(mu)
+    elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
+        mu = layer_norm(mu)
+
+    q_linear_input = x
+    return q_linear_input, mu
 
 def step_embed(
     t: int,
@@ -131,7 +214,9 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
+        B, S = bu_err.shape[:2]
+        scale = max(B * S, 1)
+        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach()) / scale
         if optimizer is not None:
             optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
         else:
