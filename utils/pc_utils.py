@@ -1,10 +1,61 @@
+import os
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import gc
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Dict
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 from utils.optim.optim_utils import PCOptimizer
+
+
+def _pc_debug_enabled() -> bool:
+    return os.getenv("PC_DEBUG", "0").strip().lower() not in ("", "0", "false", "no")
+
+
+def tensor_stats(x: torch.Tensor) -> Dict[str, float]:
+    if x is None:
+        return {"none": 1.0}
+    with torch.no_grad():
+        x_f = x.detach()
+        finite = torch.isfinite(x_f)
+        frac_finite = float(finite.float().mean().item()) if x_f.numel() else 1.0
+        x_safe = torch.nan_to_num(x_f, nan=0.0, posinf=0.0, neginf=0.0)
+        return {
+            "mean": float(x_safe.mean().item()) if x_safe.numel() else 0.0,
+            "std": float(x_safe.std(unbiased=False).item()) if x_safe.numel() else 0.0,
+            "min": float(x_safe.min().item()) if x_safe.numel() else 0.0,
+            "max": float(x_safe.max().item()) if x_safe.numel() else 0.0,
+            "absmax": float(x_safe.abs().max().item()) if x_safe.numel() else 0.0,
+            "norm": float(x_safe.norm().item()) if x_safe.numel() else 0.0,
+            "frac_finite": frac_finite,
+        }
+
+
+def log_tensor_stats(logger: Optional[logging.Logger], name: str, x: torch.Tensor, *, step: Optional[int] = None) -> None:
+    if not _pc_debug_enabled():
+        return
+    logger = logger or logging.getLogger(__name__)
+    stats = tensor_stats(x)
+    prefix = f"[PC_DEBUG] {name}"
+    if step is not None:
+        prefix += f" step={step}"
+    logger.info(
+        f"{prefix} | mean={stats.get('mean', 0.0):.4g} std={stats.get('std', 0.0):.4g} "
+        f"min={stats.get('min', 0.0):.4g} max={stats.get('max', 0.0):.4g} "
+        f"absmax={stats.get('absmax', 0.0):.4g} norm={stats.get('norm', 0.0):.4g} "
+        f"finite={stats.get('frac_finite', 1.0):.3f}"
+    )
+
+
+def sanitize_tensor(x: torch.Tensor, *, clamp_abs: Optional[float] = None) -> torch.Tensor:
+    if x is None:
+        return x
+    with torch.no_grad():
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        if clamp_abs is not None:
+            x = torch.clamp(x, -abs(clamp_abs), abs(clamp_abs))
+        return x
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))

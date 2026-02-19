@@ -106,6 +106,22 @@ def train(model, dataloader, config, global_step, device, logger):
             batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 
         else:
             batch_energy = avg_internal_energy
+
+        # Debug: if energy spikes, print per-layer energies to locate the first exploding module.
+        debug_enabled = os.getenv("PC_DEBUG", "0").strip().lower() not in ("", "0", "false", "no")
+        if (debug_enabled or batch_energy > 1e3) and (not dist.is_initialized() or dist.get_rank() == 0):
+            if logger:
+                logger.warning(f"[PC_DEBUG] Spike detected | batch={batch_idx + 1} step={global_step} energy={batch_energy:.6g} ce={ce_loss.item():.6g}")
+                try:
+                    named = model.named_modules() if hasattr(model, "named_modules") else []
+                    for name, module in named:
+                        if isinstance(module, PCLayer) and hasattr(module, "get_energy"):
+                            e = module.get_energy()
+                            if e is None or (isinstance(e, float) and math.isnan(e)):
+                                continue
+                            logger.warning(f"[PC_DEBUG]   layer={name} energy={float(e):.6g} lr={getattr(module, 'local_lr', None)} fn={getattr(module, 'energy_fn_name', None)}")
+                except Exception as ex:
+                    logger.warning(f"[PC_DEBUG] Failed to enumerate layer energies: {ex}")
         total_energy += batch_energy
         batch_count += 1
 

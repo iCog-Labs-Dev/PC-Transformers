@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import os
+import logging
 from typing import Optional, Dict, Tuple
 
 from utils.pc_utils import (
@@ -8,6 +10,8 @@ from utils.pc_utils import (
     step_linear,
     step_attn,
     finalize_step,
+    log_tensor_stats,
+    sanitize_tensor,
 )
 from utils.optim.optim_utils import PCOptimizer
 from predictive_coding.lateral_connc import LateralConnections
@@ -109,6 +113,14 @@ class PCLayer(nn.Module):
         self._reset_step_state()
         x = self._get_cached_state(layer_type)
         q = self._get_cached_state_projection(layer_type)
+
+        if os.getenv("PC_DEBUG", "0").strip().lower() not in ("", "0", "false", "no"):
+            logger = logging.getLogger(__name__)
+            log_tensor_stats(logger, f"{layer_type}.target", target_activity, step=t)
+            if x is not None:
+                log_tensor_stats(logger, f"{layer_type}.x", x, step=t)
+            if q is not None:
+                log_tensor_stats(logger, f"{layer_type}.q", q, step=t)
         
         if layer_type == "embed":
             mu, mu_word, mu_pos, bu_err = step_embed(
@@ -290,7 +302,13 @@ class PCLayer(nn.Module):
         if target_layer is None:
             raise ValueError(f"No target mapping defined for projection layer: {projection_layer_type}")
 
-        self._x_cache[target_layer] = q.detach().clone()
+        seed_scale = float(os.getenv("PC_SEED_SCALE", "1.0"))
+        q_seed = q.detach()
+        q_seed = sanitize_tensor(q_seed)
+        if seed_scale != 1.0:
+            q_seed = q_seed * seed_scale
+        q_seed = sanitize_tensor(q_seed, clamp_abs=self.clamp_value)
+        self._x_cache[target_layer] = q_seed.clone()
 
         input_dim = q.shape[-1]
         self.register_lateral(target_layer, input_dim)
