@@ -8,93 +8,7 @@ from utils.optim.optim_utils import PCOptimizer
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
-    return torch.zeros(batch_size, seq_len, embedding_size, device=device)
-
-
-@torch.no_grad()
-def step_q_embed(
-    layer: dict,
-    input_ids: torch.Tensor,
-    position_ids: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Projection-only embedding step (no updates). Returns (q_embed, q_word, q_pos)."""
-    word_layer: nn.Embedding = layer["word"]
-    pos_layer: nn.Embedding = layer["pos"]
-
-    vocab_size = word_layer.weight.size(0)
-    if input_ids.max() >= vocab_size:
-        input_ids = torch.clamp(input_ids, max=vocab_size - 1)
-
-    max_pos = pos_layer.weight.size(0)
-    if position_ids.max() >= max_pos:
-        position_ids = torch.clamp(position_ids, max=max_pos - 1)
-
-    q_word = word_layer(input_ids)
-    q_pos = pos_layer(position_ids)
-    q_embed = q_word + q_pos
-    return q_embed, q_word, q_pos
-
-
-@torch.no_grad()
-def step_q_attn(
-    x: torch.Tensor,
-    proj_layers: dict,
-    num_heads: int,
-    n_embed: int,
-    layer_norm: Optional[nn.Module] = None,
-    flash: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Projection-only attention step (no updates). Returns (q_attn, attn_context)."""
-    assert proj_layers is not None, "proj_layers dict is required for q attention"
-
-    x_norm = layer_norm(x) if layer_norm is not None else x
-    q_proj = proj_layers["q_proj"]
-    k_proj = proj_layers["k_proj"]
-    v_proj = proj_layers["v_proj"]
-
-    batch_size, seq_len, embed_dim = x.shape
-    head_dim = n_embed // num_heads
-
-    Q = q_proj(x_norm).view(batch_size, num_heads, seq_len, head_dim)
-    K = k_proj(x_norm).view(batch_size, num_heads, seq_len, head_dim)
-    V = v_proj(x_norm).view(batch_size, num_heads, seq_len, head_dim)
-
-    causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device)).unsqueeze(0).unsqueeze(0)
-
-    if flash:
-        mu_heads = apply_flash_attention(Q, K, V, mask=causal_mask)
-    else:
-        mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
-
-    attn_context = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-    q_attn = x
-    return q_attn, attn_context
-
-
-@torch.no_grad()
-def step_q_linear(
-    x: torch.Tensor,
-    layer: nn.Module,
-    layer_type: str,
-    layer_norm: Optional[nn.Module] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Projection-only linear step (no updates). Returns (q_linear_input, projected_output)."""
-    if layer_norm is not None and layer_type == "fc1":
-        x_input = layer_norm(x)
-    elif layer_type == "fc2":
-        x_input = F.gelu(x)
-    else:
-        x_input = x
-
-    mu = layer(x_input)
-
-    if layer_type == "fc1":
-        mu = F.gelu(mu)
-    elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
-        mu = layer_norm(mu)
-
-    q_linear_input = x
-    return q_linear_input, mu
+    return torch.randn(batch_size, seq_len, embedding_size, device = device)
 
 def step_embed(
     t: int,
@@ -217,9 +131,7 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        B, S = bu_err.shape[:2]
-        scale = max(B * S, 1)
-        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach()) / scale
+        update_w = torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
         if optimizer is not None:
             optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
         else:
@@ -320,7 +232,7 @@ def step_attn(
         x = x + local_lr * delta_x
         
         if requires_update:
-            lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
+            lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=clamp_value)
     else:
         x = x + local_lr * error
 
@@ -331,39 +243,66 @@ def step_attn(
         with torch.no_grad():
             B, S = batch_size, seq_len
 
-            scale = max(B * S, 1)
-            update_q = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
-            update_k = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
-            update_v = torch.einsum("bsv,bse->ve", bu_err, x_norm.detach()) / scale
+            K_update = K[:, :, -seq_len:, :]
+            V_update = V[:, :, -seq_len:, :]
 
-            update_b_q = bu_err.mean(dim=(0, 1)) if (update_bias and q_proj.bias is not None) else None
-            update_b_k = bu_err.mean(dim=(0, 1)) if (update_bias and k_proj.bias is not None) else None
-            update_b_v = bu_err.mean(dim=(0, 1)) if (update_bias and v_proj.bias is not None) else None
+            update_q = torch.zeros_like(q_proj.weight)
+            update_k = torch.zeros_like(k_proj.weight)
+            update_v = torch.zeros_like(v_proj.weight)
+
+            update_b_q = torch.zeros_like(q_proj.bias) if q_proj.bias is not None else None
+            update_b_k = torch.zeros_like(k_proj.bias) if k_proj.bias is not None else None
+            update_b_v = torch.zeros_like(v_proj.bias) if v_proj.bias is not None else None
+
+            # Multi-head Q, K, V updates
+            for h in range(num_heads):
+                q_slice = Q[:, h, :, :]  # [B, S, head_dim]
+                k_slice = K_update[:, h, :, :]
+                v_slice = V_update[:, h, :, :]
+
+                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x_norm) / (B * S)
+                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x_norm) / (B * S)
+                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x_norm) / (B * S)
+
+                start = h * head_dim
+                end = (h + 1) * head_dim
+
+                update_q[start:end, :] = dW_q_h
+                update_k[start:end, :] = dW_k_h
+                update_v[start:end, :] = dW_v_h
+
+                if update_bias:
+                    if update_b_q is not None:
+                        update_b_q[start:end] = q_slice.mean(dim=(0, 1)) / (B * S)
+                    if update_b_k is not None:
+                        update_b_k[start:end] = k_slice.mean(dim=(0, 1)) / (B * S)
+                    if update_b_v is not None:
+                        update_b_v[start:end] = v_slice.mean(dim=(0, 1)) / (B * S)
 
             if optimizer is not None:
-                optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=0.01)
-                optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=0.01)
-                optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=0.01)
+                optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=clamp_value)
+                optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=clamp_value)
+                optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=clamp_value)
 
                 if update_bias:
                     if update_b_q is not None:
-                        optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=0.01)
+                        optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=clamp_value)
                     if update_b_k is not None:
-                        optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=0.01)
+                        optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=clamp_value)
                     if update_b_v is not None:
-                        optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=0.01)
+                        optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=clamp_value)
             else:
-                q_proj.weight.data.add_(torch.clamp(local_lr * update_q, -0.01, 0.01))
-                k_proj.weight.data.add_(torch.clamp(local_lr * update_k, -0.01, 0.01))
-                v_proj.weight.data.add_(torch.clamp(local_lr * update_v, -0.01, 0.01))
+                q_proj.weight.data.add_(torch.clamp(local_lr * update_q, -clamp_value, clamp_value))
+                k_proj.weight.data.add_(torch.clamp(local_lr * update_k, -clamp_value, clamp_value))
+                v_proj.weight.data.add_(torch.clamp(local_lr * update_v, -clamp_value, clamp_value))
 
                 if update_bias:
                     if update_b_q is not None:
-                        q_proj.bias.data.add_(torch.clamp(local_lr * update_b_q, -0.01, 0.01))
+                        q_proj.bias.data.add_(torch.clamp(local_lr * update_b_q, -clamp_value, clamp_value))
                     if update_b_k is not None:
-                        k_proj.bias.data.add_(torch.clamp(local_lr * update_b_k, -0.01, 0.01))
+                        k_proj.bias.data.add_(torch.clamp(local_lr * update_b_k, -clamp_value, clamp_value))
                     if update_b_v is not None:
-                        v_proj.bias.data.add_(torch.clamp(local_lr * update_b_v, -0.01, 0.01))
+                        v_proj.bias.data.add_(torch.clamp(local_lr * update_b_v, -clamp_value, clamp_value))
  
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name)
