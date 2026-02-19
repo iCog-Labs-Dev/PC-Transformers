@@ -228,129 +228,14 @@ class PCTransformer(nn.Module):
 
 
         # Initialize streams or futures for parallel execution
+        # Initialize streams or futures for parallel execution
         use_cuda, streams_or_futures = create_streams_or_futures(
             device, 
             2 * (len(self.blocks) * 4 + 2)
         )
 
-        # Projection inference MUST run top-down so that q-cache seeds are conditioned on target_logits.
-        # Order: output -> blocks (top-down) -> embed.
+        # TODO CORRECT PROJECTION
 
-        execute_parallel(
-            use_cuda,
-            streams_or_futures,
-            self.output_projection.pc_layer_projection.forward,
-            target_activity=target_logits,
-            layer_type="projection_linear_output",
-            t=0,
-            T=1,
-            requires_update=False,
-            td_err=None,
-            layer=self.output_projection.output_projection,
-            layer_norm=None,
-            proj_layers=None,
-            input_ids=None,
-            position_ids=None,
-            flash=False,
-        )
-
-        # Iterate through blocks_projection in reverse order (top-down in the full stack)
-        for idx in range(len(self.blocks_projection) - 1, -1, -1):
-            block_projection = self.blocks_projection[idx]
-
-            next_target = (
-                self.blocks_projection[idx + 1].attn.pc_qkv_projection.get_q("projection_attn")
-                if idx < len(self.blocks_projection) - 1
-                else self.output_projection.pc_layer_projection.get_q("projection_linear_output")
-            )
-            layer_norm2 = block_projection.ln2 if idx < len(self.blocks_projection) - 1 else None
-
-            # mlp2 (fc2) is the top of the block in the standard PC pass; run it first.
-            execute_parallel(
-                use_cuda,
-                streams_or_futures,
-                block_projection.mlp.pc_layer2_projection.forward,
-                target_activity=next_target,
-                layer_type="projection_fc2",
-                t=0,
-                T=1,
-                requires_update=False,
-                td_err=None,
-                layer=block_projection.mlp.fc2_projection,
-                layer_norm=layer_norm2,
-                proj_layers=None,
-                input_ids=None,
-                position_ids=None,
-                flash=False,
-            )
-
-            # mlp1 (fc1) targets fc2
-            execute_parallel(
-                use_cuda,
-                streams_or_futures,
-                block_projection.mlp.pc_layer1_projection.forward,
-                target_activity=block_projection.mlp.pc_layer2_projection.get_q("projection_fc2"),
-                layer_type="projection_fc1",
-                t=0,
-                T=1,
-                requires_update=False,
-                td_err=None,
-                layer=block_projection.mlp.fc1_projection,
-                layer_norm=block_projection.ln1,
-                proj_layers=None,
-                input_ids=None,
-                position_ids=None,
-                flash=False,
-            )
-
-            # linear attn targets mlp1
-            execute_parallel(
-                use_cuda,
-                streams_or_futures,
-                block_projection.attn.pc_output_projection.forward,
-                target_activity=block_projection.mlp.pc_layer1_projection.get_q("projection_fc1"),
-                layer_type="projection_linear_attn",
-                t=0,
-                T=1,
-                requires_update=False,
-                td_err=None,
-                layer=block_projection.attn.output_projection,
-                layer_norm=block_projection.ln1,
-                proj_layers=None,
-                input_ids=None,
-                position_ids=None,
-                flash=False,
-            )
-
-            # attn targets linear attn
-            execute_parallel(
-                use_cuda,
-                streams_or_futures,
-                block_projection.attn.pc_qkv_projection.forward,
-                target_activity=block_projection.attn.pc_output_projection.get_q("projection_linear_attn"),
-                layer_type="projection_attn",
-                t=0,
-                T=1,
-                requires_update=False,
-                td_err=None,
-                layer=None,
-                layer_norm=block_projection.ln2,
-                proj_layers={
-                    "q_proj": block_projection.attn.q_projection,
-                    "k_proj": block_projection.attn.k_projection,
-                    "v_proj": block_projection.attn.v_projection,
-                },
-                input_ids=None,
-                position_ids=None,
-                flash=getattr(self.config, "use_flash_attention", False),
-                use_cache=use_kv_cache,
-                kv_cache=block_projection.attn.kv_cache_projection if use_kv_cache else None,
-            )
-
-            if hasattr(block_projection.attn.pc_qkv_projection, "_last_kv_cache_projection"):
-                block_projection.attn.kv_cache_projection = block_projection.attn.pc_qkv_projection._last_kv_cache_projection
-
-        # embed targets block0 attn
         execute_parallel(
             use_cuda,
             streams_or_futures,
@@ -363,13 +248,160 @@ class PCTransformer(nn.Module):
             td_err=None,
             layer={
                 "word": self.embedding_projection.word_embeddings_projection,
-                "pos": self.embedding_projection.position_embeddings_projection,
+                "pos": self.embedding_projection.position_embeddings_projection
             },
             layer_norm=self.blocks_projection[0].ln2,
             proj_layers=None,
             input_ids=input_ids,
             position_ids=position_ids,
-            flash=False,
+            flash=False
+        )
+
+
+        # Iterate through blocks_projection in reverse order
+        for idx in range(len(self.blocks_projection) - 1, -1, -1):
+
+            block_projection = self.blocks_projection[idx]
+
+            if idx == 0:
+                td_embed = self.embedding_projection.pc_layer_projection.get_td_err_projection("projection_embed")
+            else:
+                td_embed = self.blocks_projection[idx - 1].mlp.pc_layer2_projection.get_td_err_projection("projection_fc2")
+
+
+            execute_parallel(
+                use_cuda,
+                streams_or_futures,
+                block_projection.attn.pc_qkv_projection.forward,
+                target_activity=block_projection.attn.pc_output_projection.get_q("projection_linear_attn"),
+                layer_type="projection_attn",
+                t=0,
+                T=1,
+                requires_update=False,
+                td_err=td_embed,
+                layer=None,
+                layer_norm=block_projection.ln2,
+                proj_layers={
+                    "q_proj": block_projection.attn.q_projection,
+                    "k_proj": block_projection.attn.k_projection,
+                    "v_proj": block_projection.attn.v_projection
+                },
+                input_ids=None,
+                position_ids=None,
+                flash=getattr(self.config, "use_flash_attention", False),
+                use_cache=use_kv_cache,
+                kv_cache=block_projection.attn.kv_cache_projection if use_kv_cache else None,
+            )
+
+
+            # Update projection KV cache
+            if hasattr(block_projection.attn.pc_qkv_projection, "_last_kv_cache_projection"):
+                block_projection.attn.kv_cache_projection = block_projection.attn.pc_qkv_projection._last_kv_cache_projection
+
+
+            td_attn_qkv = (
+                block_projection.attn.pc_qkv_projection.get_td_err_projection("projection_attn")
+            )
+
+
+            execute_parallel(
+                use_cuda,
+                streams_or_futures,
+                block_projection.attn.pc_output_projection.forward,
+                target_activity=block_projection.mlp.pc_layer1_projection.get_q("projection_fc1"),
+                layer_type="projection_linear_attn",
+                t=0,
+                T=1,
+                requires_update=False,
+                td_err=td_attn_qkv,
+                layer=block_projection.attn.output_projection,
+                layer_norm=block_projection.ln1,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+                flash=False
+            )
+
+
+            td_attn_op = block_projection.attn.pc_output_projection.get_td_err_projection("projection_linear_attn")
+
+
+            execute_parallel(
+                use_cuda,
+                streams_or_futures,
+                block_projection.mlp.pc_layer1_projection.forward,
+                target_activity=block_projection.mlp.pc_layer2_projection.get_q("projection_fc2"),
+                layer_type="projection_fc1",
+                t=0,
+                T=1,
+                requires_update=False,
+                td_err=td_attn_op,
+                layer=block_projection.mlp.fc1_projection,
+                layer_norm=block_projection.ln1,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+                flash=False
+            )
+
+
+            next_target = (
+                self.blocks_projection[idx + 1]
+                .attn.pc_qkv_projection
+                .get_q("projection_attn")
+                if idx < len(self.blocks_projection) - 1
+                else self.output_projection.pc_layer_projection.get_q("projection_linear_output")
+            )
+
+
+            layer_norm2 = (
+                block_projection.ln2
+                if idx < len(self.blocks_projection) - 1
+                else None
+            )
+
+
+            td_mlp1 = block_projection.mlp.pc_layer1_projection.get_td_err_projection("projection_fc1")
+
+
+            execute_parallel(
+                use_cuda,
+                streams_or_futures,
+                block_projection.mlp.pc_layer2_projection.forward,
+                target_activity=next_target,
+                layer_type="projection_fc2",
+                t=0,
+                T=1,
+                requires_update=False,
+                td_err=td_mlp1,
+                layer=block_projection.mlp.fc2_projection,
+                layer_norm=layer_norm2,
+                proj_layers=None,
+                input_ids=None,
+                position_ids=None,
+                flash=False
+            )
+
+
+        td_mlp2 = self.blocks_projection[-1].mlp.pc_layer2_projection.get_td_err_projection("projection_fc2")
+
+
+        execute_parallel(
+            use_cuda,
+            streams_or_futures,
+            self.output_projection.pc_layer_projection.forward,
+            target_activity=target_logits,
+            layer_type="projection_linear_output",
+            t=0,
+            T=1,
+            requires_update=False,
+            td_err=td_mlp2,
+            layer=self.output_projection.output_projection,
+            layer_norm=None,
+            proj_layers=None,
+            input_ids=None,
+            position_ids=None,
+            flash=False
         )
 
         synchronize_execution(use_cuda, streams_or_futures)
@@ -408,8 +440,6 @@ class PCTransformer(nn.Module):
         
         for t in range(self.config.T):
 
-            do_update = (t == self.config.T - 1)
-
 
             execute_parallel(
                 use_cuda,
@@ -419,7 +449,7 @@ class PCTransformer(nn.Module):
                 layer_type="embed",
                 t=t,
                 T=self.config.T,
-                requires_update=do_update,
+                requires_update=True,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
                 layer_norm=self.blocks[0].ln2,
@@ -450,7 +480,7 @@ class PCTransformer(nn.Module):
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=do_update,
+                    requires_update=True,
                     td_err= td_embed,
                     layer = None,
                     layer_norm=block.ln2,
@@ -476,7 +506,7 @@ class PCTransformer(nn.Module):
                     layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=do_update,
+                    requires_update=True,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
                     layer_norm=block.ln1,
@@ -496,7 +526,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
-                    requires_update=do_update,
+                    requires_update=True,
                     td_err=td_attn_op,
                     layer=block.mlp.fc1,
                     layer_norm=block.ln1,
@@ -528,7 +558,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc2",
                     t=t,
                     T=self.config.T,
-                    requires_update=do_update,
+                    requires_update=True,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
@@ -555,7 +585,7 @@ class PCTransformer(nn.Module):
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
-                requires_update=do_update,
+                requires_update=True,
                 td_err= td_mlp2,
                 layer=self.output.output,
                 layer_norm=None,
