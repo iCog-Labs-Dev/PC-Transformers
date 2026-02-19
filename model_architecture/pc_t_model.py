@@ -41,7 +41,7 @@ class PCTransformer(nn.Module):
             block.mlp.pc_layer2.register_lateral("fc2", block.mlp.fc2.in_features)
         self.output.pc_layer.register_lateral("linear", self.output.output.in_features)
         for block_projection in self.blocks_projection:
-            block_projection.attn.pc_qkv_projection.register_lateral("projection_attn", block_projection.attn.q.in_features)
+            block_projection.attn.pc_qkv_projection.register_lateral("projection_attn", block_projection.attn.q_projection.in_features)
             block_projection.attn.pc_output_projection.register_lateral("projection_linear_attn", block_projection.attn.output_projection.in_features)
             block_projection.mlp.pc_layer1_projection.register_lateral("projection_fc1", block_projection.mlp.fc1_projection.in_features)
             block_projection.mlp.pc_layer2_projection.register_lateral("projection_fc2", block_projection.mlp.fc2_projection.in_features)
@@ -108,9 +108,9 @@ class PCTransformer(nn.Module):
                 device=device,
                 layer=None,
                 proj_layers={
-                    "q_proj": block_projection.attn.q,
-                    "k_proj": block_projection.attn.k,
-                    "v_proj": block_projection.attn.v
+                    "q_proj": block_projection.attn.q_projection,
+                    "k_proj": block_projection.attn.k_projection,
+                    "v_proj": block_projection.attn.v_projection
                 },
                 input_ids=None,
                 position_ids=None,
@@ -150,7 +150,7 @@ class PCTransformer(nn.Module):
             )
 
        
-        self.output_projection.pc_layer.init_q(
+        self.output_projection.pc_layer_projection.init_q(
             batch_size=B,
             seq_len=S,
             layer_type="projection_linear_output",
@@ -244,8 +244,8 @@ class PCTransformer(nn.Module):
             requires_update=False,
             td_err=None,
             layer={
-                "word": self.embedding_projection.word_embeddings,
-                "pos": self.embedding_projection.position_embeddings
+                "word": self.embedding_projection.word_embeddings_projection,
+                "pos": self.embedding_projection.position_embeddings_projection
             },
             layer_norm=self.blocks_projection[0].ln2,
             proj_layers=None,
@@ -294,7 +294,7 @@ class PCTransformer(nn.Module):
 
 
             td_attn_qkv = (
-                block_projection.attn.pc_qkv_projectio.get_td_err_projection("projection_linear_attn")
+                block_projection.attn.pc_qkv_projection.get_td_err_projection("projection_linear_attn")
                 if t > 0 else None
             )
 
@@ -341,7 +341,7 @@ class PCTransformer(nn.Module):
                 .attn.pc_qkv_projection
                 .get_q("projection_linear_attn")
                 if idx < len(self.blocks_projection) - 1
-                else self.output.pc_layer_projection.get_q("projection_linear_output")
+                else self.output_projection.pc_layer_projection.get_q("projection_linear_output")
             )
 
 
@@ -378,12 +378,12 @@ class PCTransformer(nn.Module):
         execute_parallel(
             use_cuda,
             streams_or_futures,
-            self.output.pc_layer_projection.forward,
+            self.output_projection.pc_layer_projection.forward,
             target_activity=target_logits,
             layer_type="projection_linear_output",
             requires_update=False,
             td_err=td_mlp2,
-            layer=self.output.output_projection,
+            layer=self.output_projection.output_projection,
             layer_norm=None,
             proj_layers=None,
             input_ids=None,
