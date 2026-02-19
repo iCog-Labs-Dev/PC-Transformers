@@ -47,10 +47,10 @@ def train(model, dataloader, config, global_step, device, logger):
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size - 1)
 
-        if global_step < config.warmup_steps:
-            lr = config.lr + global_step / config.warmup_steps * (
-                config.peak_learning_rate - config.lr)
-        else:
+        #if global_step < config.warmup_steps:
+         #   lr = config.lr + global_step / config.warmup_steps * (
+          #      config.peak_learning_rate - config.lr)
+       # else:
             # # Cosine decay after warmup
             # decay_step = global_step - config.warmup_steps
             # decay_total = total_steps - config.warmup_steps
@@ -59,7 +59,18 @@ def train(model, dataloader, config, global_step, device, logger):
             # # Minimum learning rate = 10% of peak_lr
             # min_lr = 0.1 * config.peak_learning_rate
             # lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
-            lr = config.peak_learning_rate
+            #lr = config.peak_learning_rate
+
+        if global_step < config.warmup_steps:
+            base_lr = config.lr + global_step / config.warmup_steps * (
+                config.peak_learning_rate - config.lr)
+        else:
+            base_lr = config.peak_learning_rate
+        
+        if getattr(config, 'optimizer_name', 'adam') in ['sgd_momentum', 'adamw']:
+            lr = base_lr * 0.1  
+        else:
+            lr = base_lr
 
         for module in model.modules():
             if hasattr(module, 'local_lr'):
@@ -69,6 +80,9 @@ def train(model, dataloader, config, global_step, device, logger):
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size-1)
             
+        logits = model(target_ids, input_ids)
+        max_grad_norm = 0.5
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             
         logits = model(target_ids, input_ids)
         ce_loss = F.cross_entropy(
@@ -153,6 +167,11 @@ def main():
         root_logger.addHandler(file_h)
 
     logger = logging.getLogger(__name__)
+    weight_decay = (
+        best_config.get("optimizer_weight_decay_pc", 0.001)
+        if best_config["optimizer_name"] == "adamw"
+        else best_config.get("optimizer_weight_decay", 0.01)
+    )
    
     config = GPTConfig(
         vocab_size = vocab_size,
@@ -180,6 +199,8 @@ def main():
         optimizer_eps = best_config["optimizer_eps"],
         optimizer_sign_value = best_config["optimizer_sign_value"],
         optimizer_weight_bound = best_config["optimizer_weight_bound"],
+        optimizer_momentum=best_config.get("optimizer_momentum", 0.9),
+        optimizer_weight_decay=weight_decay,
     )
     
     # Create a separate logger for hyperparameters
