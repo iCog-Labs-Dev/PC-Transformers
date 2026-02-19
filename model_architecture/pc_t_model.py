@@ -440,6 +440,8 @@ class PCTransformer(nn.Module):
         
         for t in range(self.config.T):
 
+            do_update = (t == self.config.T - 1)
+
 
             execute_parallel(
                 use_cuda,
@@ -449,7 +451,7 @@ class PCTransformer(nn.Module):
                 layer_type="embed",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=do_update,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
                 layer_norm=self.blocks[0].ln2,
@@ -480,7 +482,7 @@ class PCTransformer(nn.Module):
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=do_update,
                     td_err= td_embed,
                     layer = None,
                     layer_norm=block.ln2,
@@ -506,7 +508,7 @@ class PCTransformer(nn.Module):
                     layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=do_update,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
                     layer_norm=block.ln1,
@@ -526,7 +528,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=do_update,
                     td_err=td_attn_op,
                     layer=block.mlp.fc1,
                     layer_norm=block.ln1,
@@ -558,7 +560,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc2",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=do_update,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
@@ -585,7 +587,7 @@ class PCTransformer(nn.Module):
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=do_update,
                 td_err= td_mlp2,
                 layer=self.output.output,
                 layer_norm=None,
