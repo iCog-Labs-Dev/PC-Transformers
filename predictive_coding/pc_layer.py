@@ -76,6 +76,17 @@ class PCLayer(nn.Module):
         
     def _get_cached_state_projection(self, layer_type: str):
         return self._q_cache.get(layer_type, None)
+
+    def _get_lateral_connection(self, layer_type: str, device: torch.device):
+        lateral_conn = self.lateral_connections.get(layer_type, None)
+        if lateral_conn is None:
+            return None
+
+        lateral_device = lateral_conn.W_lateral.device
+        if lateral_device != device:
+            lateral_conn = lateral_conn.to(device)
+            self.lateral_connections[layer_type] = lateral_conn
+        return lateral_conn
         
     def forward(
         self,
@@ -131,7 +142,7 @@ class PCLayer(nn.Module):
             return mu_word, mu_pos
         
         elif layer_type == "attn":
-            lateral_conn = self.lateral_connections.get(layer_type, None)
+            lateral_conn = self._get_lateral_connection(layer_type, target_activity.device)
             x, mu, bu_err, new_kv_cache = step_attn(
                 t, T, target_activity, x, lateral_conn, proj_layers, layer_type,
                 self.local_lr, self.clamp_value, self.energy_fn_name, self.update_bias,
@@ -143,7 +154,7 @@ class PCLayer(nn.Module):
                 self._last_kv_cache = new_kv_cache
                 
         elif layer_type == "projection_attn":
-            lateral_conn = self.lateral_connections.get(layer_type, None)
+            lateral_conn = self._get_lateral_connection(layer_type, target_activity.device)
             q, mu, bu_err, new_kv_cache = step_attn(
                 t, T, target_activity, q, lateral_conn, proj_layers, layer_type,
                 self.local_lr, self.clamp_value, self.energy_fn_name, self.update_bias,
@@ -160,7 +171,7 @@ class PCLayer(nn.Module):
             return q, mu
          
         elif layer_type in ["projection_linear_attn", "projection_fc1", "projection_fc2", "projection_linear_output"]:
-            lateral_conn = self.lateral_connections.get(layer_type, None)
+            lateral_conn = self._get_lateral_connection(layer_type, target_activity.device)
             q, mu, bu_err = step_linear(
                 t, T, target_activity, q, layer, lateral_conn, layer_type,
                 self.local_lr, self.clamp_value, self.energy_fn_name, self.update_bias, 
@@ -174,7 +185,7 @@ class PCLayer(nn.Module):
             return q, mu
             
         else:
-            lateral_conn = self.lateral_connections.get(layer_type, None)
+            lateral_conn = self._get_lateral_connection(layer_type, target_activity.device)
             x, mu, bu_err = step_linear(
                 t, T, target_activity, x, layer, lateral_conn, layer_type,
                 self.local_lr, self.clamp_value, self.energy_fn_name, self.update_bias, 
