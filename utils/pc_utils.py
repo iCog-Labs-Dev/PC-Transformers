@@ -227,9 +227,7 @@ def step_attn(
     mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
     
     bu_err = target - mu  # B, T, D
-    if td_err is not None and td_err.shape != bu_err.shape:
-        print(td_err.shape)
-        print(bu_err.shape)
+   
     error = bu_err - td_err if td_err is not None else bu_err
                 
     if lateral_conn is not None:
