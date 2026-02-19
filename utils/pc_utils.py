@@ -115,8 +115,10 @@ def step_linear(
         bu_err = target - mu 
         
     # project bottom-up error through weights
-    error_proj= bu_err @ layer.weight      
-    error = error_proj- td_err if td_err is not None else error_proj  
+    error_proj= bu_err @ layer.weight
+    if td_err is not None and td_err.shape != error_proj.shape:
+        td_err = None
+    error = error_proj - td_err if td_err is not None else error_proj
     
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)
@@ -225,7 +227,10 @@ def step_attn(
     mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
     
     bu_err = target - mu  # B, T, D
-    error = bu_err - td_err if td_err is not None else bu_err  
+    if td_err is not None and td_err.shape != bu_err.shape:
+        print(td_err.shape)
+        print(bu_err.shape)
+    error = bu_err - td_err if td_err is not None else bu_err
                 
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)

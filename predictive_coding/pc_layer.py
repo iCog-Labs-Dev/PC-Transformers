@@ -369,12 +369,22 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        self._error_cache.clear()
+        self._q_cache.clear()
+        self._mu_cache_projection.clear()
+        self._error_cache_projection.clear()
+        if hasattr(self, "_last_kv_cache"):
+            self._last_kv_cache = None
+        if hasattr(self, "_last_kv_cache_projection"):
+            self._last_kv_cache_projection = None
         
     def get_errors(self) -> list:
         return self._errors
 
     def clear_errors(self):
         self._errors = []
+        self._error_cache.clear()
+        self._error_cache_projection.clear()
         
     def set_learning_rate(self, lr: float):
         self.local_lr = float(lr)

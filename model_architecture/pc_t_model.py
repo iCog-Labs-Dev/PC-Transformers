@@ -516,8 +516,26 @@ class PCTransformer(nn.Module):
                     flash=False
 
                 )
-                
+                td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t > 0 else None
 
+                execute_parallel(
+                    use_cuda,
+                    streams_or_futures,
+                    block.mlp.pc_layer1.forward,
+                    target_activity=block.mlp.pc_layer2.get_x("fc2"),
+                    layer_type="fc1",
+                    t=t,
+                    T=self.config.T,
+                    requires_update=True,
+                    td_err=td_attn_op,
+                    layer=block.mlp.fc1,
+                    layer_norm=block.ln1,
+                    proj_layers=None,
+                    input_ids=None,
+                    position_ids=None,
+                    flash=False
+
+                )
 
 
                 next_target = (
