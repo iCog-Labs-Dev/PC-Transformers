@@ -134,7 +134,19 @@ class PCLayer(nn.Module):
                 self.local_lr, self.clamp_value, self.energy_fn_name, requires_update,
                 layer_norm=layer_norm, optimizer=self.optimizer,
             )            
-            self._q_cache["projection_embed"] = (mu_word, mu_pos)
+            # Normalize projection seed vectors before caching to stabilize inference
+            # This helps prevent energy blowups when seeding x from projection paths
+            try:
+                max_w = mu_word.abs().max()
+                mu_word_norm = mu_word / (max_w + 1e-6)
+            except Exception:
+                mu_word_norm = mu_word
+            try:
+                max_p = mu_pos.abs().max()
+                mu_pos_norm = mu_pos / (max_p + 1e-6)
+            except Exception:
+                mu_pos_norm = mu_pos
+            self._q_cache["projection_embed"] = (mu_word_norm, mu_pos_norm)
             self._mu_cache_projection["projection_embed"] = mu.detach().clone()
             if bu_err is not None:
                 self._error_cache_projection["projection_embed"] = bu_err.detach().clone()
@@ -326,6 +338,17 @@ class PCLayer(nn.Module):
 
             q_word = layer["word"].weight[input_ids]
             q_pos = layer["pos"].weight[position_ids]
+            # Normalize seeds for projection embedding init_q as well
+            try:
+                max_qw = q_word.abs().max()
+                q_word = q_word / (max_qw + 1e-6)
+            except Exception:
+                pass
+            try:
+                max_qp = q_pos.abs().max()
+                q_pos = q_pos / (max_qp + 1e-6)
+            except Exception:
+                pass
             self._q_cache["projection_embed"] = (q_word, q_pos)
         elif layer_type in ["projection_attn", "projection_linear_attn", "projection_fc1", "projection_fc2", "projection_linear_output"]:
             if proj_layers is not None and "q_proj" in proj_layers and proj_layers["q_proj"] is not None:
