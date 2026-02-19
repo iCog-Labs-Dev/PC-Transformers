@@ -87,6 +87,7 @@ class PCTransformer(nn.Module):
 
         # Initialize all predictive coding layers
         
+        
         self.embedding_projection.pc_layer_projection.init_q(
             batch_size=B,
             seq_len=S,
@@ -127,7 +128,7 @@ class PCTransformer(nn.Module):
                 position_ids=None,
             )
         
-            block_projection.mlp._projection.init_q(
+            block_projection.mlp.pc_layer1_projection.init_q(
                 batch_size=B,
                 seq_len=S,
                 layer_type="projection_fc1",
@@ -241,6 +242,8 @@ class PCTransformer(nn.Module):
             self.embedding_projection.pc_layer_projection.forward,
             target_activity=self.blocks_projection[0].attn.pc_qkv_projection.get_q("projection_attn"),
             layer_type="projection_embed",
+            t=0,
+            T=1,
             requires_update=False,
             td_err=None,
             layer={
@@ -272,6 +275,8 @@ class PCTransformer(nn.Module):
                 block_projection.attn.pc_qkv_projection.forward,
                 target_activity=block_projection.attn.pc_output_projection.get_q("projection_linear_attn"),
                 layer_type="projection_attn",
+                t=0,
+                T=1,
                 requires_update=False,
                 td_err=td_embed,
                 layer=None,
@@ -290,12 +295,12 @@ class PCTransformer(nn.Module):
 
 
             # Update projection KV cache
-            block_projection.attn.kv_cache_projection = block_projection.attn.pc_qkv_projection._last_kv_cache
+            if hasattr(block_projection.attn.pc_qkv_projection, "_last_kv_cache_projection"):
+                block_projection.attn.kv_cache_projection = block_projection.attn.pc_qkv_projection._last_kv_cache_projection
 
 
             td_attn_qkv = (
-                block_projection.attn.pc_qkv_projection.get_td_err_projection("projection_linear_attn")
-                if t > 0 else None
+                block_projection.attn.pc_qkv_projection.get_td_err_projection("projection_attn")
             )
 
 
@@ -305,6 +310,8 @@ class PCTransformer(nn.Module):
                 block_projection.attn.pc_output_projection.forward,
                 target_activity=block_projection.mlp.pc_layer1_projection.get_q("projection_fc1"),
                 layer_type="projection_linear_attn",
+                t=0,
+                T=1,
                 requires_update=True,
                 td_err=td_attn_qkv,
                 layer=block_projection.attn.output_projection,
@@ -325,6 +332,8 @@ class PCTransformer(nn.Module):
                 block_projection.mlp.pc_layer1_projection.forward,
                 target_activity=block_projection.mlp.pc_layer2_projection.get_q("projection_fc2"),
                 layer_type="projection_fc1",
+                t=0,
+                T=1,
                 requires_update=True,
                 td_err=td_attn_op,
                 layer=block_projection.mlp.fc1_projection,
@@ -339,7 +348,7 @@ class PCTransformer(nn.Module):
             next_target = (
                 self.blocks_projection[idx + 1]
                 .attn.pc_qkv_projection
-                .get_q("projection_linear_attn")
+                .get_q("projection_attn")
                 if idx < len(self.blocks_projection) - 1
                 else self.output_projection.pc_layer_projection.get_q("projection_linear_output")
             )
@@ -361,6 +370,8 @@ class PCTransformer(nn.Module):
                 block_projection.mlp.pc_layer2_projection.forward,
                 target_activity=next_target,
                 layer_type="projection_fc2",
+                t=0,
+                T=1,
                 requires_update=True,
                 td_err=td_mlp1,
                 layer=block_projection.mlp.fc2_projection,
@@ -381,6 +392,8 @@ class PCTransformer(nn.Module):
             self.output_projection.pc_layer_projection.forward,
             target_activity=target_logits,
             layer_type="projection_linear_output",
+            t=0,
+            T=1,
             requires_update=False,
             td_err=td_mlp2,
             layer=self.output_projection.output_projection,
@@ -389,6 +402,36 @@ class PCTransformer(nn.Module):
             input_ids=None,
             position_ids=None,
             flash=False
+        )
+
+        synchronize_execution(use_cuda, streams_or_futures)
+
+        for idx, block in enumerate(self.blocks):
+            block.attn.pc_qkv.init_q(
+                projection_layer_type="projection_attn",
+                q=self.blocks_projection[idx].attn.pc_qkv_projection.get_q("projection_attn"),
+                device=device,
+            )
+            block.attn.pc_output.init_q(
+                projection_layer_type="projection_linear_attn",
+                q=self.blocks_projection[idx].attn.pc_output_projection.get_q("projection_linear_attn"),
+                device=device,
+            )
+            block.mlp.pc_layer1.init_q(
+                projection_layer_type="projection_fc1",
+                q=self.blocks_projection[idx].mlp.pc_layer1_projection.get_q("projection_fc1"),
+                device=device,
+            )
+            block.mlp.pc_layer2.init_q(
+                projection_layer_type="projection_fc2",
+                q=self.blocks_projection[idx].mlp.pc_layer2_projection.get_q("projection_fc2"),
+                device=device,
+            )
+
+        self.output.pc_layer.init_q(
+            projection_layer_type="projection_linear_output",
+            q=self.output_projection.pc_layer_projection.get_q("projection_linear_output"),
+            device=device,
         )
 
 
@@ -409,7 +452,7 @@ class PCTransformer(nn.Module):
                 requires_update=True,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-                layer_norm= block.ln2,
+                layer_norm=self.blocks[0].ln2,
                 proj_layers=None,
                 input_ids=input_ids,
                 position_ids=position_ids,

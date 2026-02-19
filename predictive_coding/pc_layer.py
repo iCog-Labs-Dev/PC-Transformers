@@ -75,9 +75,7 @@ class PCLayer(nn.Module):
         return self._x_cache.get(layer_type, None)
         
     def _get_cached_state_projection(self, layer_type: str):
-        # I noticed in your original code this polled _x_cache. I assume you might 
-        # want this to poll _q_cache for projection layers, but left it as _x_cache to match your snippet.
-        return self._x_cache.get(layer_type, None)
+        return self._q_cache.get(layer_type, None)
         
     def forward(
         self,
@@ -125,10 +123,10 @@ class PCLayer(nn.Module):
                 self.local_lr, self.clamp_value, self.energy_fn_name, requires_update,
                 layer_norm=layer_norm, optimizer=self.optimizer,
             )            
-            self._q_cache["embed"] = (mu_word, mu_pos)
-            self._mu_cache_projection["embed"] = mu.detach().clone()
+            self._q_cache["projection_embed"] = (mu_word, mu_pos)
+            self._mu_cache_projection["projection_embed"] = mu.detach().clone()
             if bu_err is not None:
-                self._error_cache_projection["embed"] = bu_err.detach().clone()
+                self._error_cache_projection["projection_embed"] = bu_err.detach().clone()
 
             return mu_word, mu_pos
         
@@ -197,28 +195,80 @@ class PCLayer(nn.Module):
         self._x_cache[layer_type] = x
         return x, mu
 
-    def init_q(self, projection_layer_type: str, q: torch.Tensor, device: torch.device):
+    def init_q(
+        self,
+        projection_layer_type: Optional[str] = None,
+        q: Optional[torch.Tensor] = None,
+        device: Optional[torch.device] = None,
+        batch_size: Optional[int] = None,
+        seq_len: Optional[int] = None,
+        layer_type: Optional[str] = None,
+        layer: Optional[nn.Module] = None,
+        proj_layers: Optional[dict] = None,
+        input_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+    ):
         """
-        Takes the `q` output from a 1-pass projection layer and initializes the `x` 
-        state of the corresponding target layer. 
+        Two modes:
+        1) Projection initialization mode (used for projection layers):
+           init_q(batch_size=..., seq_len=..., layer_type="projection_*", ...)
+           -> initializes self._q_cache for projection inference.
+
+        2) Projection-to-standard injection mode (used after projection pass):
+           init_q(projection_layer_type="projection_*", q=<tensor>, device=<device>)
+           -> maps projected q into the corresponding self._x_cache target layer.
         """
-        # Map the projection layer names to your target x_cache keys
+        if batch_size is not None and seq_len is not None and layer_type is not None:
+            if device is None:
+                raise ValueError("device is required for init_q projection initialization mode")
+
+            if layer_type == "projection_embed":
+                assert input_ids is not None and position_ids is not None, "Projection embedding layer requires input_ids and position_ids"
+                assert layer is not None and isinstance(layer, dict), "projection_embed requires layer={'word':..., 'pos':...}"
+
+                vocab_size = layer["word"].weight.size(0)
+                if input_ids.max() >= vocab_size:
+                    input_ids = torch.clamp(input_ids, max=vocab_size - 1)
+
+                max_pos = layer["pos"].weight.size(0)
+                if position_ids.max() >= max_pos:
+                    position_ids = torch.clamp(position_ids, max=max_pos - 1)
+
+                q_word = layer["word"].weight[input_ids]
+                q_pos = layer["pos"].weight[position_ids]
+                self._q_cache["projection_embed"] = (q_word, q_pos)
+                return
+
+            if layer_type in ["projection_attn", "projection_linear_attn", "projection_fc1", "projection_fc2", "projection_linear_output"]:
+                if proj_layers is not None and "q_proj" in proj_layers and proj_layers["q_proj"] is not None:
+                    feature_dim = proj_layers["q_proj"].out_features
+                elif layer is not None and hasattr(layer, "in_features"):
+                    feature_dim = layer.in_features
+                else:
+                    raise ValueError(f"Cannot infer feature dimension for projection layer_type: {layer_type}")
+
+                self._q_cache[layer_type] = torch.zeros(batch_size, seq_len, feature_dim, device=device)
+                return
+
+            raise ValueError(f"Unsupported projection layer_type in init_q: {layer_type}")
+
+        if projection_layer_type is None or q is None or device is None:
+            raise ValueError("init_q requires either projection initialization args or (projection_layer_type, q, device)")
+
         layer_mapping = {
             "projection_attn": "attn",
             "projection_linear_attn": "linear_attn",
             "projection_fc1": "fc1",
             "projection_fc2": "fc2",
-            "projection_linear_output": "linear"
+            "projection_linear_output": "linear_output"
         }
-        
+
         target_layer = layer_mapping.get(projection_layer_type)
         if target_layer is None:
             raise ValueError(f"No target mapping defined for projection layer: {projection_layer_type}")
 
-        # Inject the forward pass 'q' value into 'x'
         self._x_cache[target_layer] = q.detach().clone()
-        
-        # Register lateral connections using the dimension of the injected q
+
         input_dim = q.shape[-1]
         self.register_lateral(target_layer, input_dim)
         if target_layer in self.lateral_connections:
@@ -253,10 +303,39 @@ class PCLayer(nn.Module):
             x_word = layer["word"].weight[input_ids] 
             x_pos = layer["pos"].weight[position_ids] 
             self._x_cache["embed"] = (x_word, x_pos)
+        elif layer_type == "projection_embed":
+            assert input_ids is not None and position_ids is not None, "Projection embedding layer requires input_ids and position_ids"
+            vocab_size = layer["word"].weight.size(0)
+            if input_ids.max() >= vocab_size:
+                input_ids = torch.clamp(input_ids, max=vocab_size - 1)
+
+            max_pos = layer["pos"].weight.size(0)
+            if position_ids.max() >= max_pos:
+                position_ids = torch.clamp(position_ids, max=max_pos - 1)
+
+            q_word = layer["word"].weight[input_ids]
+            q_pos = layer["pos"].weight[position_ids]
+            self._q_cache["projection_embed"] = (q_word, q_pos)
+        elif layer_type in ["projection_attn", "projection_linear_attn", "projection_fc1", "projection_fc2", "projection_linear_output"]:
+            if proj_layers is not None and "q_proj" in proj_layers and proj_layers["q_proj"] is not None:
+                feature_dim = proj_layers["q_proj"].out_features
+            elif layer is not None and hasattr(layer, "in_features"):
+                feature_dim = layer.in_features
+            else:
+                raise ValueError(f"Cannot infer feature dimension for projection layer_type: {layer_type}")
+
+            self._q_cache[layer_type] = torch.zeros(batch_size, seq_len, feature_dim, device=device)
+        elif layer_type in ["attn", "linear_attn", "fc1", "fc2", "linear_output"]:
+            if proj_layers is not None and "q_proj" in proj_layers and proj_layers["q_proj"] is not None:
+                feature_dim = proj_layers["q_proj"].in_features
+            elif layer is not None and hasattr(layer, "in_features"):
+                feature_dim = layer.in_features
+            else:
+                raise ValueError(f"Cannot infer feature dimension for layer_type: {layer_type}")
+
+            self._x_cache[layer_type] = torch.zeros(batch_size, seq_len, feature_dim, device=device)
         else:
-            # We no longer use x_init for these layers. 
-            # They will be initialized dynamically by `init_q` after the projection pass.
-            pass
+            raise ValueError(f"Unsupported layer_type in init_x: {layer_type}")
 
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         return self._x_cache.get(layer_type, None)
