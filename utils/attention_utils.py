@@ -69,4 +69,4 @@ def apply_standard_attention(q, k, v, mask=None):
     attn_weights = torch.softmax(attn_scores, dim=-1)
     attn_output = torch.matmul(attn_weights, v)
 
-    return attn_output
+    return attn_output, attn_weights, attn_scores
