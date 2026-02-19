@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from projection.embedding_projection import Embedding_LayerProjection
-from projection.transformer_block_projection import TransformerBlockProjection
-from projection.output_projecton import OutputLayerProjection
+from .projection.embedding_projection import Embedding_LayerProjection
+from .projection.transformer_block_projection import TransformerBlockProjection
+from .projection.output_projecton import OutputLayerProjection
 
 from .embedding import Embedding_Layer
 from .transformer_block import TransformerBlock
