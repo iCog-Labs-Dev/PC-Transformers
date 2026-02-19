@@ -200,60 +200,63 @@ def step_attn(
     if flash:
         mu_heads = apply_flash_attention(Q, K, V, mask=causal_mask)
     else:
-        mu_heads = apply_standard_attention(Q, K, V, mask=causal_mask)
+        mu_heads, attn_weights, attn_scores = apply_standard_attention(Q, K, V, mask=causal_mask)
     
     mu = mu_heads.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-    
     bu_err = target - mu  # B, T, D
+    
     error = bu_err - td_err if td_err is not None else bu_err  
-                
+     
+    scale = 1.0 / (head_dim ** 0.5)
+
+    dE_dmu = -bu_err  
+    dE_dmu_heads = dE_dmu.view(batch_size, num_heads, seq_len, head_dim)
+    # dE/dV = A^T @ dE/dμ
+    dE_dV = torch.matmul(attn_weights.transpose(-2, -1), dE_dmu_heads)
+
+    # dE/dA = dE/dμ @ V^T
+    dE_dA = torch.matmul(dE_dmu_heads, V.transpose(-2, -1))
+
+    # Softmax vector-Jacobian product
+    inner = (dE_dA * attn_weights).sum(dim=-1, keepdim=True)
+    dE_dS = attn_weights * (dE_dA - inner)
+
+    dE_dQ = torch.matmul(dE_dS, K) * scale
+    dE_dK = torch.matmul(dE_dS.transpose(-2, -1), Q) * scale
+
+    delta_x = torch.zeros_like(x_norm)
+
+    # Update x per head
+    for h in range(num_heads):
+        delta_x_h = (
+            dE_dQ[:, h] @ q_proj.weight[h*head_dim:(h+1)*head_dim] +
+            dE_dK[:, h] @ k_proj.weight[h*head_dim:(h+1)*head_dim] +
+            dE_dV[:, h] @ v_proj.weight[h*head_dim:(h+1)*head_dim]
+        )
+        delta_x += delta_x_h
+        
     if lateral_conn is not None:
-        delta_x = lateral_conn.forward(x, error)
+        delta_x = lateral_conn.forward(x, delta_x)
         x = x + local_lr * delta_x
         
         if requires_update:
             lateral_conn.update_weights(x.detach())
     else:
-        x = x + local_lr * error
+        x = x + local_lr * delta_x
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 
-    # PC update W_latent
     if requires_update:
-        with torch.no_grad():
-            B, S = batch_size, seq_len
+      with torch.no_grad():
+        for h in range(num_heads):
+            dW_q = torch.einsum("btd,bte->de", dE_dQ[:, h], x_norm)
+            dW_k = torch.einsum("btd,bte->de", dE_dK[:, h], x_norm)
+            dW_v = torch.einsum("btd,bte->de", dE_dV[:, h], x_norm)
+            q_proj.weight.data[h*head_dim:(h+1)*head_dim] += local_lr * dW_q
+            k_proj.weight.data[h*head_dim:(h+1)*head_dim] += local_lr * dW_k
+            v_proj.weight.data[h*head_dim:(h+1)*head_dim] += local_lr * dW_v
 
-            K_update = K[:, :, -seq_len:, :] 
-            V_update = V[:, :, -seq_len:, :]
-            
-            # Multi-head Q, K, V updates
-            for h in range(num_heads):
-                q_slice = Q[:, h, :, :]  # [B, S, head_dim]
-                k_slice = K_update[:, h, :, :]
-                v_slice = V_update[:, h, :, :]
-                
-                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x_norm) / (B * S)
-                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x_norm) / (B * S)
-                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x_norm) / (B * S)
-
-                start = h * head_dim
-                end = (h + 1) * head_dim
-                
-                q_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_q_h, -clamp_value, clamp_value)
-                k_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_k_h, -clamp_value, clamp_value)
-                v_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_v_h, -clamp_value, clamp_value)
-                
-                if update_bias:
-                    if q_proj.bias is not None:
-                        delta_b_q = (q_slice.mean(dim=(0, 1)) / (B * S))
-                        q_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_q, -clamp_value, clamp_value)
-                    if k_proj.bias is not None:
-                        delta_b_k = (k_slice.mean(dim=(0, 1)) / (B * S))
-                        k_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_k, -clamp_value, clamp_value)
-                    if v_proj.bias is not None:
-                        delta_b_v = (v_slice.mean(dim=(0, 1)) / (B * S))
-                        v_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_v, -clamp_value, clamp_value)
- 
+         
     if t == T - 1:
         finalize_step(mu, target, error, t, layer_type,energy_fn_name)
      
