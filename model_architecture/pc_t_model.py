@@ -1,3 +1,4 @@
+
 import torch
 import torch.nn as nn
 from .embedding import Embedding_Layer
@@ -5,6 +6,7 @@ from .transformer_block import TransformerBlock
 from utils.pc_utils import ids_to_one_hot
 from .output import OutputLayer
 from utils.device_utils import create_streams_or_futures, execute_parallel, synchronize_execution
+from .projection_network import ProjectionNetwork  # Adjust import path as needed
 
 class PCTransformer(nn.Module):
     """
@@ -21,6 +23,15 @@ class PCTransformer(nn.Module):
         self.embedding = Embedding_Layer(config)
         self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
         self.output = OutputLayer(config)
+                # --- Projection Network for Latent Initialization ---
+        if getattr(config, 'use_projection_init', False):
+            self.projection_net = ProjectionNetwork(config)
+        else:
+            self.projection_net = None
+    def sync_projection_weights(self):
+        """Copy weights from main PC model to projection network."""
+        if self.projection_net is not None:
+            self.projection_net.copy_weights_from(self)
 
     def register_all_lateral_weights(self):
         """
@@ -66,11 +77,29 @@ class PCTransformer(nn.Module):
         if input_ids.max() >= vocab_size:
             input_ids = torch.clamp(input_ids, max=vocab_size-1)
         
+
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size-1)
         
         target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
+        # --- Projection-based Initialization (if enabled) ---
+        projection_latents = {}
+        if self.projection_net is not None and getattr(self.config, 'use_projection_init', False):
+            # Sync weights from main model to projection network
+            self.sync_projection_weights()
+            
+            # Run feedforward projection pass
+            with torch.no_grad():  # No gradients needed for initialization
+                _, projection_latents = self.projection_net(
+                    input_ids, 
+                    position_ids, 
+                    return_latents=True
+                )
+        
+        # Initialize all predictive coding layers
+        use_proj = (self.projection_net is not None and 
+                   getattr(self.config, 'use_projection_init', False))
 
         # Initialize all predictive coding layers
         self.embedding.pc_layer.init_x(
@@ -82,6 +111,8 @@ class PCTransformer(nn.Module):
             proj_layers=None,
             input_ids=input_ids,
             position_ids=position_ids,
+            projection_latents=projection_latents,  # NEW
+            use_projection_init=use_proj, 
         )
 
         for block in self.blocks:
@@ -94,6 +125,8 @@ class PCTransformer(nn.Module):
                 proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                 input_ids = None,
                 position_ids = None,
+                projection_latents=projection_latents,  # NEW
+                use_projection_init=use_proj,           # NEW
             )
             block.attn.pc_output.init_x(
                 batch_size=B,
@@ -104,6 +137,8 @@ class PCTransformer(nn.Module):
                 proj_layers= None, 
                 input_ids = None,
                 position_ids = None,
+                projection_latents=projection_latents,  # NEW
+                use_projection_init=use_proj,           # NEW
             )
             block.mlp.pc_layer1.init_x(
                 batch_size=B,
@@ -114,6 +149,8 @@ class PCTransformer(nn.Module):
                 proj_layers= None, 
                 input_ids = None,
                 position_ids = None,
+                projection_latents=projection_latents,  # NEW
+                use_projection_init=use_proj,           # NEW
             )
             block.mlp.pc_layer2.init_x(
                 batch_size=B,
@@ -124,6 +161,8 @@ class PCTransformer(nn.Module):
                 proj_layers= None, 
                 input_ids = None,
                 position_ids = None,
+                projection_latents=projection_latents,  # NEW
+                use_projection_init=use_proj,           # NEW
             )
         self.output.pc_layer.init_x(
             batch_size=B,
@@ -134,6 +173,8 @@ class PCTransformer(nn.Module):
             proj_layers= None, 
             input_ids = None,
             position_ids = None,
+            projection_latents=projection_latents,  # NEW
+            use_projection_init=use_proj,           # NEW
         )
 
         # Initialize streams or futures for parallel execution
