@@ -164,6 +164,8 @@ class PCLayer(nn.Module):
         self._x_cache[layer_type] = x
         return x, mu
 
+    
+    
     def init_x(
         self,
         batch_size: int,
@@ -174,13 +176,28 @@ class PCLayer(nn.Module):
         proj_layers: Optional[dict] = None,
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        projection_latents: Optional[Dict[str, torch.Tensor]] = None,
+        use_projection_init: bool = False,
+        block_index: Optional[int] = None,
     ):
-        """
-        Initialize cached activity `x` for the layer type.
-        - embed: stores (x_word, x_pos) from embedding weights
-        - attn: creates random initialization shaped (B, S, H_out)
-        - linear/others: random init sized to layer input dimension
-        """
+        """Initialize cached activity `x` for the layer type."""
+        # >>> Use projection init if requested and available <<<
+        if use_projection_init and projection_latents is not None:
+            # For embed layer, skip projection init (fall back to original)
+            if layer_type != "embed":
+                self.init_x_from_projection(
+                    projection_latents, 
+                    layer_type, 
+                    device, 
+                    block_index,
+                    layer=layer,  # NEW
+                    proj_layers=proj_layers  # NEW
+                )
+                # Check if projection init succeeded (cache not set to None)
+                if self._x_cache.get(layer_type) is not None:
+                    return  # Success, early return
+        
+        # >>> ORIGINAL INIT CODE (for embed layer or projection fallback) <<<
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
             vocab_size = layer["word"].weight.size(0)
@@ -213,7 +230,91 @@ class PCLayer(nn.Module):
             self.register_lateral(layer_type, input_dim)  
             if layer_type in self.lateral_connections:
                 self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device) 
-    
+    def init_x_from_projection(
+        self,
+        projection_latents: Dict[str, torch.Tensor],
+        layer_type: str,
+        device: torch.device,
+        block_index: Optional[int] = None,
+        layer: Optional[nn.Module] = None,  # NEW: to get correct input_dim
+        proj_layers: Optional[dict] = None,  # NEW: for attention layers
+    ):
+        """
+        Initialize cached activity `x` using latents from projection network.
+        Ensures correct feature dimensions for each layer type.
+        """
+        # Get batch_size and seq_len from embed latent
+        embed_latent = projection_latents.get("embed")
+        if embed_latent is not None:
+            B, S = embed_latent.shape[0], embed_latent.shape[1]
+        else:
+            B, S = 1, 1  # fallback
+        
+        if layer_type == "embed":
+            # >>> FIX: Fall back to original embed init (projection doesn't have separate word/pos) <<<
+            # Projection stores combined embedding, but PC embed expects tuple (word, pos)
+            # We'll use the original init logic for embed layer
+            self._x_cache["embed"] = None  # Signal to use original init
+            return
+            
+        elif layer_type == "attn":
+            key = f"block{block_index}_attn" if block_index is not None else "block0_attn"
+            attn_latent = projection_latents.get(key)
+            
+            if attn_latent is not None:
+                # Get correct output dimension from proj_layers
+                if proj_layers is not None and "v_proj" in proj_layers:
+                    H_out = proj_layers["v_proj"].weight.shape[0]
+                    # Ensure latent has correct shape
+                    if attn_latent.shape[2] == H_out:
+                        self._x_cache["attn"] = attn_latent.to(device)
+                    else:
+                        # Shape mismatch - use random init
+                        self._x_cache["attn"] = x_init(B, S, H_out, device)
+                else:
+                    self._x_cache["attn"] = x_init(B, S, self.n_embed or 768, device)
+            else:
+                H_out = self.n_embed or 768
+                self._x_cache["attn"] = x_init(B, S, H_out, device)
+            
+            # Register lateral connections
+            if proj_layers is not None and "q_proj" in proj_layers:
+                H_in = proj_layers["q_proj"].weight.shape[1]
+                self.register_lateral(layer_type, H_in)
+                if layer_type in self.lateral_connections:
+                    self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device)
+                
+        elif layer_type in ["fc1", "fc2", "linear_attn", "linear_output"]:
+            # >>> FIX: Get correct input dimension from the actual layer <<<
+            if layer is not None and hasattr(layer, 'weight'):
+                input_dim = layer.weight.shape[1]  # Correct input dimension
+            else:
+                input_dim = self.n_embed or 768  # Fallback
+            
+            # Map layer_type to projection cache key
+            key_map = {
+                "fc1": f"block{block_index}_mlp" if block_index is not None else "block0_mlp",
+                "fc2": f"block{block_index}_mlp" if block_index is not None else "block0_mlp",
+                "linear_attn": f"block{block_index}_attn" if block_index is not None else "block0_attn",
+                "linear_output": "output"
+            }
+            latent = projection_latents.get(key_map.get(layer_type, layer_type))
+            
+            if latent is not None:
+                # Check if latent has correct feature dimension
+                if latent.shape[2] == input_dim:
+                    self._x_cache[layer_type] = latent.to(device)
+                else:
+                    # Shape mismatch - use random init with correct dimension
+                    self._x_cache[layer_type] = x_init(B, S, input_dim, device)
+            else:
+                # No latent available - use random init
+                self._x_cache[layer_type] = x_init(B, S, input_dim, device)
+            
+            # Register lateral connections
+            self.register_lateral(layer_type, input_dim)
+            if layer_type in self.lateral_connections:
+                self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device)          
     def get_x(self, layer_type: str) -> Optional[torch.Tensor]:
         """Get the cached activity tensor for a given layer type."""
         return self._x_cache.get(layer_type, None)
