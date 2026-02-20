@@ -317,7 +317,7 @@ class PCLayer(nn.Module):
             assert proj_layers is not None, "Attention projection  layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
             H_out = proj_layers["v_proj"].weight.shape[0] 
-            self._q_cache["attn"] = q_init(batch_size, seq_len, H_out, device)
+            self._q_cache["projection_attn"] = q_init(batch_size, seq_len, H_out, device)
             
             self.register_lateral(layer_type, H_in)
             if layer_type in self.lateral_connections:
