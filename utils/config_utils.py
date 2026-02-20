@@ -14,7 +14,7 @@ def load_best_config():
         "output_energy_fn_name", "combined_internal_weight",
         "combined_output_weight", "use_flash_attention",
         "optimizer_name", "optimizer_beta1", "optimizer_beta2", "optimizer_eps",
-        "optimizer_sign_value", "optimizer_weight_bound"
+        "optimizer_sign_value", "optimizer_weight_bound", "optimizer_weight_decay_pc", "optimizer_momentum_lr_scale",
     }
 
     fallback_values = {
@@ -41,7 +41,11 @@ def load_best_config():
         "optimizer_beta2": 0.999,
         "optimizer_eps": 1e-8,
         "optimizer_sign_value": -1.0,
-        "optimizer_weight_bound": 0.0
+        "optimizer_weight_bound": 0.0,
+        "optimizer_momentum": 0.5,        
+        "optimizer_weight_decay": 0.01,   
+        "optimizer_weight_decay_pc": 0.001,  
+        "optimizer_momentum_lr_scale": 0.25,
     }
 
     config = {}

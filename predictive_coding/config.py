@@ -54,3 +54,5 @@ class GPTConfig:
     optimizer_eps: float
     optimizer_sign_value: float
     optimizer_weight_bound: float
+    optimizer_momentum: float
+    optimizer_weight_decay: float 
