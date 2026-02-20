@@ -69,6 +69,13 @@ def train(model, dataloader, config, global_step, device, logger):
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size-1)
             
+        # --- Sync projection weights if using projection init ---
+        base_model = model.module if hasattr(model, 'module') else model
+        if (hasattr(base_model, 'projection_net') and 
+            base_model.projection_net is not None and
+            getattr(config, 'use_projection_init', True) and
+            global_step % getattr(config, 'projection_sync_freq', 1) == 0):
+            base_model.sync_projection_weights()
             
         logits = model(target_ids, input_ids)
         ce_loss = F.cross_entropy(
@@ -173,7 +180,10 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        alpha = best_config["alpha"],
+        use_projection_init=True,
+        projection_sync_freq=1,
+        projection_dropout=0,
     )
     
     # Create a separate logger for hyperparameters
