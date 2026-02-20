@@ -160,7 +160,7 @@ class PCLayer(nn.Module):
         
         elif layer_type == "attn":
             lateral_conn = self._get_lateral_connection(layer_type, target_activity.device)
-            x, mu, bu_err, new_kv_cachegggg   = step_attn(
+            x, mu, bu_err, new_kv_cache = step_attn(
                 t, T, target_activity, x, lateral_conn, proj_layers, layer_type,
                 self.local_lr, self.clamp_value, self.energy_fn_name, self.update_bias,
                 requires_update, self.num_heads, self.n_embed, td_err=td_err, 
@@ -264,10 +264,8 @@ class PCLayer(nn.Module):
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
-            H_out = proj_layers["v_proj"].weight.shape[0] 
-
-
-            self._x_cache["attn"] = self._q_cache[layer_mapping['attn']]
+            projection_seed = self._q_cache.get(layer_mapping["attn"])
+            self._x_cache["attn"] = projection_seed if projection_seed is not None else q_init(batch_size, seq_len, H_in, device)
             
             self.register_lateral(layer_type, H_in)
             if layer_type in self.lateral_connections:
@@ -276,7 +274,8 @@ class PCLayer(nn.Module):
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
-            self._x_cache[layer_type] = self._q_cache[layer_mapping[layer_type]]
+            projection_seed = self._q_cache.get(layer_mapping[layer_type])
+            self._x_cache[layer_type] = projection_seed if projection_seed is not None else q_init(batch_size, seq_len, input_dim, device)
             
             self.register_lateral(layer_type, input_dim)  
             if layer_type in self.lateral_connections:
