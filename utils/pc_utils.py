@@ -12,18 +12,23 @@ def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.dev
 def precompute_freqs_cis_real(dim: int, end: int, theta: float = 10000.0):
     """
     Precompute RoPE cos/sin of shape [end, dim] for easy broadcasting.
+
+    Compatible with `rotate_half`, which splits the vector into two halves:
+      rotate_half([x1, x2]) = [-x2, x1]
+    Norm preservation requires that cos[:, :dim//2] == cos[:, dim//2:] and
+    sin[:, :dim//2] == sin[:, dim//2:], i.e. frequencies are replicated across
+    halves, NOT interleaved.
     """
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2).float() / dim))
     t = torch.arange(end).float()
     freqs = torch.outer(t, freqs)  # [end, dim//2]
 
-    # Interleave to full dimension
-    cos = torch.zeros(end, dim)
-    sin = torch.zeros(end, dim)
-    cos[:, 0::2] = freqs.cos()
-    cos[:, 1::2] = freqs.cos()
-    sin[:, 0::2] = freqs.sin()
-    sin[:, 1::2] = freqs.sin()
+    cos_half = freqs.cos()  # [end, dim//2]
+    sin_half = freqs.sin()  # [end, dim//2]
+
+    # Replicate each half so rotate_half convention is satisfied
+    cos = torch.cat([cos_half, cos_half], dim=-1)  # [end, dim]
+    sin = torch.cat([sin_half, sin_half], dim=-1)  # [end, dim]
 
     return cos, sin
 
@@ -206,8 +211,6 @@ def step_attn(
     V_new = V_raw  
 
     cos, sin = rope_cache
-    cos = cos.to(device)
-    sin = sin.to(device)
 
     Q, K_new = apply_rotary_emb(Q, K_new, cos[:S], sin[:S])
 
