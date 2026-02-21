@@ -21,9 +21,12 @@ class PCTransformer(nn.Module):
     def __init__(self, config):
         super().__init__()
         head_dim = config.n_embed // config.num_heads
-        seq_len = config.block_size 
+        seq_len = config.block_size
 
-        self.rope_cache = precompute_freqs_cis_real(head_dim, seq_len)
+        cos, sin = precompute_freqs_cis_real(head_dim, seq_len)
+        # Register as buffers so model.to(device) moves them automatically
+        self.register_buffer("rope_cos", cos)
+        self.register_buffer("rope_sin", sin)
 
         self.config = config
         self.embedding = Embedding_Layer(config)
@@ -271,7 +274,7 @@ class PCTransformer(nn.Module):
                     flash=getattr(self.config, 'use_flash_attention', False),
                     use_cache=use_kv_cache,  
                     kv_cache=block.attn.kv_cache if use_kv_cache else None, 
-                    rope_cache=self.rope_cache
+                    rope_cache=(self.rope_cos, self.rope_sin)
                 )
 
                 # Update cache after last iteration
