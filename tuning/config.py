@@ -19,6 +19,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     dropout = trial.suggest_float("dropout", 0.0, 0.5)
     peak_lr = trial.suggest_float('peak_lr', 1e-5, 1e-2, log=True)
     lr = peak_lr * 0.1 
+    inference_lr = 0.01
     warmup_steps = trial.suggest_int('warmup_steps', 50, 2000, log=True)
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
     batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
@@ -35,6 +36,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         n_embed=n_embed,
         dropout=dropout,
         lr=lr, 
+        inference_lr=inference_lr,
         T=T,
         num_heads=num_heads,
         n_blocks=n_blocks,

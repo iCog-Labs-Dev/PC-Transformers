@@ -7,11 +7,12 @@ class LateralConnections(nn.Module):
     Manages lateral connections for a layer.
     Implements anti-Hebbian learning for decorrelation.
     """
-    def __init__(self, size: int, local_lr: float):
+    def __init__(self, size: int, local_lr: float, inference_lr: float):
         super().__init__()
         self.size = size
         self.local_lr = local_lr
-        
+        self.inference_lr = inference_lr
+
         # Initialize lateral weight matrix
         W = torch.empty(size, size)
         nn.init.xavier_uniform_(W)
@@ -43,3 +44,7 @@ class LateralConnections(nn.Module):
     def set_learning_rate(self, lr: float):
         """Set the local learning rate for the layer."""
         self.local_lr = float(lr)
+    
+    def set_inference_learning_rate(self, inference_lr: float):
+        """Set the inference learning rate for the layer."""
+        self.inference_lr = float(inference_lr)

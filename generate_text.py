@@ -88,6 +88,7 @@ def main():
         vocab_size = vocab_size,
         block_size = best_config["block_size"],
         lr = best_config["peak_learning_rate"],
+        inference_lr = best_config["inference_lr"],
         peak_learning_rate = best_config["peak_learning_rate"],
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
