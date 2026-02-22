@@ -269,21 +269,8 @@ class PCLayer(nn.Module):
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
             projection_seed = self._q_cache.get(layer_mapping[layer_type])
-            # determine whether this is the first time `x` is being initialized
-            first_init = layer_type not in self._x_cache
+           
             self._x_cache[layer_type] = projection_seed if projection_seed is not None else q_init(batch_size, seq_len, input_dim, device)
-
-            # If this is the first initialization for the final output linear layer,
-            # seed its bottom-up TD error from the projection's final-layer TD error
-            # so `x` does not start from zero but from the projection's prediction error.
-            # Only copy projection TD error for the final output layer
-            if first_init and layer_type == "linear_output":
-                proj_err = self._error_cache_projection.get("projection_linear_output")
-                if proj_err is not None:
-                    print("last projection is included")
-                    # store a detached clone to avoid accidental graph links
-                    self._error_cache[layer_type] = proj_err.detach().clone()
-
             self.register_lateral(layer_type, input_dim)  
             if layer_type in self.lateral_connections:
                 self.lateral_connections[layer_type] = self.lateral_connections[layer_type].to(device)

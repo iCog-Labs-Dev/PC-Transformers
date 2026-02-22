@@ -416,6 +416,14 @@ class PCTransformer(nn.Module):
         )
 
         synchronize_execution(use_cuda, streams_or_futures)
+        # copy final projection TD error into the corresponding non-projection
+        # output PCLayer so `linear_output` x initialization can use it
+        try:
+            proj_err = self.output_projection.pc_layer_projection.get_td_err_projection("projection_linear_output")
+            if proj_err is not None:
+                self.output.pc_layer._error_cache["linear_output"] = proj_err.detach().clone()
+        except Exception:
+            pass
 
         self.embedding.pc_layer.init_x(
             batch_size=B,
