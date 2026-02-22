@@ -280,6 +280,7 @@ class PCLayer(nn.Module):
             if first_init and layer_type == "linear_output":
                 proj_err = self._error_cache_projection.get("projection_linear_output")
                 if proj_err is not None:
+                    print("last projection is included")
                     # store a detached clone to avoid accidental graph links
                     self._error_cache[layer_type] = proj_err.detach().clone()
 
