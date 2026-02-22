@@ -29,6 +29,28 @@ class PCTransformer(nn.Module):
         self.blocks_projection = nn.ModuleList([TransformerBlockProjection(config) for _ in range(config.n_blocks)])
         self.output_projection = OutputLayerProjection(config)
 
+    def reset(self):
+        """
+        Reset predictive-coding related caches on all submodules.
+        Clears PCLayer caches and any KV caches used for generation.
+        """
+        for module in self.modules():
+            if hasattr(module, "clear_energy"):
+                try:
+                    module.clear_energy()
+                except Exception:
+                    pass
+            if hasattr(module, "clear_errors"):
+                try:
+                    module.clear_errors()
+                except Exception:
+                    pass
+            if hasattr(module, "clear_kv_cache"):
+                try:
+                    module.clear_kv_cache()
+                except Exception:
+                    pass
+
     def register_all_lateral_weights(self):
         """
         Register lateral weights for all predictive coding layers in the model.
@@ -64,12 +86,8 @@ class PCTransformer(nn.Module):
         Returns:
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
         """
-        for module in self.modules():
-            if hasattr(module, "clear_energy"):
-                module.clear_energy()
-            
-            if hasattr(module, "clear_errors"):
-                module.clear_errors()
+        # Reset predictive-coding caches and KV caches before running a new forward
+        self.reset()
 
         B, S = input_ids.shape
         device = input_ids.device
@@ -86,7 +104,62 @@ class PCTransformer(nn.Module):
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
         # Initialize all predictive coding layers
-        
+
+
+
+        # Copy current model weights into the projection modules so projection
+        # layers start from the latest (learned) weights rather than random initializations.
+        try:
+            # embedding weights
+            if hasattr(self.embedding, "word_embeddings") and hasattr(self.embedding_projection, "word_embeddings_projection"):
+                self.embedding_projection.word_embeddings_projection.weight.data.copy_(self.embedding.word_embeddings.weight.data)
+            if hasattr(self.embedding, "position_embeddings") and hasattr(self.embedding_projection, "position_embeddings_projection"):
+                self.embedding_projection.position_embeddings_projection.weight.data.copy_(self.embedding.position_embeddings.weight.data)
+        except Exception:
+            pass
+
+        # block-level weights (attention and MLP)
+        for src_block, proj_block in zip(self.blocks, self.blocks_projection):
+            try:
+                # attention q/k/v/output
+                if hasattr(src_block.attn, "q") and hasattr(proj_block.attn, "q_projection"):
+                    proj_block.attn.q_projection.weight.data.copy_(src_block.attn.q.weight.data)
+                    if src_block.attn.q.bias is not None and proj_block.attn.q_projection.bias is not None:
+                        proj_block.attn.q_projection.bias.data.copy_(src_block.attn.q.bias.data)
+                if hasattr(src_block.attn, "k") and hasattr(proj_block.attn, "k_projection"):
+                    proj_block.attn.k_projection.weight.data.copy_(src_block.attn.k.weight.data)
+                    if src_block.attn.k.bias is not None and proj_block.attn.k_projection.bias is not None:
+                        proj_block.attn.k_projection.bias.data.copy_(src_block.attn.k.bias.data)
+                if hasattr(src_block.attn, "v") and hasattr(proj_block.attn, "v_projection"):
+                    proj_block.attn.v_projection.weight.data.copy_(src_block.attn.v.weight.data)
+                    if src_block.attn.v.bias is not None and proj_block.attn.v_projection.bias is not None:
+                        proj_block.attn.v_projection.bias.data.copy_(src_block.attn.v.bias.data)
+                if hasattr(src_block.attn, "output") and hasattr(proj_block.attn, "output_projection"):
+                    proj_block.attn.output_projection.weight.data.copy_(src_block.attn.output.weight.data)
+                    if src_block.attn.output.bias is not None and proj_block.attn.output_projection.bias is not None:
+                        proj_block.attn.output_projection.bias.data.copy_(src_block.attn.output.bias.data)
+
+                # mlp fc1/fc2
+                if hasattr(src_block.mlp, "fc1") and hasattr(proj_block.mlp, "fc1_projection"):
+                    proj_block.mlp.fc1_projection.weight.data.copy_(src_block.mlp.fc1.weight.data)
+                    if src_block.mlp.fc1.bias is not None and proj_block.mlp.fc1_projection.bias is not None:
+                        proj_block.mlp.fc1_projection.bias.data.copy_(src_block.mlp.fc1.bias.data)
+                if hasattr(src_block.mlp, "fc2") and hasattr(proj_block.mlp, "fc2_projection"):
+                    proj_block.mlp.fc2_projection.weight.data.copy_(src_block.mlp.fc2.weight.data)
+                    if src_block.mlp.fc2.bias is not None and proj_block.mlp.fc2_projection.bias is not None:
+                        proj_block.mlp.fc2_projection.bias.data.copy_(src_block.mlp.fc2.bias.data)
+            except Exception:
+                # ignore copy errors and continue
+                pass
+
+        # output layer
+        try:
+            if hasattr(self.output, "output") and hasattr(self.output_projection, "output_projection"):
+                self.output_projection.output_projection.weight.data.copy_(self.output.output.weight.data)
+                if self.output.output.bias is not None and self.output_projection.output_projection.bias is not None:
+                    self.output_projection.output_projection.bias.data.copy_(self.output.output.bias.data)
+        except Exception:
+            pass
         
         self.embedding_projection.pc_layer_projection.init_q(
             batch_size=B,

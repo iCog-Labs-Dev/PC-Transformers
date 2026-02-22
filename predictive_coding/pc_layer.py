@@ -113,13 +113,7 @@ class PCLayer(nn.Module):
         x = self._get_cached_state(layer_type)
         q = self._get_cached_state_projection(layer_type)
 
-        if os.getenv("PC_DEBUG", "0").strip().lower() not in ("", "0", "false", "no"):
-            logger = logging.getLogger(__name__)
-            log_tensor_stats(logger, f"{layer_type}.target", target_activity, step=t)
-            if x is not None:
-                log_tensor_stats(logger, f"{layer_type}.x", x, step=t)
-            if q is not None:
-                log_tensor_stats(logger, f"{layer_type}.q", q, step=t)
+      
         
         if layer_type == "embed":
             mu, mu_word, mu_pos, bu_err = step_embed(
@@ -276,6 +270,8 @@ class PCLayer(nn.Module):
             input_dim = layer.weight.shape[1]
             projection_seed = self._q_cache.get(layer_mapping[layer_type])
             self._x_cache[layer_type] = projection_seed if projection_seed is not None else q_init(batch_size, seq_len, input_dim, device)
+            
+            self.get_td_err['linear_output']=self.get_td_err_projection['projection_linear_output']
             
             self.register_lateral(layer_type, input_dim)  
             if layer_type in self.lateral_connections:
