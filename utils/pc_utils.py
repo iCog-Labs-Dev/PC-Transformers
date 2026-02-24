@@ -6,7 +6,7 @@ from typing import Optional, Tuple, Any
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 from utils.optim.optim_utils import PCOptimizer
     
-def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
+def q_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     return torch.randn(batch_size, seq_len, embedding_size, device = device)
 
