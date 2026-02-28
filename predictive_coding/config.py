@@ -36,12 +36,19 @@ class GPTConfig:
     n_blocks: int
     batch_size: int
     num_epochs: int
-    internal_energy_fn_name: str
+    internal_energy_fn_name:str
     output_energy_fn_name: str
     combined_internal_weight: float
     combined_output_weight: float
     use_flash_attention: bool
     alpha: float
+    # Per-layer T values for iterative inference
+    embed_T: int = 1
+    attn_T: int = 1
+    linear_attn_T: int = 1
+    fc1_T: int = 1
+    fc2_T: int = 1
+    linear_output_T: int = 1
     # Per-layer T values
     embed_T: int = 1
     attn_T: int = 1
