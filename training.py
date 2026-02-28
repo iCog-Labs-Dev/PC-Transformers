@@ -40,17 +40,17 @@ def train(model, dataloader, config, global_step, device, logger):
     last_energy = None
     no_change_count = 0
     output_pc_layer = base_model.output.pc_layer
-    max_batches = 50  # Limit to 50 batches max
+    # max_batches = 50  # Removed limit for full training
     
     # Add optimizer for weight updates
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.peak_learning_rate, weight_decay=0.01)
     
     for batch_idx, batch in enumerate(dataloader):
         # Stop after max_batches
-        if batch_idx >= max_batches:
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                print(f"Reached max batches limit ({max_batches})")
-            break
+        # if batch_idx >= max_batches:
+        #     if not dist.is_initialized() or dist.get_rank() == 0:
+        #         print(f"Reached max batches limit ({max_batches})")
+        #     break
             
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
@@ -116,17 +116,6 @@ def train(model, dataloader, config, global_step, device, logger):
         avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
                 
         if output_energy is not None:
-            # Early stopping logic after 50 batches
-            if batch_idx >= 49:
-                current_energy = batch_energy  # get current energy value for this batch
-                if last_energy is not None and abs(current_energy - last_energy) < early_stop_threshold:
-                    no_change_count += 1
-                else:
-                    no_change_count = 0
-                last_energy = current_energy
-                if no_change_count >= 5:
-                    print(f"Early stopping: No meaningful change in energy after 50 batches (batch {batch_idx+1})")
-                    break
             batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 
         else:
             batch_energy = avg_internal_energy
@@ -145,8 +134,7 @@ def train(model, dataloader, config, global_step, device, logger):
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
-    early_stopped = no_change_count >= 5
-    return avg_energy, avg_perplexity, global_step, early_stopped
+    return avg_energy, avg_perplexity, global_step
 
 
 def main():
@@ -192,14 +180,20 @@ def main():
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
-        num_epochs = best_config["num_epochs"], 
+        num_epochs = 5,  # Run for 5 epochs
         update_bias = best_config["update_bias"],
         internal_energy_fn_name=best_config["internal_energy_fn_name"],
         output_energy_fn_name=best_config["output_energy_fn_name"],
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        alpha = best_config["alpha"],
+        embed_T = best_config.get("embed_T", 10),
+        attn_T = best_config.get("attn_T", 2),
+        linear_attn_T = best_config.get("linear_attn_T", 1),
+        fc1_T = best_config.get("fc1_T", 2),
+        fc2_T = best_config.get("fc2_T", 1),
+        linear_output_T = best_config.get("linear_output_T", 10)
     )
     
     # Create a separate logger for hyperparameters
