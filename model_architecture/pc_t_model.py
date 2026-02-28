@@ -51,6 +51,7 @@ class PCTransformer(nn.Module):
         Returns:
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
         """
+
         for module in self.modules():
             if hasattr(module, "clear_energy"):
                 module.clear_energy()
@@ -139,17 +140,18 @@ class PCTransformer(nn.Module):
         # Initialize streams or futures for parallel execution
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
 
-        for t in range(self.config.T):
-            # Execute output layer
-            td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
+        # Per-layer inference steps
+        # Output layer
+        for t_out in range(getattr(self.config, 'linear_output_T', 1)):
+            td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t_out > 0 else None
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
                 self.output.pc_layer.forward,
                 target_activity=target_logits,
                 layer_type="linear_output",
-                t=t,
-                T=self.config.T,
+                t=t_out,
+                # Removed global T, only layer-specific T used
                 requires_update=True,
                 td_err= td_mlp2,
                 layer=self.output.output,
@@ -158,32 +160,29 @@ class PCTransformer(nn.Module):
                 input_ids=None,
                 position_ids=None,
                 flash=False
-
             )
 
-            # Iterate through blocks in reverse order for parallel execution
-            for idx in range(len(self.blocks) - 1, -1, -1):
-                block = self.blocks[idx]
-                next_target = (
-                    self.blocks[idx + 1].attn.pc_qkv.get_x("attn")
-                    if idx < len(self.blocks) - 1
-                    else self.output.pc_layer.get_x("linear_output")
-                )
-                
-                layer_norm2 = (block.ln2
-                   if idx < len(self.blocks) - 1
-                    else None)
-                td_mlp1 = block.mlp.pc_layer1.get_td_err("fc1") if t > 0 else None
+        # Each block (reverse order)
+        for idx in range(len(self.blocks) - 1, -1, -1):
+            block = self.blocks[idx]
+            next_target = (
+                self.blocks[idx + 1].attn.pc_qkv.get_x("attn")
+                if idx < len(self.blocks) - 1
+                else self.output.pc_layer.get_x("linear_output")
+            )
+            layer_norm2 = (block.ln2 if idx < len(self.blocks) - 1 else None)
 
-                # Execute MLP layer 2
+            # fc2
+            for t_fc2 in range(getattr(self.config, 'fc2_T', 1)):
+                td_mlp1 = block.mlp.pc_layer1.get_td_err("fc1") if t_fc2 > 0 else None
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
                     block.mlp.pc_layer2.forward,
                     target_activity=next_target,
                     layer_type="fc2",
-                    t=t,
-                    T=self.config.T,
+                    t=t_fc2,
+                    # Removed global T, only layer-specific T used
                     requires_update=True,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
@@ -192,19 +191,19 @@ class PCTransformer(nn.Module):
                     input_ids=None,
                     position_ids=None,
                     flash=False
-
                 )
-                td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t > 0 else None
 
-                # Execute MLP layer 1
+            # fc1
+            for t_fc1 in range(getattr(self.config, 'fc1_T', 1)):
+                td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t_fc1 > 0 else None
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
                     block.mlp.pc_layer1.forward,
                     target_activity=block.mlp.pc_layer2.get_x("fc2"),
                     layer_type="fc1",
-                    t=t,
-                    T=self.config.T,
+                    t=t_fc1,
+                    # Removed global T, only layer-specific T used
                     requires_update=True,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
@@ -213,26 +212,23 @@ class PCTransformer(nn.Module):
                     input_ids=None,
                     position_ids=None,
                     flash=False
-
                 )
-                
-                if idx == 0:
-                   td_embed = self.embedding.pc_layer.get_td_err("embed") if t > 0 else None
-                else:
-                   td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
-                
-                td_attn_qkv = block.attn.pc_qkv.get_td_err("attn") if t > 0 else None
 
-    
-                # Execute attention output
+            # attn output
+            for t_linear_attn in range(getattr(self.config, 'linear_attn_T', 1)):
+                if idx == 0:
+                    td_embed = self.embedding.pc_layer.get_td_err("embed") if t_linear_attn > 0 else None
+                else:
+                    td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("fc2") if t_linear_attn > 0 else None
+                td_attn_qkv = block.attn.pc_qkv.get_td_err("attn") if t_linear_attn > 0 else None
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
                     block.attn.pc_output.forward,
                     target_activity=block.mlp.pc_layer1.get_x("fc1"),
                     layer_type="linear_attn",
-                    t=t,
-                    T=self.config.T,
+                    t=t_linear_attn,
+                    # Removed global T, only layer-specific T used
                     requires_update=True,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
@@ -241,18 +237,18 @@ class PCTransformer(nn.Module):
                     input_ids=None,
                     position_ids=None,
                     flash=False
-
                 )
 
-                # Execute attention QKV
+            # attn QKV
+            for t_attn in range(getattr(self.config, 'attn_T', 1)):
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
                     block.attn.pc_qkv.forward,
                     target_activity=block.attn.pc_output.get_x("linear_attn"),
                     layer_type="attn",
-                    t=t,
-                    T=self.config.T,
+                    t=t_attn,
+                    # Removed global T, only layer-specific T used
                     requires_update=True,
                     td_err= td_embed,
                     layer = None,
@@ -264,32 +260,32 @@ class PCTransformer(nn.Module):
                     use_cache=use_kv_cache,  
                     kv_cache=block.attn.kv_cache if use_kv_cache else None, 
                 )
-
                 # Update cache after last iteration
-                if use_kv_cache and t == self.config.T - 1:
+                if use_kv_cache and t_attn == getattr(self.config, 'attn_T', 1) - 1:
                     block.attn.kv_cache = block.attn.pc_qkv._last_kv_cache
-    
-            # Execute embedding layer
+
+        # Embedding layer
+        for t_embed in range(getattr(self.config, 'embed_T', 1)):
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
                 self.embedding.pc_layer.forward,
                 target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
                 layer_type="embed",
-                t=t,
-                T=self.config.T,
+                t=t_embed,
+                # Removed global T, only layer-specific T used
                 requires_update=True,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-                layer_norm= block.ln2,
+                layer_norm= self.blocks[0].ln2,
                 proj_layers=None,
                 input_ids=input_ids,
                 position_ids=position_ids,
                 flash=False
             )
 
-            # Synchronize all parallel tasks
-            synchronize_execution(use_cuda, streams_or_futures)
+        # Synchronize all parallel tasks
+        synchronize_execution(use_cuda, streams_or_futures)
         logits = self.output.pc_layer.get_mu("linear_output")
         return logits
     

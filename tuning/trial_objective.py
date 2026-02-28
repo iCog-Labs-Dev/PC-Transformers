@@ -42,7 +42,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
     start_time = time.time()
     model = None
     
-    print(f"\nStarting Trial {trial.number}")
+    print(f"\nStarting Trial {trial.number + 1}")
     
     try:       
         if not dist.is_initialized() or dist.get_rank() == 0:
@@ -57,7 +57,6 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             config_dict = broadcast_config(config_dict, device)
         
         config = GPTConfig(**config_dict)
-        update_global_config(config.__dict__)
 
         model = PCTransformer(config).to(device)  
        
@@ -77,17 +76,41 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         model.train()
         train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
 
-        model.eval()
-        avg_energy, avg_perplexity = evaluate(model, config, valid_loader, max_batches=None, device=device)
-        
         train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
-        
         alpha = 0.5
         combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
-        
         trial_time = (time.time() - start_time) 
-        
-        trial.set_user_attr("config", config.__dict__)
+
+        # Print parameters only once before batch progress
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            print("Parameters:")
+            print(f"  embed_T: {config.embed_T}")
+            print(f"  attn_T: {config.attn_T}")
+            print(f"  linear_attn_T: {config.linear_attn_T}")
+            print(f"  fc1_T: {config.fc1_T}")
+            print(f"  fc2_T: {config.fc2_T}")
+            print(f"  linear_output_T: {config.linear_output_T}")
+            print(f"  vocab_size: {config.vocab_size}")
+            print(f"  block_size: {config.block_size}")
+            print(f"  lr: {config.lr}")
+            print(f"  peak_learning_rate: {config.peak_learning_rate}")
+            print(f"  warmup_steps: {config.warmup_steps}")
+            print(f"  n_embed: {config.n_embed}")
+            print(f"  dropout: {config.dropout}")
+            print(f"  update_bias: {config.update_bias}")
+            print(f"  num_heads: {config.num_heads}")
+            print(f"  n_blocks: {config.n_blocks}")
+            print(f"  batch_size: {config.batch_size}")
+            print(f"  num_epochs: {config.num_epochs}")
+            print(f"  internal_energy_fn_name: {config.internal_energy_fn_name}")
+            print(f"  output_energy_fn_name: {config.output_energy_fn_name}")
+            print(f"  combined_internal_weight: {config.combined_internal_weight}")
+            print(f"  combined_output_weight: {config.combined_output_weight}")
+            print(f"  use_flash_attention: {config.use_flash_attention}")
+            print(f"  alpha: {config.alpha}")
+            # ...existing code...
+
+        trial.set_user_attr("config", dict(config.__dict__))
         trial.set_user_attr("energy", train_energy)
         trial.set_user_attr("perplexity", train_perplexity)
         trial.set_user_attr("ce_loss", train_ce_loss)
@@ -116,3 +139,4 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         if model:
             del model
         cleanup_memory()
+

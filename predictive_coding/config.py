@@ -27,18 +27,25 @@ class GPTConfig:
     block_size: int
     lr: float
     peak_learning_rate: Optional[float]
-    warmup_steps: Optional[int] 
-    n_embed: int 
-    dropout: float 
-    T: int 
-    update_bias: bool 
-    num_heads: int 
-    n_blocks: int 
+    warmup_steps: Optional[int]
+    n_embed: int
+    dropout: float
+    T: int
+    update_bias: bool
+    num_heads: int
+    n_blocks: int
     batch_size: int
     num_epochs: int
-    internal_energy_fn_name:str
+    internal_energy_fn_name: str
     output_energy_fn_name: str
-    combined_internal_weight: float 
+    combined_internal_weight: float
     combined_output_weight: float
     use_flash_attention: bool
     alpha: float
+    # Per-layer T values
+    embed_T: int = 1
+    attn_T: int = 1
+    linear_attn_T: int = 1
+    fc1_T: int = 1
+    fc2_T: int = 1
+    linear_output_T: int = 1

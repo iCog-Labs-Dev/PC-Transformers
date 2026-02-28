@@ -55,8 +55,6 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
    
     if local_rank == 0:
         trials_path = initialize_logs(study_name)
-        logger.info(f"[Rank {local_rank}] Starting Bayesian tuning with {n_trials} trials")
-        logger.info(f"[Rank {local_rank}] Trials Log: {trials_path}")
     else:
         trials_path = f"tuning/{study_name}_trials.txt"
     
@@ -66,11 +64,13 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
             train_energy = best_trial.user_attrs.get("energy", "N/A")
             train_perplexity = best_trial.user_attrs.get("perplexity", "N/A")
             combined_loss = best_trial.user_attrs.get("combined_loss", "N/A")
-            logger.info(f"\nBest trial so far: {best_trial.number} | Combined Loss: {combined_loss:.5f} | Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f}\n")
+            def fmt(val):
+                return f"{val:.4f}" if isinstance(val, (float, int)) else str(val)
+            # ...existing code...
 
     try:
         study.optimize(lambda trial: objective(trial, device, flash, enable_batch_logging=enable_batch_logging), n_trials=n_trials,  callbacks=[callback], show_progress_bar=(local_rank == 0))
-        logger.info(f"[Rank {local_rank}] Bayesian tuning completed!")
+        # ...existing code...
     
         if local_rank == 0 and study.best_trial:
                 best_trial = study.best_trial

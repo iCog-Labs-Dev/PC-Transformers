@@ -36,6 +36,9 @@ def train(model, dataloader, config, global_step, device, logger):
     batch_count = 0
 
     base_model = model.module if hasattr(model, 'module') else model
+    early_stop_threshold = 1e-3  # You can adjust this threshold for 'meaningful change'
+    last_energy = None
+    no_change_count = 0
     output_pc_layer = base_model.output.pc_layer
     
     for batch_idx, batch in enumerate(dataloader):
@@ -103,6 +106,17 @@ def train(model, dataloader, config, global_step, device, logger):
         avg_internal_energy = sum(internal_energies) / len(internal_energies) if internal_energies else ce_loss.item()
                 
         if output_energy is not None:
+            # Early stopping logic after 50 batches
+            if batch_idx >= 49:
+                current_energy = batch_energy  # get current energy value for this batch
+                if last_energy is not None and abs(current_energy - last_energy) < early_stop_threshold:
+                    no_change_count += 1
+                else:
+                    no_change_count = 0
+                last_energy = current_energy
+                if no_change_count >= 5:
+                    print(f"Early stopping: No meaningful change in energy after 50 batches (batch {batch_idx+1})")
+                    break
             batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 
         else:
             batch_energy = avg_internal_energy
@@ -112,8 +126,9 @@ def train(model, dataloader, config, global_step, device, logger):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
+            ce_loss_val = ce_loss.item()
             if logger:
-                logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+                logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f} | CE Loss: {ce_loss_val:.4f}")
             else:
                 print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
 
