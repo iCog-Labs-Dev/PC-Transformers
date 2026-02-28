@@ -73,15 +73,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
 
         trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
 
-        model.train()
-        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
-
-        train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
-        alpha = 0.5
-        combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
-        trial_time = (time.time() - start_time) 
-
-        # Print parameters only once before batch progress
+        # Print parameters BEFORE training
         if not dist.is_initialized() or dist.get_rank() == 0:
             print("Parameters:")
             print(f"  embed_T: {config.embed_T}")
@@ -108,7 +100,14 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             print(f"  combined_output_weight: {config.combined_output_weight}")
             print(f"  use_flash_attention: {config.use_flash_attention}")
             print(f"  alpha: {config.alpha}")
-            # ...existing code...
+
+        model.train()
+        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
+
+        train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
+        alpha = 0.5
+        combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
+        trial_time = (time.time() - start_time) 
 
         trial.set_user_attr("config", dict(config.__dict__))
         trial.set_user_attr("energy", train_energy)
