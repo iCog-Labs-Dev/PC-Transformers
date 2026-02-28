@@ -48,10 +48,4 @@ class GPTConfig:
     fc1_T: int = 1
     fc2_T: int = 1
     linear_output_T: int = 1
-    # Per-layer T values
-    embed_T: int = 1
-    attn_T: int = 1
-    linear_attn_T: int = 1
-    fc1_T: int = 1
-    fc2_T: int = 1
-    linear_output_T: int = 1
+   

@@ -92,7 +92,7 @@ def main():
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        T = best_config["T"],
+    
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
