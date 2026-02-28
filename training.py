@@ -42,6 +42,13 @@ def train(model, dataloader, config, global_step, device, logger):
     output_pc_layer = base_model.output.pc_layer
     # max_batches = 50  # Removed limit for full training
     
+    # Clear all PC layer caches before training
+    for module in base_model.modules():
+        if isinstance(module, PCLayer):
+            module._x_cache.clear()
+            module._error_cache.clear()
+            module._mu_cache.clear()
+    
     # Add optimizer for weight updates
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.peak_learning_rate, weight_decay=0.01)
     
@@ -51,6 +58,11 @@ def train(model, dataloader, config, global_step, device, logger):
         #     if not dist.is_initialized() or dist.get_rank() == 0:
         #         print(f"Reached max batches limit ({max_batches})")
         #     break
+        
+        # Clear caches at start of each batch
+        for module in base_model.modules():
+            if isinstance(module, PCLayer):
+                module._error_cache.clear()
             
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)

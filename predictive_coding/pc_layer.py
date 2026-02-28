@@ -233,6 +233,7 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        self._error_cache.clear()
         
     def get_errors(self) -> list:
         """Get the list of error values accumulated during inference."""
