@@ -13,7 +13,7 @@ class Embedding_Layer(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
         
         self.pc_layer= PCLayer(
-            T=config.T,
+            T=config.embed_T,
             lr=config.lr,
             update_bias = config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,                    
