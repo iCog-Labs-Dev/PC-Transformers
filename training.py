@@ -40,8 +40,15 @@ def train(model, dataloader, config, global_step, device, logger):
     last_energy = None
     no_change_count = 0
     output_pc_layer = base_model.output.pc_layer
+    max_batches = 50  # Limit to 50 batches max
     
     for batch_idx, batch in enumerate(dataloader):
+        # Stop after max_batches
+        if batch_idx >= max_batches:
+            if not dist.is_initialized() or dist.get_rank() == 0:
+                print(f"Reached max batches limit ({max_batches})")
+            break
+            
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
 
@@ -135,7 +142,8 @@ def train(model, dataloader, config, global_step, device, logger):
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
-    return avg_energy, avg_perplexity, global_step
+    early_stopped = no_change_count >= 5
+    return avg_energy, avg_perplexity, global_step, early_stopped
 
 
 def main():

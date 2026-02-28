@@ -102,11 +102,32 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             print(f"  alpha: {config.alpha}")
 
         model.train()
-        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
+        
+        # Limit to 50 batches max
+        max_batches = 50
+        
+        train_energy, train_perplexity, _, early_stopped = train(
+            model, train_loader, config, global_step = 0, device = device, logger=trial_logger
+        )
 
         train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
         alpha = 0.5
-        combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
+        
+        # Penalty if energy > 5
+        if train_energy > 5:
+            penalty = (train_energy - 5) * 10  # Heavy penalty
+            combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha) + penalty
+            if not dist.is_initialized() or dist.get_rank() == 0:
+                print(f"WARNING: Energy {train_energy:.4f} > 5, adding penalty: {penalty:.4f}")
+        # Penalty if early stopped (not meaningful change)
+        elif early_stopped:
+            penalty = 2.0  # Penalty for early stopping due to no significant change
+            combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha) + penalty
+            if not dist.is_initialized() or dist.get_rank() == 0:
+                print(f"WARNING: Early stopping - no significant change, adding penalty: {penalty:.4f}")
+        else:
+            combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
+        
         trial_time = (time.time() - start_time) 
 
         trial.set_user_attr("config", dict(config.__dict__))
