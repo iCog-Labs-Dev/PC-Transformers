@@ -114,7 +114,7 @@ if __name__ == "__main__":
     if use_ddp:
         dist.barrier()
     
-    study = run_tuning(n_trials= 12, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash, enable_batch_logging=args.log_batches)
+    study = run_tuning(n_trials= 20, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash, enable_batch_logging=args.log_batches)
 
     if use_ddp and dist.is_initialized():
         dist.barrier() 

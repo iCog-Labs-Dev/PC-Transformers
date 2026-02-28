@@ -42,6 +42,9 @@ def train(model, dataloader, config, global_step, device, logger):
     output_pc_layer = base_model.output.pc_layer
     max_batches = 50  # Limit to 50 batches max
     
+    # Add optimizer for weight updates
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.peak_learning_rate, weight_decay=0.01)
+    
     for batch_idx, batch in enumerate(dataloader):
         # Stop after max_batches
         if batch_idx >= max_batches:
