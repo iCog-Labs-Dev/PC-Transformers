@@ -17,30 +17,30 @@ def load_best_config():
     }
 
     fallback_values = {
-        "block_size": 64,
-        "peak_learning_rate": 0.009416657639167958,
-        "warmup_steps": 322,
-        "n_embed": 432,
-        "dropout": 0.3821491414108895,
+        "block_size": 160,
+        "peak_learning_rate": 0.00193089651443157,
+        "warmup_steps": 303,
+        "n_embed": 320,
+        "dropout": 0.36511234941575904,
         "T": 2,
-        "num_heads": 24,
-        "n_blocks": 7,
-        "update_bias": False,
+        "num_heads": 20,
+        "n_blocks": 6,
+        "update_bias": True,
         "alpha": 0.5,
-        "lr": 0.0009416657639167959,
-        "batch_size": 8,
+        "lr": 0.000193089651443157,
+        "batch_size": 32,
         "num_epochs": 10,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
-        "combined_internal_weight": 0.5104696055069317,
-        "combined_output_weight": 0.48953039449306834,
+        "combined_internal_weight": 0.8104916098938995,
+        "combined_output_weight": 0.18950839010610054,
         "use_flash_attention": False,
-        "embed_T": 10,
+        "embed_T": 11,
         "attn_T": 2,
         "linear_attn_T": 1,
-        "fc1_T": 2,
-        "fc2_T": 1,
-        "linear_output_T": 10
+        "fc1_T": 1,
+        "fc2_T": 2,
+        "linear_output_T": 2
     }
 
     config = {}
