@@ -18,7 +18,6 @@ class PCLayer(nn.Module):
     """
     def __init__(
         self,
-        T: int,
         lr: float,
         update_bias: bool,
         energy_fn_name: str,
@@ -26,7 +25,6 @@ class PCLayer(nn.Module):
         n_embed: Optional[int] = None,
     ):
         super().__init__()
-        self.T = T
         self.local_lr = lr
         self.update_bias = update_bias
         self.clamp_value = 3.0
