@@ -151,7 +151,7 @@ class PCTransformer(nn.Module):
                 target_activity=target_logits,
                 layer_type="linear_output",
                 t=t_out,
-                # Removed global T, only layer-specific T used
+                T=getattr(self.config, 'linear_output_T', 1),
                 requires_update=True,
                 td_err= td_mlp2,
                 layer=self.output.output,
@@ -182,7 +182,7 @@ class PCTransformer(nn.Module):
                     target_activity=next_target,
                     layer_type="fc2",
                     t=t_fc2,
-                    # Removed global T, only layer-specific T used
+                    T=getattr(self.config, 'fc2_T', 1),
                     requires_update=True,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
@@ -203,7 +203,7 @@ class PCTransformer(nn.Module):
                     target_activity=block.mlp.pc_layer2.get_x("fc2"),
                     layer_type="fc1",
                     t=t_fc1,
-                    # Removed global T, only layer-specific T used
+                    T=getattr(self.config, 'fc1_T', 1),
                     requires_update=True,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
@@ -228,7 +228,7 @@ class PCTransformer(nn.Module):
                     target_activity=block.mlp.pc_layer1.get_x("fc1"),
                     layer_type="linear_attn",
                     t=t_linear_attn,
-                    # Removed global T, only layer-specific T used
+                    T=getattr(self.config, 'linear_attn_T', 1),
                     requires_update=True,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
@@ -248,7 +248,7 @@ class PCTransformer(nn.Module):
                     target_activity=block.attn.pc_output.get_x("linear_attn"),
                     layer_type="attn",
                     t=t_attn,
-                    # Removed global T, only layer-specific T used
+                    T=getattr(self.config, 'attn_T', 1),
                     requires_update=True,
                     td_err= td_embed,
                     layer = None,
@@ -273,7 +273,7 @@ class PCTransformer(nn.Module):
                 target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
                 layer_type="embed",
                 t=t_embed,
-                # Removed global T, only layer-specific T used
+                T=getattr(self.config, 'embed_T', 1),
                 requires_update=True,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
