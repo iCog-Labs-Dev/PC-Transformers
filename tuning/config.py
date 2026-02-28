@@ -32,7 +32,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     combined_output_weight = 1.0 - combined_internal_weight
     num_epochs = num_epochs = 10
     alpha = 0.5
-    
+
     return GPTConfig(
         vocab_size=vocab_size,
         block_size=block_size,

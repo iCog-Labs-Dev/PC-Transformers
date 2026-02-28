@@ -30,7 +30,6 @@ class GPTConfig:
     warmup_steps: Optional[int]
     n_embed: int
     dropout: float
-    T: int
     update_bias: bool
     num_heads: int
     n_blocks: int
