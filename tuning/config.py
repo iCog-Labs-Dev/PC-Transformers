@@ -30,7 +30,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
     combined_internal_weight = trial.suggest_float('combined_internal_weight', 0.1, 0.9)
     combined_output_weight = 1.0 - combined_internal_weight
-    num_epochs = num_epochs = 10
+    num_epochs = num_epochs = 5
     alpha = 0.5
     return GPTConfig(
         vocab_size=vocab_size,
