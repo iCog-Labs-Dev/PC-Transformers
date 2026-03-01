@@ -112,6 +112,7 @@ def train(model, dataloader, config, global_step, device, logger):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
+   
             if logger:
                 logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
             else:
@@ -162,7 +163,7 @@ def main():
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        T = best_config["T"],
+       
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
@@ -173,7 +174,13 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        alpha = best_config["alpha"],
+        embed_T = best_config.get("embed_T", 10),
+        attn_T = best_config.get("attn_T", 2),
+        linear_attn_T = best_config.get("linear_attn_T", 1),
+        fc1_T = best_config.get("fc1_T", 2),
+        fc2_T = best_config.get("fc2_T", 1),
+        linear_output_T = best_config.get("linear_output_T", 10)
     )
     
     # Create a separate logger for hyperparameters
