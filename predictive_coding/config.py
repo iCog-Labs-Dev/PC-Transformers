@@ -30,7 +30,6 @@ class GPTConfig:
     warmup_steps: Optional[int] 
     n_embed: int 
     dropout: float 
-    T: int 
     update_bias: bool 
     num_heads: int 
     n_blocks: int 
@@ -42,3 +41,11 @@ class GPTConfig:
     combined_output_weight: float
     use_flash_attention: bool
     alpha: float
+    # Per-layer T values for iterative inference
+    embed_T: int = 1
+    attn_T: int = 1
+    linear_attn_T: int = 1
+    fc1_T: int = 1
+    fc2_T: int = 1
+    linear_output_T: int = 1
+   
