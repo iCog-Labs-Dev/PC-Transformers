@@ -21,7 +21,6 @@ class Attention(nn.Module):
         self.output = nn.Linear(config.n_embed, config.n_embed)
 
         self.pc_qkv = PCLayer(
-            T=config.T,
             lr=config.lr,
             update_bias = config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,
@@ -30,7 +29,6 @@ class Attention(nn.Module):
         )
 
         self.pc_output = PCLayer(
-            T=config.T,
             lr=config.lr,
             update_bias = config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,
