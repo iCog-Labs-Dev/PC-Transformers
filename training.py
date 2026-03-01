@@ -132,7 +132,8 @@ def main():
 
     rank = dist.get_rank() if dist.is_initialized() else 0
 
-    best_config = load_best_config()   
+    best_config = load_best_config()
+    best_config["num_epochs"] = 5  # Force epochs to 5
     # Configure logging
     log_dir = 'logs'
     os.makedirs(log_dir, exist_ok=True)
