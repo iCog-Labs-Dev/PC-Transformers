@@ -32,6 +32,13 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
     
+    # Clear all PC layer caches before evaluation
+    for module in base_model.modules():
+        if isinstance(module, PCLayer):
+            module._x_cache.clear()
+            module._error_cache.clear()
+            module._mu_cache.clear()
+    
     if local_rank == 0:
         if max_batches is None:
             print(f"Evaluating on the full test set...")
@@ -41,7 +48,12 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
     for batch_idx, batch in enumerate(dataloader):
         if max_batches is not None and batch_idx >= max_batches:
             break
-
+        
+        # Clear caches at start of each batch
+        for module in base_model.modules():
+            if isinstance(module, PCLayer):
+                module._error_cache.clear()
+        
         input_ids = batch["input_ids"].to(device)
         targets = batch["target_ids"].to(device)
 
@@ -119,7 +131,6 @@ def main():
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        T = best_config["T"],
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
