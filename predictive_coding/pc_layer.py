@@ -18,7 +18,6 @@ class PCLayer(nn.Module):
     """
     def __init__(
         self,
-        T: int,
         lr: float,
         update_bias: bool,
         energy_fn_name: str,
@@ -26,7 +25,6 @@ class PCLayer(nn.Module):
         n_embed: Optional[int] = None,
     ):
         super().__init__()
-        self.T = T
         self.local_lr = lr
         self.update_bias = update_bias
         self.clamp_value = 3.0
@@ -235,6 +233,7 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        self._error_cache.clear()
         
     def get_errors(self) -> list:
         """Get the list of error values accumulated during inference."""
