@@ -82,10 +82,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         model.train()
         train_energy, train_perplexity, _ = train(model, train_loader, config, global_step=0, device=device, logger=trial_logger)
 
-        # Prune if train_energy > 3
-        if train_energy > 3:
-            print(f"Pruning trial {trial.number}: train_energy ({train_energy}) > 3")
-            raise optuna.TrialPruned()
+        
 
         # Update energy history
         objective.energy_history.append(train_energy)
