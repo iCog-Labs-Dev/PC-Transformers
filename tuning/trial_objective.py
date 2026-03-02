@@ -18,10 +18,11 @@ from data_preparation.config import vocab_size
 
 def combined_loss(energy, ce_loss, alpha=0.5):
     """
-    Combine energy and cross-entropy loss.
-    alpha: weight between energy and CE loss (0.0 = only CE, 1.0 = only energy)
+    Combine energy and cross-entropy loss using harmonic mean.
+    This penalizes when either is high and rewards when both are low.
     """
-    return alpha * energy + (1 - alpha) * ce_loss
+    eps = 1e-8
+    return 2 * energy * ce_loss / (energy + ce_loss + eps)
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
