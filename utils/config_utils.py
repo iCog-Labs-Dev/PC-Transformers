@@ -18,30 +18,30 @@ def load_best_config():
 
     fallback_values = {
         "vocab_size": 1024,
-        "block_size": 288,
-        "peak_learning_rate": 0.001254153538294382,
-        "warmup_steps": 247,
-        "n_embed": 208,
-        "dropout": 0.40314119098963885,
+        "block_size": 176,
+        "peak_learning_rate": 0.004258413352463466,
+        "warmup_steps": 83,
+        "n_embed": 384,
+        "dropout": 0.4399883268949166,
         "T": 1,
-        "num_heads": 4,
-        "n_blocks": 6,
+        "num_heads": 12,
+        "n_blocks": 5,
         "update_bias": False,
         "alpha": 0.5,
-        "lr": 0.0001254153538294382,
-        "batch_size": 4,
+        "lr": 0.0004258413352463467,
+        "batch_size": 16,
         "num_epochs": 5,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
-        "combined_internal_weight": 0.15484722255584202,
-        "combined_output_weight": 0.845152777444158,
+        "combined_internal_weight": 0.26856742087264707,
+        "combined_output_weight": 0.7314325791273529,
         "use_flash_attention": False, 
         "embed_T": 1,
         "attn_T": 1,
         "linear_attn_T": 2,
         "fc1_T": 1,
         "fc2_T": 1,
-        "linear_output_T": 2
+        "linear_output_T": 8
     }
 
     config = {}
