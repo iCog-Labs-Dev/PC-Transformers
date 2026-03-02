@@ -80,11 +80,35 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
 
         trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
 
+        # Print all model configuration parameters before starting training
+        print("\nModel configuration parameters for this trial:")
+        print(f"vocab_size={config.vocab_size}")
+        print(f"block_size={config.block_size}")
+        print(f"peak_learning_rate={config.peak_learning_rate}")
+        print(f"warmup_steps={config.warmup_steps}")
+        print(f"n_embed={config.n_embed}")
+        print(f"dropout={config.dropout}")
+        print(f"lr={config.lr}")
+        print(f"embed_T={config.embed_T}")
+        print(f"attn_T={config.attn_T}")
+        print(f"linear_attn_T={config.linear_attn_T}")
+        print(f"fc1_T={config.fc1_T}")
+        print(f"fc2_T={config.fc2_T}")
+        print(f"linear_output_T={config.linear_output_T}")
+        print(f"num_heads={config.num_heads}")
+        print(f"n_blocks={config.n_blocks}")
+        print(f"batch_size={config.batch_size}")
+        print(f"num_epochs={config.num_epochs}")
+        print(f"update_bias={config.update_bias}")
+        print(f"internal_energy_fn_name={config.internal_energy_fn_name}")
+        print(f"output_energy_fn_name={config.output_energy_fn_name}")
+        print(f"combined_internal_weight={config.combined_internal_weight}")
+        print(f"combined_output_weight={config.combined_output_weight}")
+        print(f"use_flash_attention={config.use_flash_attention}")
+        print(f"alpha={config.alpha}")
         model.train()
             # Print all model parameters before training batch 10
-        print("Model parameters before batch 10:")
-        for name, param in model.named_parameters():
-            print(f"{name}: {param.data}")
+       
         train_energy, train_perplexity, _ = train(model, train_loader, config, global_step=0, device=device, logger=trial_logger)
 
         
