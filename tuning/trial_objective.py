@@ -81,6 +81,10 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
 
         model.train()
+            # Print all model parameters before training batch 10
+        print("Model parameters before batch 10:")
+        for name, param in model.named_parameters():
+            print(f"{name}: {param.data}")
         train_energy, train_perplexity, _ = train(model, train_loader, config, global_step=0, device=device, logger=trial_logger)
 
         
