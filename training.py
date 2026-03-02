@@ -156,6 +156,15 @@ def main():
 
     logger = logging.getLogger(__name__)
    
+    print("\nModel configuration parameters for this training run:")
+    for k in [
+        "vocab_size", "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
+        "dropout", "lr", "embed_T", "attn_T", "linear_attn_T", "fc1_T", "fc2_T", "linear_output_T",
+        "num_heads", "n_blocks", "batch_size", "num_epochs", "update_bias",
+        "internal_energy_fn_name", "output_energy_fn_name", "combined_internal_weight",
+        "combined_output_weight", "use_flash_attention", "alpha"
+    ]:
+        print(f"{k}={best_config.get(k)}")
     config = GPTConfig(
         vocab_size = best_config.get("vocab_size", vocab_size),
         block_size = best_config["block_size"],
@@ -164,8 +173,6 @@ def main():
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-       
-       
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
