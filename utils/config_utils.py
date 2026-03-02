@@ -35,7 +35,7 @@ def load_best_config():
         "output_energy_fn_name": "pc_e",
         "combined_internal_weight": 0.26856742087264707,
         "combined_output_weight": 0.7314325791273529,
-        "use_flash_attention": False,
+        "use_flash_attention": False, 
         "embed_T": 1,
         "attn_T": 1,
         "linear_attn_T": 2,
