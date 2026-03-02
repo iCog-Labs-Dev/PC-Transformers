@@ -21,7 +21,7 @@ def combined_loss(energy, ce_loss, alpha=0.5):
     Combine energy and cross-entropy loss.
     alpha: weight between energy and CE loss (0.0 = only CE, 1.0 = only energy)
     """
-    return alpha * energy + (1 - alpha) * ce_loss
+    return energy 
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
