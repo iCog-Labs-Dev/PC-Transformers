@@ -18,30 +18,30 @@ def load_best_config():
 
     fallback_values = {
         "vocab_size": 1024,
-        "block_size": 256,
-        "peak_learning_rate": 0.001966798920805493,
-        "warmup_steps": 167,
-        "n_embed": 256,
-        "dropout": 0.18674826768797906,
+        "block_size": 304,
+        "peak_learning_rate": 0.0013504784012236817,
+        "warmup_steps": 788,
+        "n_embed": 224,
+        "dropout": 0.4024105856640753,
         "T": 1,
-        "num_heads": 4,
+        "num_heads": 16,
         "n_blocks": 7,
         "update_bias": False,
         "alpha": 0.5,
-        "lr": 0.00019667989208054933,
-        "batch_size": 4,
+        "lr": 0.00013504784012236817,
+        "batch_size": 32,
         "num_epochs": 5,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
-        "combined_internal_weight": 0.1647900223684064,
-        "combined_output_weight": 0.8352099776315935,
-        "use_flash_attention": False, 
-        "embed_T": 1,
-        "attn_T": 1,
-        "linear_attn_T": 3,
-        "fc1_T": 1,
+        "combined_internal_weight": 0.47422412956522186,
+        "combined_output_weight": 0.5257758704347781,
+        "use_flash_attention": False,
+        "embed_T": 2,
+        "attn_T": 3,
+        "linear_attn_T": 1,
+        "fc1_T": 2,
         "fc2_T": 1,
-        "linear_output_T": 4
+        "linear_output_T": 14
     }
 
     config = {}
@@ -52,7 +52,7 @@ def load_best_config():
             content = f.read()
 
         for line in content.splitlines():
-            match = re.match(r'(\w+):\s+(.*)', line)
+            match = re.match(r'(\w+)\s*[:=]\s*(.*)', line)
             if match:
                 key, value = match.groups()
                 if key in selected_keys:
