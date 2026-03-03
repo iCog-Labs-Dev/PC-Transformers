@@ -66,16 +66,7 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
             train_energy = best_trial.user_attrs.get("energy", "N/A")
             train_perplexity = best_trial.user_attrs.get("perplexity", "N/A")
             combined_loss = best_trial.user_attrs.get("combined_loss", "N/A")
-
-            def fmt(val, fmtstr):
-                try:
-                    return format(float(val), fmtstr)
-                except (ValueError, TypeError):
-                    return str(val)
-
-            logger.info(
-                f"\nBest trial so far: {best_trial.number} | Combined Loss: {fmt(combined_loss, '.5f')} | Train Energy: {fmt(train_energy, '.4f')} | Train Perplexity: {fmt(train_perplexity, '.4f')}\n"
-            )
+            logger.info(f"\nBest trial so far: {best_trial.number} | Combined Loss: {combined_loss:.5f} | Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f}\n")
 
     try:
         study.optimize(lambda trial: objective(trial, device, flash, enable_batch_logging=enable_batch_logging), n_trials=n_trials,  callbacks=[callback], show_progress_bar=(local_rank == 0))
