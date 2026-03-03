@@ -16,12 +16,12 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     block_size = trial.suggest_int("block_size", 64, 512, step=16)
     n_blocks = trial.suggest_int('n_blocks', 1, 12)
     # Per-layer T values
-    embed_T = trial.suggest_int('embed_T', 1, 14, log=True)
-    attn_T = trial.suggest_int('attn_T', 1, 14, log=True)
-    linear_attn_T = trial.suggest_int('linear_attn_T', 1, 14, log=True)
-    fc1_T = trial.suggest_int('fc1_T', 1, 14, log=True)
-    fc2_T = trial.suggest_int('fc2_T', 1, 14, log=True)
-    linear_output_T = trial.suggest_int('linear_output_T', 1, 14, log=True)
+    embed_T = trial.suggest_int('embed_T', 4, 20, log=True)
+    attn_T = trial.suggest_int('attn_T', 4, 20, log=True)
+    linear_attn_T = trial.suggest_int('linear_attn_T', 3, 20, log=True)
+    fc1_T = trial.suggest_int('fc1_T', 4, 20, log=True)
+    fc2_T = trial.suggest_int('fc2_T', 4, 20, log=True)
+    linear_output_T = trial.suggest_int('linear_output_T', 4, 20, log=True)
     dropout = trial.suggest_float("dropout", 0.0, 0.5)
     peak_lr = trial.suggest_float('peak_lr', 1e-5, 1e-2, log=True)
     lr = peak_lr * 0.1 
