@@ -17,11 +17,8 @@ from data_preparation.dataloader import get_loaders
 from data_preparation.config import vocab_size
 
 def combined_loss(energy, ce_loss, alpha=0.5):
-    """
-    Combine energy and cross-entropy loss.
-    alpha: weight between energy and CE loss (0.0 = only CE, 1.0 = only energy)
-    """
-    return energy 
+    
+    return energy
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
@@ -38,18 +35,13 @@ def broadcast_config(config_dict, device):
 
 def objective(trial, device = None, flash=False, enable_batch_logging=False):
     """Bayesian Objective function"""
-    import optuna
     set_seed(42 + trial.number)
     start_time = time.time()
     model = None
-
+    
     print(f"\nStarting Trial {trial.number}")
-
-    # Static variable to track energy history
-    if not hasattr(objective, "energy_history"):
-        objective.energy_history = []
-
-    try:
+    
+    try:       
         if not dist.is_initialized() or dist.get_rank() == 0:
             config = get_dynamic_model_config(trial, vocab_size, flash)
             if config is None:
@@ -60,25 +52,24 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
 
         if dist.is_initialized():
             config_dict = broadcast_config(config_dict, device)
-
+        
         config = GPTConfig(**config_dict)
         update_global_config(config.__dict__)
 
-        model = PCTransformer(config).to(device)
-
+        model = PCTransformer(config).to(device)  
+       
         if dist.is_initialized():
             if device.type == "cuda":
                 model = DDP(model, device_ids=[device.index], output_device=device.index)
             else:
                 model = DDP(model)
-
-        train_loader, valid_loader, _ = get_loaders(distributed=dist.is_initialized()) 
+       
+        train_loader, valid_loader, _ = get_loaders(distributed=dist.is_initialized())
         
         if len(train_loader) == 0 or len(valid_loader) == 0:
             return float("inf")
 
         trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
-
         # Print all model configuration parameters before starting training
         print("\nModel configuration parameters for this trial:")
         print(f"vocab_size={config.vocab_size}")
@@ -106,35 +97,18 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         print(f"use_flash_attention={config.use_flash_attention}")
         print(f"alpha={config.alpha}")
         model.train()
-            # Print all model parameters before training batch 10
-       
-        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step=0, device=device, logger=trial_logger)
-
-        
-
-        # Update energy history
-        objective.energy_history.append(train_energy)
-
-        # Only check if we have at least 51 trials (50 increases possible)
-        if len(objective.energy_history) >= 51:
-            increases = 0
-            for i in range(-50, 0):
-                if objective.energy_history[i] > objective.energy_history[i-1]:
-                    increases += 1
-            if increases == 50:
-                print(f"Pruning trial {trial.number}: energy increased for 50 consecutive trials.")
-                raise optuna.TrialPruned()
+        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
 
         model.eval()
         avg_energy, avg_perplexity = evaluate(model, config, valid_loader, max_batches=None, device=device)
-
+        
         train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
-
+        
         alpha = 0.5
         combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
-
-        trial_time = (time.time() - start_time)
-
+        
+        trial_time = (time.time() - start_time) 
+        
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", train_energy)
         trial.set_user_attr("perplexity", train_perplexity)
@@ -146,11 +120,11 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         trial_path = "tuning/bayesian_tuning_trials.txt"
 
         if not dist.is_initialized() or dist.get_rank() == 0:
-            write_header = trial.number == 0
+            write_header = trial.number == 0 
             log_trial_to_detailed_log(trial_path, trial, config, trial_time, train_energy, write_header=write_header)
 
         return combined_objective
-
+    
     except Exception as e:
         print("Trial failed:", e)
         trial.set_user_attr("energy", "N/A")
@@ -159,7 +133,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         trial.set_user_attr("trial_time", (time.time() - start_time))
 
         return float("inf")
-
+    
     finally:
         if model:
             del model
