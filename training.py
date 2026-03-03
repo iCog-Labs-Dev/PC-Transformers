@@ -112,7 +112,6 @@ def train(model, dataloader, config, global_step, device, logger):
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
         if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
-   
             if logger:
                 logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
             else:
@@ -132,8 +131,7 @@ def main():
 
     rank = dist.get_rank() if dist.is_initialized() else 0
 
-    best_config = load_best_config()
-    best_config["num_epochs"] = 5  # Force epochs to 5
+    best_config = load_best_config()   
     # Configure logging
     log_dir = 'logs'
     os.makedirs(log_dir, exist_ok=True)
@@ -155,7 +153,6 @@ def main():
         root_logger.addHandler(file_h)
 
     logger = logging.getLogger(__name__)
-   
     print("\nModel configuration parameters for this training run:")
     for k in [
         "vocab_size", "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
@@ -165,8 +162,9 @@ def main():
         "combined_output_weight", "use_flash_attention", "alpha"
     ]:
         print(f"{k}={best_config.get(k)}")
+   
     config = GPTConfig(
-        vocab_size = best_config.get("vocab_size", vocab_size),
+        vocab_size = vocab_size,
         block_size = best_config["block_size"],
         lr = best_config["lr"],
         peak_learning_rate = best_config["peak_learning_rate"],

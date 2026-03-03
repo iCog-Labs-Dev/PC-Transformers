@@ -9,7 +9,7 @@ def load_best_config():
 
     selected_keys = {
         "vocab_size", "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
-        "dropout", "T", "num_heads", "n_blocks", "update_bias", "alpha",
+        "dropout", "num_heads", "n_blocks", "update_bias", "alpha",
         "lr", "batch_size", "num_epochs", "internal_energy_fn_name",
         "output_energy_fn_name", "combined_internal_weight",
         "combined_output_weight", "use_flash_attention",
@@ -23,7 +23,7 @@ def load_best_config():
         "warmup_steps": 788,
         "n_embed": 224,
         "dropout": 0.4024105856640753,
-        "T": 1,
+   
         "num_heads": 16,
         "n_blocks": 7,
         "update_bias": False,
