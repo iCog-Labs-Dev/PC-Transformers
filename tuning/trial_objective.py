@@ -21,7 +21,7 @@ def compute_inference_cost(config):
     return float(config.embed_T + config.linear_output_T + (config.n_blocks * per_block_steps))
 
 
-def combined_loss(energy, ce_loss, compute_cost=0.0, alpha=0.5, lambda_compute=0.0):
+def combined_loss(energy, ce_loss, compute_cost=0.0, lambda_compute=0.0):
     return float(energy + (lambda_compute * compute_cost))
 
 
@@ -37,6 +37,14 @@ def insufficient_drop_penalty(energies, min_drop):
     if len(energies) < 2:
         return float(min_drop)
     total_drop = float(energies[0] - energies[-1])
+    return float(max(0.0, min_drop - total_drop))
+
+
+def insufficient_ppl_drop_penalty(perplexities, min_drop):
+    """Penalty when total perplexity drop from first to last epoch is too small."""
+    if len(perplexities) < 2:
+        return float(min_drop)
+    total_drop = float(perplexities[0] - perplexities[-1])
     return float(max(0.0, min_drop - total_drop))
 
 def broadcast_config(config_dict, device):
@@ -108,6 +116,8 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         print(f"monotonic_penalty_weight={config.monotonic_penalty_weight}")
         print(f"min_energy_drop={config.min_energy_drop}")
         print(f"drop_penalty_weight={config.drop_penalty_weight}")
+        print(f"min_ppl_drop={config.min_ppl_drop}")
+        print(f"ppl_drop_penalty_weight={config.ppl_drop_penalty_weight}")
         print(f"num_heads={config.num_heads}")
         print(f"n_blocks={config.n_blocks}")
         print(f"batch_size={config.batch_size}")
@@ -125,6 +135,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         avg_energy = float("inf")
         avg_perplexity = float("inf")
         val_epoch_energies = []
+        val_epoch_perplexities = []
 
         for _ in range(config.num_epochs):
             model.train()
@@ -140,25 +151,26 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             model.eval()
             avg_energy, avg_perplexity = evaluate(model, config, valid_loader, max_batches=None, device=device)
             val_epoch_energies.append(avg_energy)
+            val_epoch_perplexities.append(avg_perplexity)
         
         train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
         val_ce_loss = torch.log(torch.tensor(avg_perplexity)).item()
         inference_cost = compute_inference_cost(config)
         increase_penalty = monotonic_increase_penalty(val_epoch_energies)
         drop_shortfall = insufficient_drop_penalty(val_epoch_energies, config.min_energy_drop)
+        ppl_drop_shortfall = insufficient_ppl_drop_penalty(val_epoch_perplexities, config.min_ppl_drop)
         total_drop = float(val_epoch_energies[0] - val_epoch_energies[-1]) if len(val_epoch_energies) >= 2 else 0.0
+        total_ppl_drop = float(val_epoch_perplexities[0] - val_epoch_perplexities[-1]) if len(val_epoch_perplexities) >= 2 else 0.0
         
-        alpha = config.alpha
         combined_objective = combined_loss(
             avg_energy,
             val_ce_loss,
             compute_cost=inference_cost,
-            alpha=alpha,
             lambda_compute=config.lambda_compute,
-        ) + (config.monotonic_penalty_weight * increase_penalty) + (config.drop_penalty_weight * drop_shortfall)
+        ) + (config.monotonic_penalty_weight * increase_penalty) + (config.drop_penalty_weight * drop_shortfall) + (config.ppl_drop_penalty_weight * ppl_drop_shortfall)
 
         # Hard constraint: trial must show a meaningful overall energy decrease across epochs.
-        if total_drop < config.min_energy_drop:
+        if total_drop < config.min_energy_drop or total_ppl_drop < config.min_ppl_drop:
             combined_objective = float("inf")
         
         trial_time = (time.time() - start_time) 
@@ -173,14 +185,18 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         trial.set_user_attr("inference_cost", inference_cost)
         trial.set_user_attr("lambda_compute", config.lambda_compute)
         trial.set_user_attr("val_epoch_energies", val_epoch_energies)
+        trial.set_user_attr("val_epoch_perplexities", val_epoch_perplexities)
         trial.set_user_attr("increase_penalty", increase_penalty)
         trial.set_user_attr("monotonic_penalty_weight", config.monotonic_penalty_weight)
         trial.set_user_attr("drop_shortfall", drop_shortfall)
         trial.set_user_attr("total_energy_drop", total_drop)
         trial.set_user_attr("min_energy_drop", config.min_energy_drop)
         trial.set_user_attr("drop_penalty_weight", config.drop_penalty_weight)
+        trial.set_user_attr("ppl_drop_shortfall", ppl_drop_shortfall)
+        trial.set_user_attr("total_ppl_drop", total_ppl_drop)
+        trial.set_user_attr("min_ppl_drop", config.min_ppl_drop)
+        trial.set_user_attr("ppl_drop_penalty_weight", config.ppl_drop_penalty_weight)
         trial.set_user_attr("combined_loss", combined_objective)
-        trial.set_user_attr("alpha", alpha)
         trial.set_user_attr("trial_time", trial_time)
 
         trial_path = "tuning/bayesian_tuning_trials.txt"

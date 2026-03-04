@@ -52,4 +52,6 @@ class GPTConfig:
     monotonic_penalty_weight: float = 1.0
     min_energy_drop: float = 0.05
     drop_penalty_weight: float = 5.0
+    min_ppl_drop: float = 20.0
+    ppl_drop_penalty_weight: float = 1.0
    
