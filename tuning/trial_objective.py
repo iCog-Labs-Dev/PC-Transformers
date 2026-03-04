@@ -65,6 +65,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
     set_seed(42 + trial.number)
     start_time = time.time()
     model = None
+    cleanup_memory()
     
     print(f"\nStarting Trial {trial.number}")
     
@@ -209,6 +210,8 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
     
     except Exception as e:
         print("Trial failed:", e)
+        if "out of memory" in str(e).lower():
+            cleanup_memory()
         trial.set_user_attr("energy", "N/A")
         trial.set_user_attr("perplexity", "N/A")
         trial.set_user_attr("combined_loss", "N/A")

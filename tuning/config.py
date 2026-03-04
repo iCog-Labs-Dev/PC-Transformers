@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 def get_dynamic_model_config(trial, vocab_size, flash=False):
     """Get model configuration with dynamic parameter combinations, including flash attention flag."""
-    n_embed = trial.suggest_int("n_embed", 64, 512, step=16)
+    n_embed = trial.suggest_int("n_embed", 64, 384, step=16)
 
     valid_heads = [h for h in range(2, min(32, n_embed // 8) + 1) if n_embed % h == 0 and 8 <= n_embed // h <= 128]
     if not valid_heads:
@@ -13,15 +13,15 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         return None
         
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
-    block_size = trial.suggest_int("block_size", 64, 512, step=16)
-    n_blocks = trial.suggest_int('n_blocks', 1, 12)
+    block_size = trial.suggest_int("block_size", 64, 256, step=16)
+    n_blocks = trial.suggest_int('n_blocks', 1, 8)
     # Per-layer T values
-    embed_T = trial.suggest_int('embed_T', 4, 20, log=True)
-    attn_T = trial.suggest_int('attn_T', 4, 20, log=True)
-    linear_attn_T = trial.suggest_int('linear_attn_T', 3, 20, log=True)
-    fc1_T = trial.suggest_int('fc1_T', 4, 20, log=True)
-    fc2_T = trial.suggest_int('fc2_T', 4, 20, log=True)
-    linear_output_T = trial.suggest_int('linear_output_T', 4, 20, log=True)
+    embed_T = trial.suggest_int('embed_T', 3, 12, log=True)
+    attn_T = trial.suggest_int('attn_T', 3, 12, log=True)
+    linear_attn_T = trial.suggest_int('linear_attn_T', 3, 12, log=True)
+    fc1_T = trial.suggest_int('fc1_T', 3, 12, log=True)
+    fc2_T = trial.suggest_int('fc2_T', 3, 12, log=True)
+    linear_output_T = trial.suggest_int('linear_output_T', 3, 12, log=True)
     lambda_compute = trial.suggest_float('lambda_compute', 1e-6, 3e-5, log=True)
     monotonic_penalty_weight = 1.0
     min_energy_drop = 0.08
@@ -33,7 +33,23 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     lr = peak_lr * 0.1 
     warmup_steps = trial.suggest_int('warmup_steps', 50, 2000, log=True)
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
-    batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
+    if block_size >= 224 or n_embed >= 352 or n_blocks >= 7:
+        batch_choices = [4, 8]
+    elif block_size >= 192 or n_embed >= 320 or n_blocks >= 6:
+        batch_choices = [4, 8, 16]
+    else:
+        batch_choices = [4, 8, 16, 32]
+    batch_size = trial.suggest_categorical('batch_size', batch_choices)
+
+    # Guardrail to skip memory-heavy combinations before model construction.
+    per_block_t = attn_T + linear_attn_T + fc1_T + fc2_T
+    complexity_score = batch_size * block_size * n_embed * n_blocks * per_block_t
+    if complexity_score > 80_000_000:
+        logger.warning(
+            "Skipping trial due to estimated memory pressure: "
+            f"score={complexity_score}, bs={batch_size}, block={block_size}, embed={n_embed}, blocks={n_blocks}, t={per_block_t}"
+        )
+        return None
     combined_internal_weight = trial.suggest_float('combined_internal_weight', 0.1, 0.9)
     combined_output_weight = 1.0 - combined_internal_weight
     num_epochs = num_epochs = 3
