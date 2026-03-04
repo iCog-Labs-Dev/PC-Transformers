@@ -50,6 +50,7 @@ class GPTConfig:
     linear_output_T: int = 1
     lambda_compute: float = 0.0
     monotonic_penalty_weight: float = 1.0
+    ppl_monotonic_penalty_weight: float = 1.0
     min_energy_drop: float = 0.05
     drop_penalty_weight: float = 5.0
     min_ppl_drop: float = 20.0

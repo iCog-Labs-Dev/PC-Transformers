@@ -32,6 +32,13 @@ def monotonic_increase_penalty(energies):
     return float(sum(max(0.0, energies[i] - energies[i - 1]) for i in range(1, len(energies))))
 
 
+def monotonic_increase_penalty_ppl(perplexities):
+    """Penalty for epoch-to-epoch perplexity increases."""
+    if len(perplexities) < 2:
+        return 0.0
+    return float(sum(max(0.0, perplexities[i] - perplexities[i - 1]) for i in range(1, len(perplexities))))
+
+
 def insufficient_drop_penalty(energies, min_drop):
     """Penalty when total drop from first to last epoch is too small."""
     if len(energies) < 2:
@@ -115,6 +122,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         print(f"linear_output_T={config.linear_output_T}")
         print(f"lambda_compute={config.lambda_compute}")
         print(f"monotonic_penalty_weight={config.monotonic_penalty_weight}")
+        print(f"ppl_monotonic_penalty_weight={config.ppl_monotonic_penalty_weight}")
         print(f"min_energy_drop={config.min_energy_drop}")
         print(f"drop_penalty_weight={config.drop_penalty_weight}")
         print(f"min_ppl_drop={config.min_ppl_drop}")
@@ -158,6 +166,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         val_ce_loss = torch.log(torch.tensor(avg_perplexity)).item()
         inference_cost = compute_inference_cost(config)
         increase_penalty = monotonic_increase_penalty(val_epoch_energies)
+        ppl_increase_penalty = monotonic_increase_penalty_ppl(val_epoch_perplexities)
         drop_shortfall = insufficient_drop_penalty(val_epoch_energies, config.min_energy_drop)
         ppl_drop_shortfall = insufficient_ppl_drop_penalty(val_epoch_perplexities, config.min_ppl_drop)
         total_drop = float(val_epoch_energies[0] - val_epoch_energies[-1]) if len(val_epoch_energies) >= 2 else 0.0
@@ -168,7 +177,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             val_ce_loss,
             compute_cost=inference_cost,
             lambda_compute=config.lambda_compute,
-        ) + (config.monotonic_penalty_weight * increase_penalty) + (config.drop_penalty_weight * drop_shortfall) + (config.ppl_drop_penalty_weight * ppl_drop_shortfall)
+        ) + (config.monotonic_penalty_weight * increase_penalty) + (config.ppl_monotonic_penalty_weight * ppl_increase_penalty) + (config.drop_penalty_weight * drop_shortfall) + (config.ppl_drop_penalty_weight * ppl_drop_shortfall)
 
         # Hard constraint: trial must show a meaningful overall energy decrease across epochs.
         if total_drop < config.min_energy_drop or total_ppl_drop < config.min_ppl_drop:
@@ -189,6 +198,8 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         trial.set_user_attr("val_epoch_perplexities", val_epoch_perplexities)
         trial.set_user_attr("increase_penalty", increase_penalty)
         trial.set_user_attr("monotonic_penalty_weight", config.monotonic_penalty_weight)
+        trial.set_user_attr("ppl_increase_penalty", ppl_increase_penalty)
+        trial.set_user_attr("ppl_monotonic_penalty_weight", config.ppl_monotonic_penalty_weight)
         trial.set_user_attr("drop_shortfall", drop_shortfall)
         trial.set_user_attr("total_energy_drop", total_drop)
         trial.set_user_attr("min_energy_drop", config.min_energy_drop)

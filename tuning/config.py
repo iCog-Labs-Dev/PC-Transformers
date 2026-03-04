@@ -24,22 +24,17 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     linear_output_T = trial.suggest_int('linear_output_T', 3, 12, log=True)
     lambda_compute = trial.suggest_float('lambda_compute', 1e-6, 3e-5, log=True)
     monotonic_penalty_weight = 1.0
+    ppl_monotonic_penalty_weight = 1.0
     min_energy_drop = 0.08
     drop_penalty_weight = 5.0
     min_ppl_drop = 20.0
     ppl_drop_penalty_weight = 1.0
     dropout = trial.suggest_float("dropout", 0.0, 0.5)
-    peak_lr = trial.suggest_float('peak_lr', 1e-5, 1e-2, log=True)
+    peak_lr = trial.suggest_float('peak_lr', 1e-5, 2e-3, log=True)
     lr = peak_lr * 0.1 
     warmup_steps = trial.suggest_int('warmup_steps', 50, 2000, log=True)
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
-    if block_size >= 224 or n_embed >= 352 or n_blocks >= 7:
-        batch_choices = [4, 8]
-    elif block_size >= 192 or n_embed >= 320 or n_blocks >= 6:
-        batch_choices = [4, 8, 16]
-    else:
-        batch_choices = [4, 8, 16, 32]
-    batch_size = trial.suggest_categorical('batch_size', batch_choices)
+    batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
 
     # Guardrail to skip memory-heavy combinations before model construction.
     per_block_t = attn_T + linear_attn_T + fc1_T + fc2_T
@@ -70,6 +65,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         linear_output_T=linear_output_T,
         lambda_compute=lambda_compute,
         monotonic_penalty_weight=monotonic_penalty_weight,
+        ppl_monotonic_penalty_weight=ppl_monotonic_penalty_weight,
         min_energy_drop=min_energy_drop,
         drop_penalty_weight=drop_penalty_weight,
         min_ppl_drop=min_ppl_drop,
@@ -96,7 +92,8 @@ def update_global_config(config):
         'batch_size', 'num_epochs', 'combined_internal_weight', 
         'combined_output_weight', 'alpha', 'embed_T', 'attn_T',
         'linear_attn_T', 'fc1_T', 'fc2_T', 'linear_output_T', 'lambda_compute',
-        'monotonic_penalty_weight', 'min_energy_drop', 'drop_penalty_weight',
+        'monotonic_penalty_weight', 'ppl_monotonic_penalty_weight',
+        'min_energy_drop', 'drop_penalty_weight',
         'min_ppl_drop', 'ppl_drop_penalty_weight'
     ]
     
