@@ -18,30 +18,30 @@ def load_best_config():
 
     fallback_values = {
         "vocab_size": 1024,
-        "block_size": 304,
-        "peak_learning_rate": 0.0013504784012236817,
-        "warmup_steps": 788,
-        "n_embed": 224,
-        "dropout": 0.4024105856640753,
-   
-        "num_heads": 16,
-        "n_blocks": 7,
-        "update_bias": False,
+        "block_size": 208,
+        "peak_learning_rate": 3.688485170315793e-05,
+        "warmup_steps": 1090,
+        "n_embed": 384,
+        "dropout": 0.4166152568090924,
+
+        "num_heads": 24,
+        "n_blocks": 8,
+        "update_bias": True,
         "alpha": 0.5,
-        "lr": 0.00013504784012236817,
+        "lr": 3.6884851703157935e-06,
         "batch_size": 32,
         "num_epochs": 5,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
-        "combined_internal_weight": 0.47422412956522186,
-        "combined_output_weight": 0.5257758704347781,
+        "combined_internal_weight": 0.7025752444778229,
+        "combined_output_weight": 0.29742475552217706,
         "use_flash_attention": False,
-        "embed_T": 2,
-        "attn_T": 3,
-        "linear_attn_T": 1,
-        "fc1_T": 2,
-        "fc2_T": 1,
-        "linear_output_T": 14
+        "embed_T": 9,
+        "attn_T": 7,
+        "linear_attn_T": 9,
+        "fc1_T": 13,
+        "fc2_T": 14,
+        "linear_output_T": 4
     }
 
     config = {}
@@ -60,16 +60,13 @@ def load_best_config():
                         num = float(value)
                         config[key] = int(num) if num.is_integer() else num
                     except ValueError:
-                        # Handle booleans
                         if value.lower() in {"true", "false"}:
                             config[key] = value.lower() == "true"
                         else:
-                            # Keep as string
                             config[key] = value.strip('"').strip("'")
     else:
         print(f"[WARNING] Tuning result file not found: {file_path}")
         print(f"[INFO] Using fallback values for missing keys: {selected_keys - config.keys()}")
-        
 
     # Fill in missing keys from fallback
     for key in selected_keys:
