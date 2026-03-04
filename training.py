@@ -34,6 +34,8 @@ def train(model, dataloader, config, global_step, device, logger):
     total_ce_loss = 0.0
     total_energy = 0.0
     batch_count = 0
+    total_steps = max(1, len(dataloader) * max(1, config.num_epochs))
+    min_lr = 0.1 * config.peak_learning_rate
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -42,24 +44,12 @@ def train(model, dataloader, config, global_step, device, logger):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
 
-        # total_steps = len(dataloader) * config.num_epochs
-        
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size - 1)
 
-        if global_step < config.warmup_steps:
-            lr = config.lr + global_step / config.warmup_steps * (
-                config.peak_learning_rate - config.lr)
-        else:
-            # # Cosine decay after warmup
-            # decay_step = global_step - config.warmup_steps
-            # decay_total = total_steps - config.warmup_steps
-            # cosine_decay = 0.5 * (1 + math.cos(math.pi * decay_step / decay_total))
-            
-            # # Minimum learning rate = 10% of peak_lr
-            # min_lr = 0.1 * config.peak_learning_rate
-            # lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
-            lr = config.peak_learning_rate
+        progress = min(1.0, global_step / max(1, total_steps - 1))
+        cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+        lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
 
         for module in model.modules():
             if hasattr(module, 'local_lr'):
