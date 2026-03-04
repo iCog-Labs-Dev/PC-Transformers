@@ -46,7 +46,7 @@ def _get_best_finite_trial(study):
         return None
     return min(finite_trials, key=lambda t: float(t.value))
 
-def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False, enable_batch_logging=False):
+def run_tuning(n_trials=70, study_name="bayesian_tuning", local_rank=0, device=None, flash=False, enable_batch_logging=False):
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
     if local_rank == 0:
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     if use_ddp:
         dist.barrier()
     
-    study = run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash, enable_batch_logging=args.log_batches)
+    study = run_tuning(n_trials=70, study_name="bayesian_tuning", local_rank=local_rank, device=device, flash=args.flash, enable_batch_logging=args.log_batches)
 
     if use_ddp and dist.is_initialized():
         dist.barrier() 
