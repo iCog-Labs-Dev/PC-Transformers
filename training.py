@@ -44,6 +44,9 @@ def train(model, dataloader, config, global_step, device, logger):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
 
+        if hasattr(base_model, "reset_pc_state"):
+            base_model.reset_pc_state(clear_kv_cache=True)
+
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size - 1)
 

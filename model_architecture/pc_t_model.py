@@ -40,6 +40,16 @@ class PCTransformer(nn.Module):
                     if module.W_latents[key] is not None:
                         module.W_latents[key] = module.W_latents[key].to(next(self.parameters()).device)
 
+    def reset_pc_state(self, clear_kv_cache: bool = True):
+        """Reset per-batch predictive-coding caches/stats to a clean state."""
+        for module in self.modules():
+            if hasattr(module, "clear_energy"):
+                module.clear_energy()
+            if hasattr(module, "clear_errors"):
+                module.clear_errors()
+            if clear_kv_cache and hasattr(module, "clear_kv_cache"):
+                module.clear_kv_cache()
+
     def forward(self, target_ids, input_ids, use_kv_cache=False):
         """
         Forward pass of the PCTransformer model, using device-specific parallelism (CUDA streams or torch.jit.fork).
@@ -51,12 +61,7 @@ class PCTransformer(nn.Module):
         Returns:
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
         """
-        for module in self.modules():
-            if hasattr(module, "clear_energy"):
-                module.clear_energy()
-            
-            if hasattr(module, "clear_errors"):
-                module.clear_errors()
+        self.reset_pc_state(clear_kv_cache=not use_kv_cache)
 
         B, S = input_ids.shape
         device = input_ids.device
