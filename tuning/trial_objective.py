@@ -1,6 +1,8 @@
 import torch
 import pickle
 import time
+import math
+import optuna
 from training import train
 from eval import evaluate
 from utils.pc_utils import cleanup_memory
@@ -23,6 +25,14 @@ def compute_inference_cost(config):
 
 def combined_loss(energy, ce_loss, compute_cost=0.0, lambda_compute=0.0):
     return float(energy + (lambda_compute * compute_cost))
+
+
+def _is_finite_positive(value):
+    try:
+        val = float(value)
+        return math.isfinite(val) and val > 0.0
+    except (TypeError, ValueError):
+        return False
 
 
 def monotonic_increase_penalty(energies):
@@ -80,7 +90,8 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         if not dist.is_initialized() or dist.get_rank() == 0:
             config = get_dynamic_model_config(trial, vocab_size, flash)
             if config is None:
-                return float("inf")
+                trial.set_user_attr("skip_reason", "invalid_config")
+                raise optuna.TrialPruned("Invalid configuration generated")
             config_dict = config.__dict__
         else:
             config_dict = None
@@ -102,7 +113,8 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         train_loader, valid_loader, _ = get_loaders(distributed=dist.is_initialized())
         
         if len(train_loader) == 0 or len(valid_loader) == 0:
-            return float("inf")
+            trial.set_user_attr("skip_reason", "empty_dataloader")
+            raise optuna.TrialPruned("Empty train/validation loader")
 
         trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
         # Print all model configuration parameters before starting training
@@ -162,6 +174,10 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             val_epoch_energies.append(avg_energy)
             val_epoch_perplexities.append(avg_perplexity)
         
+        if not _is_finite_positive(train_perplexity) or not _is_finite_positive(avg_perplexity):
+            trial.set_user_attr("skip_reason", "non_finite_perplexity")
+            raise optuna.TrialPruned("Perplexity is non-finite or non-positive")
+
         train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
         val_ce_loss = torch.log(torch.tensor(avg_perplexity)).item()
         inference_cost = compute_inference_cost(config)
@@ -179,9 +195,14 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             lambda_compute=config.lambda_compute,
         ) + (config.monotonic_penalty_weight * increase_penalty) + (config.ppl_monotonic_penalty_weight * ppl_increase_penalty) + (config.drop_penalty_weight * drop_shortfall) + (config.ppl_drop_penalty_weight * ppl_drop_shortfall)
 
+        if not math.isfinite(combined_objective):
+            trial.set_user_attr("skip_reason", "non_finite_objective")
+            raise optuna.TrialPruned("Combined objective is non-finite")
+
         # Hard constraint: trial must show a meaningful overall energy decrease across epochs.
         if total_drop < config.min_energy_drop or total_ppl_drop < config.min_ppl_drop:
-            combined_objective = float("inf")
+            trial.set_user_attr("skip_reason", "drop_constraints_not_met")
+            raise optuna.TrialPruned("Drop constraints not met")
         
         trial_time = (time.time() - start_time) 
         
@@ -220,6 +241,8 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         return combined_objective
     
     except Exception as e:
+        if isinstance(e, optuna.TrialPruned):
+            raise
         print("Trial failed:", e)
         if "out of memory" in str(e).lower():
             cleanup_memory()

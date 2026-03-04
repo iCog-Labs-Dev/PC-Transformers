@@ -1,6 +1,13 @@
 import logging
 import os
 
+
+def _fmt_float(value, precision=4):
+    try:
+        return f"{float(value):.{precision}f}"
+    except (TypeError, ValueError):
+        return str(value)
+
 def initialize_logs(study_name: str):
     """Create and initialize summary and trial log files."""
     trials_path = f"tuning/{study_name}_trials.txt"
@@ -29,6 +36,13 @@ def log_trial_to_detailed_log(trials_path, trial, config, trial_time, avg_energy
                 f"{config.peak_learning_rate:<8.2e} | {config.warmup_steps:<6} | {config.dropout:<7.3f} | {str(config.update_bias):<5}\n")
         
 def write_final_results(results_path, trial):
+    if trial is None:
+        with open(results_path, "w") as f:
+            f.write("COMBINED ENERGY OPTIMIZATION RESULTS\n")
+            f.write("====================================\n\n")
+            f.write("No finite completed trial found.\n")
+        return
+
     config = trial.user_attrs.get("config", {})
     energy = trial.user_attrs.get("energy", "N/A")
     perplexity = trial.user_attrs.get("perplexity", "N/A")
@@ -37,10 +51,10 @@ def write_final_results(results_path, trial):
     with open(results_path, "w") as f:
         f.write("COMBINED ENERGY OPTIMIZATION RESULTS\n")
         f.write("====================================\n\n")
-        f.write(f"Best combined energy: {trial.value:.4f}\n")
-        f.write(f"Average Energy: {energy:.4f}\n")
-        f.write(f"Average Perplexity: {perplexity:.4f}\n")
-        f.write(f"Combined Loss: {combined_loss:.4f}\n\n")
+        f.write(f"Best combined energy: {_fmt_float(trial.value, 4)}\n")
+        f.write(f"Average Energy: {_fmt_float(energy, 4)}\n")
+        f.write(f"Average Perplexity: {_fmt_float(perplexity, 4)}\n")
+        f.write(f"Combined Loss: {_fmt_float(combined_loss, 4)}\n\n")
         
         if config:
             f.write("Best Configuration:\n")

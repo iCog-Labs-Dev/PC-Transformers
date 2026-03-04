@@ -3,6 +3,7 @@ import logging
 import optuna
 import os
 import sys
+import math
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from tuning.trial_objective import objective
@@ -32,6 +33,18 @@ def _fmt_metric(value, precision=4):
         return f"{float(value):.{precision}f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _get_best_finite_trial(study):
+    finite_trials = [
+        t for t in study.trials
+        if t.state == optuna.trial.TrialState.COMPLETE
+        and t.value is not None
+        and math.isfinite(float(t.value))
+    ]
+    if not finite_trials:
+        return None
+    return min(finite_trials, key=lambda t: float(t.value))
 
 def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False, enable_batch_logging=False):
     """Run clean dynamic hyperparameter tuning"""
@@ -70,7 +83,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
     
     def callback(study, trial):
         if local_rank == 0:
-            best_trial = study.best_trial
+            best_trial = _get_best_finite_trial(study)
+            if best_trial is None:
+                logger.info("\nBest trial so far: none (no finite completed trial yet)\n")
+                return
             train_energy = best_trial.user_attrs.get("energy", "N/A")
             train_perplexity = best_trial.user_attrs.get("perplexity", "N/A")
             combined_loss = best_trial.user_attrs.get("combined_loss", "N/A")
@@ -83,8 +99,11 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
         study.optimize(lambda trial: objective(trial, device, flash, enable_batch_logging=enable_batch_logging), n_trials=n_trials,  callbacks=[callback], show_progress_bar=(local_rank == 0))
         logger.info(f"[Rank {local_rank}] Bayesian tuning completed!")
     
-        if local_rank == 0 and study.best_trial:
-                best_trial = study.best_trial
+        if local_rank == 0:
+            best_trial = _get_best_finite_trial(study)
+            if best_trial is None:
+                logger.warning("No finite completed trial found. Skipping final result save.")
+            else:
                 train_energy = best_trial.user_attrs.get("energy", "N/A")
                 train_perplexity = best_trial.user_attrs.get("perplexity", "N/A")
                 combined_loss = best_trial.user_attrs.get("combined_loss", "N/A")
