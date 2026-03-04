@@ -29,7 +29,7 @@ def load_best_config():
         "alpha": 0.5,
         "lr": 1.6197791949058118e-05,
         "batch_size": 16,
-        "num_epochs": 3,
+        "num_epochs": 5,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
         "combined_internal_weight": 0.6904847201267206,
