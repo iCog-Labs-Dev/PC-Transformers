@@ -29,13 +29,29 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> training.py
 
 """
 
+
+def compute_local_lr(config, global_step, total_steps):
+    """Warmup + cosine decay learning-rate schedule."""
+    peak_lr = float(getattr(config, "peak_learning_rate", getattr(config, "lr", 1e-4)))
+    min_lr = float(getattr(config, "lr", 0.1 * peak_lr))
+    warmup_steps = int(max(0, getattr(config, "warmup_steps", 0)))
+
+    if warmup_steps > 0 and global_step < warmup_steps:
+        warmup_progress = (global_step + 1) / warmup_steps
+        return min_lr + (peak_lr - min_lr) * warmup_progress
+
+    decay_steps = max(1, total_steps - warmup_steps)
+    decay_step = min(max(0, global_step - warmup_steps), decay_steps)
+    progress = decay_step / decay_steps
+    cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return min_lr + (peak_lr - min_lr) * cosine_decay
+
 def train(model, dataloader, config, global_step, device, logger):
     model.train()
     total_ce_loss = 0.0
     total_energy = 0.0
     batch_count = 0
     total_steps = max(1, len(dataloader) * max(1, config.num_epochs))
-    min_lr = 0.1 * config.peak_learning_rate
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
@@ -50,9 +66,7 @@ def train(model, dataloader, config, global_step, device, logger):
         if target_ids.max() >= vocab_size:
             target_ids = torch.clamp(target_ids, max=vocab_size - 1)
 
-        progress = min(1.0, global_step / max(1, total_steps - 1))
-        cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
-        lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
+        lr = compute_local_lr(config, global_step, total_steps)
 
         for module in model.modules():
             if hasattr(module, 'local_lr'):
