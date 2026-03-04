@@ -25,6 +25,14 @@ Usage:  torchrun --nproc-per-node=<NUM_GPU> tuning/bayes_tuning.py
 
 """
 
+
+def _fmt_metric(value, precision=4):
+    """Safely format numeric or string-like trial metrics for logging."""
+    try:
+        return f"{float(value):.{precision}f}"
+    except (TypeError, ValueError):
+        return str(value)
+
 def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False, enable_batch_logging=False):
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
@@ -66,7 +74,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
             train_energy = best_trial.user_attrs.get("energy", "N/A")
             train_perplexity = best_trial.user_attrs.get("perplexity", "N/A")
             combined_loss = best_trial.user_attrs.get("combined_loss", "N/A")
-            logger.info(f"\nBest trial so far: {best_trial.number} | Combined Loss: {combined_loss:.5f} | Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f}\n")
+            logger.info(
+                f"\nBest trial so far: {best_trial.number} | Combined Loss: {_fmt_metric(combined_loss, 5)} "
+                f"| Train Energy: {_fmt_metric(train_energy, 4)} | Train Perplexity: {_fmt_metric(train_perplexity, 4)}\n"
+            )
 
     try:
         study.optimize(lambda trial: objective(trial, device, flash, enable_batch_logging=enable_batch_logging), n_trials=n_trials,  callbacks=[callback], show_progress_bar=(local_rank == 0))
@@ -77,7 +88,10 @@ def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=N
                 train_energy = best_trial.user_attrs.get("energy", "N/A")
                 train_perplexity = best_trial.user_attrs.get("perplexity", "N/A")
                 combined_loss = best_trial.user_attrs.get("combined_loss", "N/A")
-                logger.info(f"\nFinal Best trial: {best_trial.number} | Combined Loss: {combined_loss:.5f} | Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f}\n")
+                logger.info(
+                    f"\nFinal Best trial: {best_trial.number} | Combined Loss: {_fmt_metric(combined_loss, 5)} "
+                    f"| Train Energy: {_fmt_metric(train_energy, 4)} | Train Perplexity: {_fmt_metric(train_perplexity, 4)}\n"
+                )
                 write_final_results(f"tuning/{study_name}_results.txt", best_trial)
         
         if dist.is_initialized():
