@@ -18,30 +18,29 @@ def load_best_config():
 
     fallback_values = {
         "vocab_size": 1024,
-        "block_size": 208,
-        "peak_learning_rate": 3.688485170315793e-05,
-        "warmup_steps": 1090,
-        "n_embed": 384,
-        "dropout": 0.4166152568090924,
-
-        "num_heads": 24,
-        "n_blocks": 8,
+        "block_size": 256,
+        "peak_learning_rate": 0.00016197791949058117,
+        "warmup_steps": 1205,
+        "n_embed": 144,
+        "dropout": 0.2260322398521038,
+        "num_heads": 6,
+        "n_blocks": 1,
         "update_bias": True,
         "alpha": 0.5,
-        "lr": 3.6884851703157935e-06,
-        "batch_size": 32,
-        "num_epochs": 5,
+        "lr": 1.6197791949058118e-05,
+        "batch_size": 16,
+        "num_epochs": 3,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
-        "combined_internal_weight": 0.7025752444778229,
-        "combined_output_weight": 0.29742475552217706,
+        "combined_internal_weight": 0.6904847201267206,
+        "combined_output_weight": 0.3095152798732794,
         "use_flash_attention": False,
-        "embed_T": 9,
-        "attn_T": 7,
-        "linear_attn_T": 9,
-        "fc1_T": 13,
-        "fc2_T": 14,
-        "linear_output_T": 4
+        "embed_T": 4,
+        "attn_T": 9,
+        "linear_attn_T": 12,
+        "fc1_T": 4,
+        "fc2_T": 3,
+        "linear_output_T": 9
     }
 
     config = {}
