@@ -32,7 +32,6 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     combined_internal_weight = trial.suggest_float('combined_internal_weight', 0.1, 0.9)
     combined_output_weight = 1.0 - combined_internal_weight
     num_epochs = num_epochs = 10
-    alpha = 0.5
     
     return GPTConfig(
         vocab_size=vocab_size,
@@ -59,7 +58,6 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         combined_internal_weight = combined_internal_weight,
         combined_output_weight = combined_output_weight,
         use_flash_attention=flash,
-        alpha=alpha
     )
 
 def update_global_config(config):
@@ -69,7 +67,7 @@ def update_global_config(config):
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
         'update_bias', 'internal_energy_fn_name', 'output_energy_fn_name',
         'batch_size', 'num_epochs', 'combined_internal_weight', 
-        'combined_output_weight', 'alpha', 'embed_T', 'attn_T',
+        'combined_output_weight', 'embed_T', 'attn_T',
         'linear_attn_T', 'fc1_T', 'fc2_T', 'linear_output_T', 'lambda_compute'
     ]
     

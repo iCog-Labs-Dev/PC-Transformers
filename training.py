@@ -173,7 +173,6 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
     )
     
     # Create a separate logger for hyperparameters

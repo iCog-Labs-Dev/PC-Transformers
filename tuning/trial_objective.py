@@ -1,7 +1,8 @@
 import torch
 import pickle
 import time
-import pickle
+import math
+import optuna
 from training import train
 from eval import evaluate
 from utils.pc_utils import cleanup_memory
@@ -16,12 +17,15 @@ import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
 from data_preparation.config import vocab_size
 
-def combined_loss(energy, ce_loss, alpha=0.5):
-    """
-    Combine energy and cross-entropy loss.
-    alpha: weight between energy and CE loss (0.0 = only CE, 1.0 = only energy)
-    """
-    return alpha * energy + (1 - alpha) * ce_loss
+def compute_inference_cost(config):
+    """Approximate compute cost from layer-wise inference steps."""
+    per_block_steps = config.attn_T + config.linear_attn_T + config.fc1_T + config.fc2_T
+    return float(config.embed_T + config.linear_output_T + (config.n_blocks * per_block_steps))
+
+
+def combined_loss(energy, compute_cost=0.0, lambda_compute=0.0):
+    return float(energy + (lambda_compute * compute_cost))
+
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
@@ -41,7 +45,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
     set_seed(42 + trial.number)
     start_time = time.time()
     model = None
-    
+
     print(f"\nStarting Trial {trial.number}")
     
     try:       
@@ -73,26 +77,52 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             return float("inf")
 
         trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
-
+        print("\nModel configuration parameters for this trial:")
+        print(f"vocab_size={config.vocab_size}")
+        print(f"block_size={config.block_size}")
+        print(f"peak_learning_rate={config.peak_learning_rate}")
+        print(f"warmup_steps={config.warmup_steps}")
+        print(f"n_embed={config.n_embed}")
+        print(f"dropout={config.dropout}")
+        print(f"lr={config.lr}")
+        print(f"embed_T={config.embed_T}")
+        print(f"attn_T={config.attn_T}")
+        print(f"linear_attn_T={config.linear_attn_T}")
+        print(f"fc1_T={config.fc1_T}")
+        print(f"fc2_T={config.fc2_T}")
+        print(f"linear_output_T={config.linear_output_T}")
+        print(f"lambda_compute={config.lambda_compute}")
+        print(f"num_heads={config.num_heads}")
+        print(f"n_blocks={config.n_blocks}")
+        print(f"batch_size={config.batch_size}")
+        print(f"num_epochs={config.num_epochs}")
+        print(f"update_bias={config.update_bias}")
+        print(f"internal_energy_fn_name={config.internal_energy_fn_name}")
+        print(f"output_energy_fn_name={config.output_energy_fn_name}")
+        print(f"combined_internal_weight={config.combined_internal_weight}")
+        print(f"combined_output_weight={config.combined_output_weight}")
+        print(f"use_flash_attention={config.use_flash_attention}")
         model.train()
         train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
 
         model.eval()
         avg_energy, avg_perplexity = evaluate(model, config, valid_loader, max_batches=None, device=device)
-        
-        train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
-        
-        alpha = 0.5
-        combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
+
+        inference_cost = compute_inference_cost(config)
+        combined_objective = combined_loss(
+            train_energy,
+            compute_cost=inference_cost,
+            lambda_compute=config.lambda_compute,
+        )
         
         trial_time = (time.time() - start_time) 
         
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", train_energy)
         trial.set_user_attr("perplexity", train_perplexity)
-        trial.set_user_attr("ce_loss", train_ce_loss)
+        trial.set_user_attr("inference_cost", inference_cost)
+        trial.set_user_attr("lambda_compute", config.lambda_compute)
         trial.set_user_attr("combined_loss", combined_objective)
-        trial.set_user_attr("alpha", alpha)
         trial.set_user_attr("trial_time", trial_time)
 
         trial_path = "tuning/bayesian_tuning_trials.txt"

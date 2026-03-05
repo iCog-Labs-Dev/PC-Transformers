@@ -39,7 +39,6 @@ class GPTConfig:
     combined_internal_weight: float 
     combined_output_weight: float
     use_flash_attention: bool
-    alpha: float
     # Per-layer T values for iterative inference
     embed_T: int = 1
     attn_T: int = 1
