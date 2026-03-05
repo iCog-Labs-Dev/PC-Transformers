@@ -26,7 +26,6 @@ def load_best_config():
         "num_heads": 8,
         "n_blocks": 6,
         "update_bias": False,
-        "alpha": 0.5,
         "lr": 8.148429609007041e-05,
         "batch_size": 8,
         "num_epochs": 3,
@@ -74,5 +73,8 @@ def load_best_config():
     for key in selected_keys:
         if key not in config:
             config[key] = fallback_values[key]
+
+    # Central policy: keep training/eval/generation epoch count consistent.
+    config["num_epochs"] = 5
 
     return config
