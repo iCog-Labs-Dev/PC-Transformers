@@ -182,8 +182,14 @@ class PCTransformer(nn.Module):
 
 
             for t_attn in range(getattr(self.config, 'attn_T', 1)):
+
+                if idx == 0:
+                    td_embed = self.embedding.pc_layer.get_td_err("embed") if t_linear_attn > 0 else None
+                else:
+                    td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("fc2") if t_linear_attn > 0 else None
                 if td_embed is None:
-                    _debug_none_td("attn.td_embed", "attn", t_attn, idx)
+                    _debug_none_td("linear_attn.td_embed", "linear_attn", t_linear_attn, idx)
+                
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
@@ -209,12 +215,6 @@ class PCTransformer(nn.Module):
             
             # attn output
             for t_linear_attn in range(getattr(self.config, 'linear_attn_T', 1)):
-                if idx == 0:
-                    td_embed = self.embedding.pc_layer.get_td_err("embed") if t_linear_attn > 0 else None
-                else:
-                    td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("fc2") if t_linear_attn > 0 else None
-                if td_embed is None:
-                    _debug_none_td("linear_attn.td_embed", "linear_attn", t_linear_attn, idx)
                 
                 td_attn_qkv = block.attn.pc_qkv.get_td_err("attn") if t_linear_attn > 0 else None
                 if td_attn_qkv is None:
