@@ -4,7 +4,6 @@ import time
 import math
 import optuna
 from training import train
-from eval import evaluate
 from utils.pc_utils import cleanup_memory
 from utils.model_utils import set_seed
 from model_architecture.pc_t_model import PCTransformer
@@ -13,7 +12,6 @@ from tuning.config import get_dynamic_model_config, update_global_config
 from tuning.tuning_logs import log_trial_to_detailed_log, trial_batch_logger
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
 from data_preparation.config import vocab_size
 
@@ -71,9 +69,9 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             else:
                 model = DDP(model)
        
-        train_loader, valid_loader, _ = get_loaders(distributed=dist.is_initialized())
+        train_loader, _, _ = get_loaders(distributed=dist.is_initialized())
         
-        if len(train_loader) == 0 or len(valid_loader) == 0:
+        if len(train_loader) == 0:
             return float("inf")
 
         trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
@@ -102,11 +100,25 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         print(f"combined_internal_weight={config.combined_internal_weight}")
         print(f"combined_output_weight={config.combined_output_weight}")
         print(f"use_flash_attention={config.use_flash_attention}")
-        model.train()
-        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
-
-        model.eval()
-        avg_energy, avg_perplexity = evaluate(model, config, valid_loader, max_batches=None, device=device)
+        global_step = 0
+        train_epoch_energies = []
+        train_epoch_perplexities = []
+        for epoch in range(config.num_epochs):
+            model.train()
+            train_energy, train_perplexity, global_step = train(
+                model,
+                train_loader,
+                config,
+                global_step=global_step,
+                device=device,
+                logger=trial_logger,
+            )
+            train_epoch_energies.append(float(train_energy))
+            train_epoch_perplexities.append(float(train_perplexity))
+            print(
+                f"Trial {trial.number} | Epoch {epoch + 1}/{config.num_epochs} "
+                f"| Train Free Energy: {train_energy:.6f} | Train Perplexity: {train_perplexity:.6f}"
+            )
 
         inference_cost = compute_inference_cost(config)
         combined_objective = combined_loss(
@@ -120,6 +132,8 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", train_energy)
         trial.set_user_attr("perplexity", train_perplexity)
+        trial.set_user_attr("train_epoch_energies", train_epoch_energies)
+        trial.set_user_attr("train_epoch_perplexities", train_epoch_perplexities)
         trial.set_user_attr("inference_cost", inference_cost)
         trial.set_user_attr("lambda_compute", config.lambda_compute)
         trial.set_user_attr("combined_loss", combined_objective)
