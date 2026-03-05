@@ -148,7 +148,7 @@ class PCTransformer(nn.Module):
         # Per-layer inference steps
         # Output layer
         for t_embed in range(getattr(self.config, 'embed_T', 1)):
-            _debug_none_td("embed.td_err", "embed", t_embed)
+            
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
