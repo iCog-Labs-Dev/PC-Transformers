@@ -28,7 +28,7 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     lr = peak_lr * 0.1 
     warmup_steps = trial.suggest_int('warmup_steps', 50, 2000, log=True)
     update_bias = trial.suggest_int('update_bias_int', 0, 1) == 1
-    batch_size = trial.suggest_categorical('batch_size', [16, 32, 64])
+    batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
     combined_internal_weight = trial.suggest_float('combined_internal_weight', 0.1, 0.9)
     combined_output_weight = 1.0 - combined_internal_weight
     num_epochs = 3
