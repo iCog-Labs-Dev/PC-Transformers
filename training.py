@@ -153,6 +153,15 @@ def main():
         root_logger.addHandler(file_h)
 
     logger = logging.getLogger(__name__)
+    print("\nModel configuration parameters for this training run:")
+    for k in [
+        "vocab_size", "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
+        "dropout", "lr", "embed_T", "attn_T", "linear_attn_T", "fc1_T", "fc2_T", "linear_output_T",
+        "num_heads", "n_blocks", "batch_size", "num_epochs", "update_bias",
+        "internal_energy_fn_name", "output_energy_fn_name", "combined_internal_weight",
+        "combined_output_weight", "use_flash_attention"
+    ]:
+        print(f"{k}={best_config.get(k)}")
    
     config = GPTConfig(
         vocab_size = vocab_size,
@@ -162,7 +171,6 @@ def main():
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        T = best_config["T"],
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
@@ -173,7 +181,12 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        embed_T = best_config.get("embed_T", 1),
+        attn_T = best_config.get("attn_T", 1),
+        linear_attn_T = best_config.get("linear_attn_T", 2),
+        fc1_T = best_config.get("fc1_T", 1),
+        fc2_T = best_config.get("fc2_T", 1),
+        linear_output_T = best_config.get("linear_output_T", 8)
     )
     
     # Create a separate logger for hyperparameters
