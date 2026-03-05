@@ -15,7 +15,14 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
     block_size = trial.suggest_int("block_size", 64, 512, step=16)
     n_blocks = trial.suggest_int('n_blocks', 1, 12)
-    T = trial.suggest_int('T', 1, 14, log=True)
+    # Per-layer T values
+    embed_T = trial.suggest_int('embed_T', 3, 14, log=True)
+    attn_T = trial.suggest_int('attn_T', 3, 14, log=True)
+    linear_attn_T = trial.suggest_int('linear_attn_T', 3, 14, log=True)
+    fc1_T = trial.suggest_int('fc1_T', 3, 14, log=True)
+    fc2_T = trial.suggest_int('fc2_T', 3, 14, log=True)
+    linear_output_T = trial.suggest_int('linear_output_T', 3, 14, log=True)
+    lambda_compute = trial.suggest_float('lambda_compute', 1e-6, 3e-5, log=True)
     dropout = trial.suggest_float("dropout", 0.0, 0.5)
     peak_lr = trial.suggest_float('peak_lr', 1e-5, 1e-2, log=True)
     lr = peak_lr * 0.1 
@@ -35,7 +42,13 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         n_embed=n_embed,
         dropout=dropout,
         lr=lr, 
-        T=T,
+        embed_T=embed_T,
+        attn_T=attn_T,
+        linear_attn_T=linear_attn_T,
+        fc1_T=fc1_T,
+        fc2_T=fc2_T,
+        linear_output_T=linear_output_T,
+        lambda_compute=lambda_compute,
         num_heads=num_heads,
         n_blocks=n_blocks,
         batch_size = batch_size,
@@ -54,9 +67,10 @@ def update_global_config(config):
     config_keys = [
         'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
-        'update_bias', 'T', 'internal_energy_fn_name', 'output_energy_fn_name',
+        'update_bias', 'internal_energy_fn_name', 'output_energy_fn_name',
         'batch_size', 'num_epochs', 'combined_internal_weight', 
-        'combined_output_weight', 'alpha'
+        'combined_output_weight', 'alpha', 'embed_T', 'attn_T',
+        'linear_attn_T', 'fc1_T', 'fc2_T', 'linear_output_T', 'lambda_compute'
     ]
     
     for key in config_keys:
