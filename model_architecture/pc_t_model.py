@@ -51,6 +51,12 @@ class PCTransformer(nn.Module):
         Returns:
             logits (torch.Tensor): Tensor of shape (B, T, vocab_size), the model's output logits for each token position.
         """
+        def _debug_none_td(td_name, layer_type, step, block_idx=None):
+            msg = f"[DEBUG][None td_err] {td_name} is None at layer={layer_type}, step={step}"
+            if block_idx is not None:
+                msg += f", block={block_idx}"
+            print(msg)
+
         for module in self.modules():
             if hasattr(module, "clear_energy"):
                 module.clear_energy()
@@ -142,6 +148,7 @@ class PCTransformer(nn.Module):
         # Per-layer inference steps
         # Output layer
         for t_embed in range(getattr(self.config, 'embed_T', 1)):
+            _debug_none_td("embed.td_err", "embed", t_embed)
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
@@ -170,10 +177,13 @@ class PCTransformer(nn.Module):
             )
             
             layer_norm2 = (block.ln2 if idx < len(self.blocks) - 1 else None)
+            
 
 
 
             for t_attn in range(getattr(self.config, 'attn_T', 1)):
+                if td_embed is None:
+                    _debug_none_td("attn.td_embed", "attn", t_attn, idx)
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
@@ -203,7 +213,12 @@ class PCTransformer(nn.Module):
                     td_embed = self.embedding.pc_layer.get_td_err("embed") if t_linear_attn > 0 else None
                 else:
                     td_embed = self.blocks[idx - 1].mlp.pc_layer2.get_td_err("fc2") if t_linear_attn > 0 else None
+                if td_embed is None:
+                    _debug_none_td("linear_attn.td_embed", "linear_attn", t_linear_attn, idx)
+                
                 td_attn_qkv = block.attn.pc_qkv.get_td_err("attn") if t_linear_attn > 0 else None
+                if td_attn_qkv is None:
+                    _debug_none_td("linear_attn.td_attn_qkv", "linear_attn", t_linear_attn, idx)
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
@@ -225,6 +240,8 @@ class PCTransformer(nn.Module):
             # fc1
             for t_fc1 in range(getattr(self.config, 'fc1_T', 1)):
                 td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t_fc1 > 0 else None
+                if td_attn_op is None:
+                    _debug_none_td("fc1.td_attn_op", "fc1", t_fc1, idx)
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
@@ -245,6 +262,8 @@ class PCTransformer(nn.Module):
             # fc2
             for t_fc2 in range(getattr(self.config, 'fc2_T', 1)):
                 td_mlp1 = block.mlp.pc_layer1.get_td_err("fc1") if t_fc2 > 0 else None
+                if td_mlp1 is None:
+                    _debug_none_td("fc2.td_mlp1", "fc2", t_fc2, idx)
                 execute_parallel(
                     use_cuda,
                     streams_or_futures,
@@ -269,6 +288,8 @@ class PCTransformer(nn.Module):
 
         for t_out in range(getattr(self.config, 'linear_output_T', 1)):
             td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t_out > 0 else None
+            if td_mlp2 is None:
+                _debug_none_td("linear_output.td_mlp2", "linear_output", t_out)
             execute_parallel(
                 use_cuda,
                 streams_or_futures,
