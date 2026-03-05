@@ -18,7 +18,6 @@ class PCLayer(nn.Module):
     """
     def __init__(
         self,
-        T: int,
         lr: float,
         update_bias: bool,
         energy_fn_name: str,
@@ -26,7 +25,6 @@ class PCLayer(nn.Module):
         n_embed: Optional[int] = None,
     ):
         super().__init__()
-        self.T = T
         self.local_lr = lr
         self.update_bias = update_bias
         self.clamp_value = 3.0
@@ -60,8 +58,8 @@ class PCLayer(nn.Module):
         target_activity: torch.Tensor,
         layer_type: str,
         t: int,
-        T: int,
         requires_update: bool,
+        T: Optional[int] = None,
         td_err:  Optional[torch.Tensor] = None,
         layer: Optional[nn.Module] = None,
         layer_norm: Optional[nn.Module] = None,
@@ -71,15 +69,33 @@ class PCLayer(nn.Module):
         flash: bool = False,
         kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # ADD THIS
         use_cache: bool = False, 
+        embed_T: Optional[int] = None,
+        attn_T: Optional[int] = None,
+        linear_attn_T: Optional[int] = None,
+        fc1_T: Optional[int] = None,
+        fc2_T: Optional[int] = None,
+        linear_output_T: Optional[int] = None,
     ):
         """Perform one predictive coding inference step."""
         self._reset_step_state()
         x = self._get_cached_state(layer_type)
 
+        layer_t_map = {
+            "embed": embed_T,
+            "attn": attn_T,
+            "linear_attn": linear_attn_T,
+            "fc1": fc1_T,
+            "fc2": fc2_T,
+            "linear_output": linear_output_T,
+        }
+        step_T = layer_t_map.get(layer_type)
+        if step_T is None:
+            step_T = T if T is not None else 1
+
         if layer_type == "embed":
             mu, mu_word, mu_pos, bu_err = step_embed(
                 t,
-                T,
+                step_T,
                 target_activity,
                 layer,
                 layer_type,
@@ -97,18 +113,19 @@ class PCLayer(nn.Module):
             if bu_err is not None:
                 self._error_cache["embed"] = bu_err.detach().clone()
 
-            # compute energy
-            error = target_activity - mu
-            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-            self._energy += energy
-            self._errors.extend(step_errors)
+            # compute energy only at final inference step
+            if t == step_T - 1:
+                error = target_activity - mu
+                energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+                self._energy += energy
+                self._errors.extend(step_errors)
             return mu_word, mu_pos
         
         elif layer_type == "attn":
             lateral_conn = self.lateral_connections.get(layer_type, None)
             x, mu, bu_err, new_kv_cache = step_attn(
                 t,
-                T,
+                step_T,
                 target_activity,
                 x,
                 lateral_conn,
@@ -135,7 +152,7 @@ class PCLayer(nn.Module):
             lateral_conn = self.lateral_connections.get(layer_type, None)
             x, mu, bu_err = step_linear(
                 t,
-                T,
+                step_T,
                 target_activity,
                 x,
                 layer, 
@@ -155,10 +172,11 @@ class PCLayer(nn.Module):
         if bu_err is not None: 
          self._error_cache[layer_type] = bu_err.detach().clone()   
         
-        error = target_activity - mu
-        energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-        self._energy += energy
-        self._errors.extend(step_errors)
+        if t == step_T - 1:
+            error = target_activity - mu
+            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+            self._energy += energy
+            self._errors.extend(step_errors)
 
         # update x cache
         self._x_cache[layer_type] = x
@@ -235,6 +253,7 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        self._error_cache.clear()
         
     def get_errors(self) -> list:
         """Get the list of error values accumulated during inference."""
