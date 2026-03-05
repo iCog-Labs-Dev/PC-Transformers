@@ -39,7 +39,12 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
             warmup_steps = best_config["warmup_steps"],
             n_embed = best_config["n_embed"],
             dropout = best_config["dropout"],
-            T = best_config["T"],
+            embed_T = best_config["embed_T"],
+            attn_T = best_config["attn_T"],
+            linear_attn_T = best_config["linear_attn_T"],
+            fc1_T = best_config["fc1_T"],
+            fc2_T = best_config["fc2_T"],
+            linear_output_T = best_config["linear_output_T"],
             num_heads = best_config["num_heads"],
             n_blocks = n_blocks,   # Variable parameter
             batch_size = best_config["batch_size"],
@@ -50,6 +55,7 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
             combined_internal_weight = best_config["combined_internal_weight"],
             combined_output_weight = best_config["combined_output_weight"],
             use_flash_attention = best_config["use_flash_attention"],
+         
         )
         
         # Initialize model

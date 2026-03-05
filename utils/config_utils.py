@@ -8,31 +8,39 @@ def load_best_config():
     """
 
     selected_keys = {
-        "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
-        "dropout", "T", "num_heads", "n_blocks", "update_bias",
+        "vocab_size", "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
+        "dropout", "num_heads", "n_blocks", "update_bias",
         "lr", "batch_size", "num_epochs", "internal_energy_fn_name",
         "output_energy_fn_name", "combined_internal_weight",
-        "combined_output_weight", "use_flash_attention"
+        "combined_output_weight", "use_flash_attention",
+        "embed_T", "attn_T", "linear_attn_T", "fc1_T", "fc2_T", "linear_output_T"
     }
 
     fallback_values = {
-        "block_size": 64,
-        "peak_learning_rate": 0.009606017304857476,
-        "warmup_steps": 59,
-        "n_embed": 512,
-        "dropout": 0.46876145412214615,
-        "T": 2,
-        "num_heads": 32,
-        "n_blocks": 12,
+        "vocab_size": 1024,
+        "block_size": 144,
+        "peak_learning_rate": 0.000814842960900704,
+        "warmup_steps": 838,
+        "n_embed": 320,
+        "dropout": 0.41064724380468237,
+        "num_heads": 8,
+        "n_blocks": 6,
         "update_bias": False,
-        "lr": 0.0009606017304857476,
+        "alpha": 0.5,
+        "lr": 8.148429609007041e-05,
         "batch_size": 8,
-        "num_epochs": 10,
+        "num_epochs": 3,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
-        "combined_internal_weight": 0.8779955579743048,
-        "combined_output_weight": 0.12200444202569516,
-        "use_flash_attention": False
+        "combined_internal_weight": 0.8738836293065214,
+        "combined_output_weight": 0.12611637069347859,
+        "use_flash_attention": False,
+        "embed_T": 4,
+        "attn_T": 11,
+        "linear_attn_T": 5,
+        "fc1_T": 5,
+        "fc2_T": 12,
+        "linear_output_T": 3
     }
 
     config = {}
