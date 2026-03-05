@@ -159,7 +159,7 @@ def main():
         "dropout", "lr", "embed_T", "attn_T", "linear_attn_T", "fc1_T", "fc2_T", "linear_output_T",
         "num_heads", "n_blocks", "batch_size", "num_epochs", "update_bias",
         "internal_energy_fn_name", "output_energy_fn_name", "combined_internal_weight",
-        "combined_output_weight", "use_flash_attention", "alpha"
+        "combined_output_weight", "use_flash_attention"
     ]:
         print(f"{k}={best_config.get(k)}")
    
@@ -181,7 +181,6 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"],
         embed_T = best_config.get("embed_T", 1),
         attn_T = best_config.get("attn_T", 1),
         linear_attn_T = best_config.get("linear_attn_T", 2),

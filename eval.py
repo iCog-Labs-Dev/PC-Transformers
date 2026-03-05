@@ -129,7 +129,6 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"],
         embed_T = best_config.get("embed_T", 10),
         attn_T = best_config.get("attn_T", 2),
         linear_attn_T = best_config.get("linear_attn_T", 1),
