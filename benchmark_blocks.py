@@ -55,6 +55,12 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
             combined_internal_weight = best_config["combined_internal_weight"],
             combined_output_weight = best_config["combined_output_weight"],
             use_flash_attention = best_config["use_flash_attention"],
+            embed_T = best_config.get("embed_T", 1),
+            attn_T = best_config.get("attn_T", 1),
+            linear_attn_T = best_config.get("linear_attn_T", 1),
+            fc1_T = best_config.get("fc1_T", 1),
+            fc2_T = best_config.get("fc2_T", 1),
+            linear_output_T = best_config.get("linear_output_T", 1),
          
         )
         

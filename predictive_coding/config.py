@@ -40,12 +40,11 @@ class GPTConfig:
     combined_output_weight: float
     use_flash_attention: bool
     # Per-layer T values for iterative inference
-    embed_T: int = 1
-    attn_T: int = 1
-    linear_attn_T: int = 1
-    fc1_T: int = 1
-    fc2_T: int = 1
-    linear_output_T: int = 1
-    lambda_compute: float = 0.0
+    embed_T: int
+    attn_T: int
+    linear_attn_T: int
+    fc1_T: int
+    fc2_T: int
+    linear_output_T: int
     
    
