@@ -60,8 +60,8 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             config_dict = broadcast_config(config_dict, device)
         
         config = GPTConfig(**config_dict)
-        # Ensure each tuning trial trains for 3 epochs.
-        config.num_epochs = 3
+        # Tuning objective runs a single train+eval pass.
+        config.num_epochs = 1
         update_global_config(config.__dict__)
 
         if not dist.is_initialized() or dist.get_rank() == 0:
@@ -96,35 +96,31 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         avg_energy = float("inf")
         avg_perplexity = float("inf")
 
-        for epoch in range(config.num_epochs):
-            if hasattr(train_loader, "sampler") and isinstance(train_loader.sampler, torch.utils.data.DistributedSampler):
-                train_loader.sampler.set_epoch(epoch)
+        model.train()
+        train_energy, train_perplexity, global_step = train(
+            model,
+            train_loader,
+            config,
+            global_step=global_step,
+            device=device,
+            logger=trial_logger,
+        )
 
-            model.train()
-            train_energy, train_perplexity, global_step = train(
-                model,
-                train_loader,
-                config,
-                global_step=global_step,
-                device=device,
-                logger=trial_logger,
+        model.eval()
+        avg_energy, avg_perplexity = evaluate(
+            model,
+            config,
+            valid_loader,
+            max_batches=None,
+            device=device,
+        )
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            logger.info(
+                f"Trial {trial.number} | "
+                f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
+                f"Val Energy: {avg_energy:.4f} | Val Perplexity: {avg_perplexity:.4f}"
             )
-
-            model.eval()
-            avg_energy, avg_perplexity = evaluate(
-                model,
-                config,
-                valid_loader,
-                max_batches=None,
-                device=device,
-            )
-
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                logger.info(
-                    f"Trial {trial.number} Epoch {epoch + 1}/{config.num_epochs} | "
-                    f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-                    f"Val Energy: {avg_energy:.4f} | Val Perplexity: {avg_perplexity:.4f}"
-                )
         
         train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
         
