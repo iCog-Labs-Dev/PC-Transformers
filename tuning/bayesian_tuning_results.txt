@@ -18,7 +18,7 @@ update_bias: False
 num_heads: 2
 n_blocks: 1
 batch_size: 32
-num_epochs: 1
+num_epochs: 10
 internal_energy_fn_name: pc_e
 output_energy_fn_name: pc_e
 combined_internal_weight: 0.7774452929376792
