@@ -33,7 +33,7 @@ def load_best_config():
         "update_bias": False,
         "lr": 0.0005385160427135375,
         "batch_size": 32,
-        "num_epochs": 10,
+        "num_epochs": 3,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
         "combined_internal_weight": 0.7774452929376792,
