@@ -13,18 +13,14 @@ from tuning.config import get_dynamic_model_config, update_global_config
 from tuning.tuning_logs import log_trial_to_detailed_log, trial_batch_logger
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
 from data_preparation.config import vocab_size
 
 logger = logging.getLogger(__name__)
 
-def combined_loss(energy, ce_loss, alpha=0.5):
-    """
-    Combine energy and cross-entropy loss.
-    alpha: weight between energy and CE loss (0.0 = only CE, 1.0 = only energy)
-    """
-    return alpha * energy + (1 - alpha) * ce_loss
+def combined_loss(energy):
+    """Energy-only objective for tuning."""
+    return energy
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
@@ -122,19 +118,14 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
                 f"Val Energy: {avg_energy:.4f} | Val Perplexity: {avg_perplexity:.4f}"
             )
         
-        train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
-        
-        alpha = 0.5
-        combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
+        combined_objective = combined_loss(train_energy)
         
         trial_time = (time.time() - start_time) 
         
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", train_energy)
         trial.set_user_attr("perplexity", train_perplexity)
-        trial.set_user_attr("ce_loss", train_ce_loss)
         trial.set_user_attr("combined_loss", combined_objective)
-        trial.set_user_attr("alpha", alpha)
         trial.set_user_attr("trial_time", trial_time)
 
         trial_path = "tuning/bayesian_tuning_trials.txt"
