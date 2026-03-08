@@ -12,7 +12,8 @@ def load_best_config():
         "dropout", "T", "num_heads", "n_blocks", "update_bias", "alpha",
         "lr", "batch_size", "num_epochs", "internal_energy_fn_name",
         "output_energy_fn_name", "combined_internal_weight",
-        "combined_output_weight", "use_flash_attention"
+        "combined_output_weight", "use_flash_attention",
+        "use_memory_init", "memory_slots", "memory_delta", "memory_update_qk"
     }
 
     fallback_values = {
@@ -33,7 +34,11 @@ def load_best_config():
         "output_energy_fn_name": "pc_e",
         "combined_internal_weight": 0.8779955579743048,
         "combined_output_weight": 0.12200444202569516,
-        "use_flash_attention": False
+        "use_flash_attention": False,
+        "use_memory_init": True,
+        "memory_slots": 128,
+        "memory_delta": 8.0,
+        "memory_update_qk": True
     }
 
     config = {}
