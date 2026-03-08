@@ -26,6 +26,10 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     combined_output_weight = 1.0 - combined_internal_weight
     num_epochs = num_epochs = 10
     alpha = 0.5
+    use_memory_init = True
+    memory_slots = 128
+    memory_delta = 8.0
+    memory_update_qk = True
     
     return GPTConfig(
         vocab_size=vocab_size,
@@ -46,7 +50,11 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         combined_internal_weight = combined_internal_weight,
         combined_output_weight = combined_output_weight,
         use_flash_attention=flash,
-        alpha=alpha
+        alpha=alpha,
+        use_memory_init=use_memory_init,
+        memory_slots=memory_slots,
+        memory_delta=memory_delta,
+        memory_update_qk=memory_update_qk,
     )
 
 def update_global_config(config):
