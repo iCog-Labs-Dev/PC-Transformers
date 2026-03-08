@@ -70,7 +70,7 @@ def train(model, dataloader, config, global_step, device, logger):
             target_ids = torch.clamp(target_ids, max=vocab_size-1)
             
             
-        logits = model(target_ids, input_ids)
+        logits = model(target_ids, input_ids, requires_update=True)
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             target_ids.view(-1),
@@ -173,7 +173,11 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        alpha = best_config["alpha"],
+        use_memory_init=best_config.get("use_memory_init", True),
+        memory_slots=best_config.get("memory_slots", 128),
+        memory_delta=best_config.get("memory_delta", 8.0),
+        memory_update_qk=best_config.get("memory_update_qk", True),
     )
     
     # Create a separate logger for hyperparameters
