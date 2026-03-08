@@ -3,13 +3,13 @@ import torch.nn as nn
 from typing import Optional, Dict, Tuple
 
 from utils.pc_utils import (
-    x_init,
     step_embed,
     step_linear,
     step_attn,
     finalize_step,
 )
 from predictive_coding.lateral_connc import LateralConnections
+from predictive_coding.hopfield_memory import HopfieldMemory
 
 class PCLayer(nn.Module):
     """
@@ -24,6 +24,10 @@ class PCLayer(nn.Module):
         energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
+        use_memory_init: bool = True,
+        memory_slots: int = 128,
+        memory_delta: float = 8.0,
+        memory_update_qk: bool = True,
     ):
         super().__init__()
         self.T = T
@@ -33,13 +37,20 @@ class PCLayer(nn.Module):
         self.energy_fn_name = energy_fn_name 
         self.num_heads = num_heads
         self.n_embed = n_embed
+        self.use_memory_init = use_memory_init
+        self.memory_slots = int(memory_slots)
+        self.memory_delta = float(memory_delta)
+        self.memory_update_qk = bool(memory_update_qk)
         
         self.lateral_connections: Dict[str, LateralConnections] = {}
+        self.memories: Dict[str, HopfieldMemory] = {}
         
         self._x_cache: Dict[str, torch.Tensor] = {}
         self._mu_cache: Dict[str, torch.Tensor] = {}
         self._error_cache: Dict[str, torch.Tensor] = {}
+        self._obs_cache: Dict[str, torch.Tensor] = {}
         self._energy = 0.0
+        self._memory_loss = 0.0
         self._errors = []
     
     def register_lateral(self, layer_type: str, size: int):
@@ -54,6 +65,18 @@ class PCLayer(nn.Module):
     
     def _get_cached_state(self, layer_type: str):
         return self._x_cache.get(layer_type, None)
+
+    def register_memory(self, layer_type: str, obs_dim: int, hidden_dim: int, device: torch.device):
+        if layer_type not in self.memories:
+            memory = HopfieldMemory(
+                obs_dim=obs_dim,
+                hidden_dim=hidden_dim,
+                memory_slots=self.memory_slots,
+                delta=self.memory_delta,
+            )
+            self.memories[layer_type] = memory
+            self.add_module(f"memory_{layer_type}", memory)
+        self.memories[layer_type] = self.memories[layer_type].to(device)
     
     def forward(
         self,
@@ -71,6 +94,7 @@ class PCLayer(nn.Module):
         flash: bool = False,
         kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # ADD THIS
         use_cache: bool = False, 
+        observation: Optional[torch.Tensor] = None,
     ):
         """Perform one predictive coding inference step."""
         self._reset_step_state()
@@ -160,6 +184,23 @@ class PCLayer(nn.Module):
         self._energy += energy
         self._errors.extend(step_errors)
 
+        # Update associative memory only after final inference step.
+        if (
+            self.use_memory_init
+            and requires_update
+            and t == T - 1
+            and layer_type in self.memories
+            and layer_type in self._obs_cache
+        ):
+            lh = self.memories[layer_type].local_update(
+                observation=self._obs_cache[layer_type],
+                converged_state=x.detach(),
+                lr=self.local_lr,
+                clamp_value=self.clamp_value,
+                update_qk=self.memory_update_qk,
+            )
+            self._memory_loss += float(lh)
+
         # update x cache
         self._x_cache[layer_type] = x
         return x, mu
@@ -174,6 +215,7 @@ class PCLayer(nn.Module):
         proj_layers: Optional[dict] = None,
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        observation: Optional[torch.Tensor] = None,
     ):
         """
         Initialize cached activity `x` for the layer type.
@@ -199,7 +241,17 @@ class PCLayer(nn.Module):
             assert proj_layers is not None, "Attention layer requires proj_layers"
             H_in = proj_layers["q_proj"].weight.shape[1]
             H_out = proj_layers["v_proj"].weight.shape[0] 
-            self._x_cache["attn"] = x_init(batch_size, seq_len, H_out, device)
+            if self.use_memory_init and observation is not None:
+                self.register_memory("attn", observation.size(-1), H_out, device)
+                if not self.memories["attn"]._bootstrapped:
+                    # In decoder-only settings, Ifw is typically unavailable; use current state as warm-start target.
+                    warm_start = torch.zeros(batch_size, seq_len, H_out, device=device)
+                    self.memories["attn"].bootstrap_value_matrix(observation, warm_start)
+                retrieved, _, _, _ = self.memories["attn"].retrieve(observation)
+                self._x_cache["attn"] = retrieved.detach().clone()
+                self._obs_cache["attn"] = observation.detach().clone()
+            else:
+                self._x_cache["attn"] = torch.zeros(batch_size, seq_len, H_out, device=device)
             
             self.register_lateral(layer_type, H_in)
             if layer_type in self.lateral_connections:
@@ -208,7 +260,17 @@ class PCLayer(nn.Module):
         else:  
             assert layer is not None, "Linear layer requires layer parameter"
             input_dim = layer.weight.shape[1]
-            self._x_cache[layer_type] = x_init(batch_size, seq_len, input_dim, device)
+            if self.use_memory_init and observation is not None:
+                self.register_memory(layer_type, observation.size(-1), input_dim, device)
+                if not self.memories[layer_type]._bootstrapped:
+                    # If Ifw is unavailable, initialize V to match a neutral baseline on first minibatch.
+                    warm_start = torch.zeros(batch_size, seq_len, input_dim, device=device)
+                    self.memories[layer_type].bootstrap_value_matrix(observation, warm_start)
+                retrieved, _, _, _ = self.memories[layer_type].retrieve(observation)
+                self._x_cache[layer_type] = retrieved.detach().clone()
+                self._obs_cache[layer_type] = observation.detach().clone()
+            else:
+                self._x_cache[layer_type] = torch.zeros(batch_size, seq_len, input_dim, device=device)
             
             self.register_lateral(layer_type, input_dim)  
             if layer_type in self.lateral_connections:
@@ -230,11 +292,17 @@ class PCLayer(nn.Module):
         """Get the accumulated energy for the layer."""
         return float(self._energy)
 
+    def get_memory_loss(self) -> float:
+        """Get accumulated memory reconstruction loss LH for this layer."""
+        return float(self._memory_loss)
+
     def clear_energy(self):
         """Clear the stored energy and cached states for the layer."""
         self._energy = 0.0
+        self._memory_loss = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        self._obs_cache.clear()
         
     def get_errors(self) -> list:
         """Get the list of error values accumulated during inference."""
