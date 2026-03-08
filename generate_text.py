@@ -42,7 +42,7 @@ def generate_text(model, config, input_ids, max_new_tokens, temperature, device 
         # For first token or with cache, pass full or last token
         current_input = input_tensor[:, -config.block_size:] if input_tensor.size(1) > config.block_size else input_tensor
       
-        logits = model(current_input, current_input, use_kv_cache=use_cache)
+        logits = model(current_input, current_input, use_kv_cache=use_cache, requires_update=False)
         logits = logits[:, -1, :] / temperature
         probs = F.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, num_samples=1)
@@ -103,7 +103,11 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]    
+        alpha = best_config["alpha"],
+        use_memory_init=best_config.get("use_memory_init", True),
+        memory_slots=best_config.get("memory_slots", 128),
+        memory_delta=best_config.get("memory_delta", 8.0),
+        memory_update_qk=best_config.get("memory_update_qk", True),
     )
     
     model_path = "checkpoints/final_model.pt"
