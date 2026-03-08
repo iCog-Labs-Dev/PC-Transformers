@@ -50,7 +50,11 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
             combined_internal_weight = best_config["combined_internal_weight"],
             combined_output_weight = best_config["combined_output_weight"],
             use_flash_attention = best_config["use_flash_attention"],
-            alpha = best_config["alpha"]
+            alpha = best_config["alpha"],
+            use_memory_init = best_config.get("use_memory_init", True),
+            memory_slots = best_config.get("memory_slots", 128),
+            memory_delta = best_config.get("memory_delta", 8.0),
+            memory_update_qk = best_config.get("memory_update_qk", True),
         )
         
         # Initialize model
