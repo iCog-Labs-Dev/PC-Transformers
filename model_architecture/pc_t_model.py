@@ -40,7 +40,7 @@ class PCTransformer(nn.Module):
                     if module.W_latents[key] is not None:
                         module.W_latents[key] = module.W_latents[key].to(next(self.parameters()).device)
 
-    def forward(self, target_ids, input_ids, use_kv_cache=False):
+    def forward(self, target_ids, input_ids, use_kv_cache=False, requires_update=True):
         """
         Forward pass of the PCTransformer model, using device-specific parallelism (CUDA streams or torch.jit.fork).
 
@@ -72,6 +72,12 @@ class PCTransformer(nn.Module):
         target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
+        # Observation o = (x, y) represented in embedding space for memory retrieval.
+        with torch.no_grad():
+            obs_x = self.embedding.word_embeddings(input_ids)
+            obs_y = self.embedding.word_embeddings(target_ids)
+            observation = torch.cat([obs_x, obs_y], dim=-1).detach()
+
         # Initialize all predictive coding layers
         self.embedding.pc_layer.init_x(
             batch_size=B,
@@ -82,6 +88,7 @@ class PCTransformer(nn.Module):
             proj_layers=None,
             input_ids=input_ids,
             position_ids=position_ids,
+            observation=observation,
         )
 
         for block in self.blocks:
@@ -94,6 +101,7 @@ class PCTransformer(nn.Module):
                 proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                 input_ids = None,
                 position_ids = None,
+                observation=observation,
             )
             block.attn.pc_output.init_x(
                 batch_size=B,
@@ -104,6 +112,7 @@ class PCTransformer(nn.Module):
                 proj_layers= None, 
                 input_ids = None,
                 position_ids = None,
+                observation=observation,
             )
             block.mlp.pc_layer1.init_x(
                 batch_size=B,
@@ -114,6 +123,7 @@ class PCTransformer(nn.Module):
                 proj_layers= None, 
                 input_ids = None,
                 position_ids = None,
+                observation=observation,
             )
             block.mlp.pc_layer2.init_x(
                 batch_size=B,
@@ -124,6 +134,7 @@ class PCTransformer(nn.Module):
                 proj_layers= None, 
                 input_ids = None,
                 position_ids = None,
+                observation=observation,
             )
         self.output.pc_layer.init_x(
             batch_size=B,
@@ -134,6 +145,7 @@ class PCTransformer(nn.Module):
             proj_layers= None, 
             input_ids = None,
             position_ids = None,
+            observation=observation,
         )
 
         # Initialize streams or futures for parallel execution
@@ -150,7 +162,7 @@ class PCTransformer(nn.Module):
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=requires_update,
                 td_err= td_mlp2,
                 layer=self.output.output,
                 layer_norm=None,
@@ -184,7 +196,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc2",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=requires_update,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
@@ -205,7 +217,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=requires_update,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
                     layer_norm=block.ln1, 
@@ -233,7 +245,7 @@ class PCTransformer(nn.Module):
                     layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=requires_update,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
                     layer_norm=block.ln1,
@@ -253,7 +265,7 @@ class PCTransformer(nn.Module):
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=requires_update,
                     td_err= td_embed,
                     layer = None,
                     layer_norm=block.ln2,
@@ -278,7 +290,7 @@ class PCTransformer(nn.Module):
                 layer_type="embed",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=requires_update,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
                 layer_norm= block.ln2,
