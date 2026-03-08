@@ -1,28 +1,32 @@
 COMBINED ENERGY OPTIMIZATION RESULTS
 ====================================
 
-Best combined energy: 4.2202
-Average Energy: 1.4161
-Average Perplexity: 1026.9309
-Combined Loss: 4.2202
+Best combined energy: 3.5128
+Average Energy: 0.0941
+Average Perplexity: 1024.0998
+Combined Loss: 3.5128
 
 Best Configuration:
 vocab_size: 1024
-block_size: 208
-lr: 0.0003223786832283688
-peak_learning_rate: 0.003223786832283688
-warmup_steps: 369
-n_embed: 160
-dropout: 0.4546369920173881
-T: 2
-update_bias: False
-num_heads: 10
-n_blocks: 3
-batch_size: 8
-num_epochs: 5
+block_size: 192
+lr: 6.482389382882527e-05
+peak_learning_rate: 0.0006482389382882527
+warmup_steps: 61
+n_embed: 240
+dropout: 0.30577824734570824
+T: 1
+update_bias: True
+num_heads: 12
+n_blocks: 10
+batch_size: 16
+num_epochs: 10
 internal_energy_fn_name: pc_e
 output_energy_fn_name: pc_e
-combined_internal_weight: 0.5094684344308807
-combined_output_weight: 0.49053156556911925
+combined_internal_weight: 0.8555688029514547
+combined_output_weight: 0.14443119704854535
 use_flash_attention: False
 alpha: 0.5
+use_memory_init: True
+memory_slots: 128
+memory_delta: 8.0
+memory_update_qk: True
