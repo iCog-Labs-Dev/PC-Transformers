@@ -42,3 +42,7 @@ class GPTConfig:
     combined_output_weight: float
     use_flash_attention: bool
     alpha: float
+    use_memory_init: bool
+    memory_slots: int
+    memory_delta: float
+    memory_update_qk: bool
