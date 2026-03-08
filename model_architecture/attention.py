@@ -27,6 +27,10 @@ class Attention(nn.Module):
             energy_fn_name=config.internal_energy_fn_name,
             num_heads=config.num_heads,
             n_embed=config.n_embed,
+            use_memory_init=getattr(config, "use_memory_init", True),
+            memory_slots=getattr(config, "memory_slots", 128),
+            memory_delta=getattr(config, "memory_delta", 8.0),
+            memory_update_qk=getattr(config, "memory_update_qk", True),
         )
 
         self.pc_output = PCLayer(
@@ -34,6 +38,10 @@ class Attention(nn.Module):
             lr=config.lr,
             update_bias = config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,
+            use_memory_init=getattr(config, "use_memory_init", True),
+            memory_slots=getattr(config, "memory_slots", 128),
+            memory_delta=getattr(config, "memory_delta", 8.0),
+            memory_update_qk=getattr(config, "memory_update_qk", True),
         )
         
         # KV cache for generation: stores (K, V) tensors
