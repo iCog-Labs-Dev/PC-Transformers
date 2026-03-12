@@ -39,7 +39,6 @@ def benchmark_T(T_values=[2, 3, 4, 5, 6, 8, 10], num_epochs=5):
             warmup_steps = best_config["warmup_steps"],
             n_embed = best_config["n_embed"],
             dropout = best_config["dropout"],
-            T=T,  # Variable parameter
             num_heads = best_config["num_heads"],
             n_blocks = best_config["n_blocks"],  
             batch_size = best_config["batch_size"],
@@ -50,7 +49,13 @@ def benchmark_T(T_values=[2, 3, 4, 5, 6, 8, 10], num_epochs=5):
             combined_internal_weight = best_config["combined_internal_weight"],
             combined_output_weight = best_config["combined_output_weight"],
             use_flash_attention = best_config["use_flash_attention"],
-            alpha = best_config["alpha"]
+            embed_T = best_config.get("embed_T", T),
+            attn_T = best_config.get("attn_T", T),
+            linear_attn_T = best_config.get("linear_attn_T", T),
+            fc1_T = best_config.get("fc1_T", T),
+            fc2_T = best_config.get("fc2_T", T),
+            linear_output_T = best_config.get("linear_output_T", T),
+           
         )
         
         # Initialize model

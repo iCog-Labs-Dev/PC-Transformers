@@ -2,6 +2,7 @@ import torch
 import pickle
 import time
 import pickle
+import logging
 from training import train
 from eval import evaluate
 from utils.pc_utils import cleanup_memory
@@ -12,16 +13,14 @@ from tuning.config import get_dynamic_model_config, update_global_config
 from tuning.tuning_logs import log_trial_to_detailed_log, trial_batch_logger
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
 from data_preparation.config import vocab_size
 
-def combined_loss(energy, ce_loss, alpha=0.5):
-    """
-    Combine energy and cross-entropy loss.
-    alpha: weight between energy and CE loss (0.0 = only CE, 1.0 = only energy)
-    """
-    return alpha * energy + (1 - alpha) * ce_loss
+logger = logging.getLogger(__name__)
+
+def combined_loss(energy):
+    """Energy-only objective for tuning."""
+    return energy
 
 def broadcast_config(config_dict, device):
     """Broadcast config from rank 0 to all other ranks"""
@@ -42,7 +41,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
     start_time = time.time()
     model = None
     
-    print(f"\nStarting Trial {trial.number}")
+    logger.info(f"Starting Trial {trial.number}")
     
     try:       
         if not dist.is_initialized() or dist.get_rank() == 0:
@@ -57,7 +56,20 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
             config_dict = broadcast_config(config_dict, device)
         
         config = GPTConfig(**config_dict)
+        # Tuning objective runs a single train+eval pass.
+        config.num_epochs = 1
         update_global_config(config.__dict__)
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            logger.info("Model configuration parameters for this trial:")
+            for key in [
+                "vocab_size", "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
+                "dropout", "lr", "embed_T", "attn_T", "linear_attn_T", "fc1_T", "fc2_T", "linear_output_T",
+                "num_heads", "n_blocks", "batch_size", "num_epochs", "update_bias",
+                "internal_energy_fn_name", "output_energy_fn_name", "combined_internal_weight",
+                "combined_output_weight", "use_flash_attention"
+            ]:
+                logger.info(f"{key}={getattr(config, key)}")
 
         model = PCTransformer(config).to(device)  
        
@@ -74,25 +86,46 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
 
         trial_logger = trial_batch_logger(trial_number=trial.number) if enable_batch_logging else None
 
+        global_step = 0
+        train_energy = float("inf")
+        train_perplexity = float("inf")
+        avg_energy = float("inf")
+        avg_perplexity = float("inf")
+
         model.train()
-        train_energy, train_perplexity, _ = train(model, train_loader, config, global_step = 0, device = device, logger=trial_logger)
+        train_energy, train_perplexity, global_step = train(
+            model,
+            train_loader,
+            config,
+            global_step=global_step,
+            device=device,
+            logger=trial_logger,
+        )
 
         model.eval()
-        avg_energy, avg_perplexity = evaluate(model, config, valid_loader, max_batches=None, device=device)
+        avg_energy, avg_perplexity = evaluate(
+            model,
+            config,
+            valid_loader,
+            max_batches=None,
+            device=device,
+        )
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            logger.info(
+                f"Trial {trial.number} | "
+                f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
+                f"Val Energy: {avg_energy:.4f} | Val Perplexity: {avg_perplexity:.4f}"
+            )
         
-        train_ce_loss = torch.log(torch.tensor(train_perplexity)).item()
-        
-        alpha = 0.5
-        combined_objective = combined_loss(train_energy, train_ce_loss, alpha=alpha)
+        combined_objective = combined_loss(train_energy)
         
         trial_time = (time.time() - start_time) 
         
         trial.set_user_attr("config", config.__dict__)
         trial.set_user_attr("energy", train_energy)
         trial.set_user_attr("perplexity", train_perplexity)
-        trial.set_user_attr("ce_loss", train_ce_loss)
         trial.set_user_attr("combined_loss", combined_objective)
-        trial.set_user_attr("alpha", alpha)
         trial.set_user_attr("trial_time", trial_time)
 
         trial_path = "tuning/bayesian_tuning_trials.txt"
@@ -104,7 +137,7 @@ def objective(trial, device = None, flash=False, enable_batch_logging=False):
         return combined_objective
     
     except Exception as e:
-        print("Trial failed:", e)
+        logger.exception(f"Trial {trial.number} failed: {e}")
         trial.set_user_attr("energy", "N/A")
         trial.set_user_attr("perplexity", "N/A")
         trial.set_user_attr("combined_loss", "N/A")
