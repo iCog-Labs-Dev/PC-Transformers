@@ -98,14 +98,20 @@ def step_linear(
         mu = layer_norm(mu)
             
     if layer_type=="linear_output":
-        bu_err= target - F.softmax(mu, dim=-1) 
+        p = F.softmax(mu, dim=-1) 
+        bu_err= target - p
+        dE_dp= -bu_err
+        inner = (dE_dp * p).sum(dim=-1, keepdim=True)
+        dE_dmu = p * (dE_dp - inner)
+        error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
+
     else:    
         bu_err = target - mu 
-        
-    # project bottom-up error through weights
-    error_proj= bu_err @ layer.weight      
+        dE_dmu = bu_err
+        error_proj= dE_dmu @ layer.weight
+            
     error = error_proj- td_err if td_err is not None else error_proj  
-    
+   
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)
         x = x + local_lr * delta_x
@@ -119,11 +125,11 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
+        delta_W = local_lr * torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
         delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
         if layer.bias is not None and update_bias:
-            delta_b = local_lr * bu_err.mean(dim=(0, 1))
+            delta_b = local_lr * dE_dmu.mean(dim=(0, 1))
             delta_b = torch.clamp(delta_b, -0.01, 0.01)
             layer.bias.data.add_(delta_b)
 
