@@ -116,6 +116,21 @@ def train(model, dataloader, config, global_step, device, logger):
                 logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
             else:
                 print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+                
+            # Log per-layer convergence info
+            layer_stats = []
+            for name, mod in model.named_modules():
+                if isinstance(mod, PCLayer):
+                    short_name = name.replace("module.", "")
+                    steps = len(mod._step_energies)
+                    energies_str = ", ".join([f"{e:.4f}" for e in mod._step_energies])
+                    layer_stats.append(f"{short_name} (T={steps}): [{energies_str}]")
+            
+            stats_str = " | ".join(layer_stats)
+            if logger:
+                logger.info(f"    Layer Stats:\n      " + "\n      ".join(layer_stats))
+            else:
+                print(f"    Layer Stats:\n      " + "\n      ".join(layer_stats))
 
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
@@ -162,7 +177,6 @@ def main():
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        T = best_config["T"],
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
@@ -173,7 +187,10 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        alpha = best_config["alpha"],
+        convergence_threshold=best_config.get("convergence_threshold", 0.01),
+        healthy_energy_threshold=best_config.get("healthy_energy_threshold", 0.0),
+        min_steps=best_config.get("min_steps", 2)
     )
     
     # Create a separate logger for hyperparameters
