@@ -15,7 +15,6 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
     num_heads = valid_heads[trial.suggest_int('head_idx', 0, len(valid_heads) - 1)]
     block_size = trial.suggest_int("block_size", 64, 512, step=16)
     n_blocks = trial.suggest_int('n_blocks', 1, 12)
-    T = trial.suggest_int('T', 1, 14, log=True)
     dropout = trial.suggest_float("dropout", 0.0, 0.5)
     peak_lr = trial.suggest_float('peak_lr', 1e-5, 1e-2, log=True)
     lr = peak_lr * 0.1 
@@ -34,8 +33,8 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         warmup_steps=warmup_steps,
         n_embed=n_embed,
         dropout=dropout,
-        lr=lr, 
-        T=T,
+        lr=lr,
+        max_steps=30,
         num_heads=num_heads,
         n_blocks=n_blocks,
         batch_size = batch_size,
@@ -54,7 +53,7 @@ def update_global_config(config):
     config_keys = [
         'num_heads', 'n_embed', 'block_size', 'n_blocks', 'vocab_size',
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
-        'update_bias', 'T', 'internal_energy_fn_name', 'output_energy_fn_name',
+        'update_bias', 'max_steps', 'internal_energy_fn_name', 'output_energy_fn_name',
         'batch_size', 'num_epochs', 'combined_internal_weight', 
         'combined_output_weight', 'alpha'
     ]

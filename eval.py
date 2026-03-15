@@ -119,7 +119,6 @@ def main():
         warmup_steps = best_config["warmup_steps"],
         n_embed = best_config["n_embed"],
         dropout = best_config["dropout"],
-        T = best_config["T"],
         num_heads = best_config["num_heads"],
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
@@ -130,7 +129,10 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        alpha = best_config["alpha"],
+        convergence_threshold=best_config.get("convergence_threshold", 0.01),
+        healthy_energy_threshold=best_config.get("healthy_energy_threshold", 0.0),
+        min_steps=best_config.get("min_steps", 2)
     )
   
     model_path = "checkpoints/final_model.pt"

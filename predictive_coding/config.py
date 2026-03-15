@@ -14,7 +14,7 @@ class GPTConfig:
         lr (float): Local learning rate for predictive coding layers.
         peak_learning_rate (float): Peak learning rate for learning rate scheduling.
         warmup_steps (int): Number of warmup steps for learning rate scheduling.
-        T (int): Number of inference steps for predictive coding.
+        max_steps (int): Max number of inference steps for predictive coding loops.
         update_bias (bool): Whether to update bias terms during learning.
         num_heads (int): Number of attention heads.
         n_blocks (int): Number of transformer blocks.
@@ -30,7 +30,6 @@ class GPTConfig:
     warmup_steps: Optional[int] 
     n_embed: int 
     dropout: float 
-    T: int 
     update_bias: bool 
     num_heads: int 
     n_blocks: int 
@@ -42,3 +41,7 @@ class GPTConfig:
     combined_output_weight: float
     use_flash_attention: bool
     alpha: float
+    max_steps: int
+    convergence_threshold: float
+    healthy_energy_threshold: float
+    min_steps: int 
