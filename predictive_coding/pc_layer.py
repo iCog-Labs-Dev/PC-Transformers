@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Dict, Tuple
+import torch.nn.functional as F
 
 from utils.pc_utils import (
     x_init,
@@ -41,6 +42,36 @@ class PCLayer(nn.Module):
         self._error_cache: Dict[str, torch.Tensor] = {}
         self._energy = 0.0
         self._errors = []
+        self._converged = False
+        self._step_energies = []
+        self._plateau_count = 0
+    
+    def check_convergence(self, t: int, min_steps: int, threshold: float, healthy_threshold: float = 0.0) -> bool:
+        if t < min_steps:
+            return False
+            
+        if len(self._step_energies) >= 1:
+            E_t = self._step_energies[-1]
+            
+            # 1. Absolute "Healthy" check
+            if healthy_threshold > 0 and E_t < healthy_threshold:
+                self._converged = True
+                return True
+
+            # 2. Relative "Plateau" check
+            if len(self._step_energies) >= 2:
+                E_prev = self._step_energies[-2]
+                relative_change = abs(E_t - E_prev) / (abs(E_prev) + 1e-8)
+                
+                if relative_change < threshold:
+                    self._plateau_count += 1
+                else:
+                    self._plateau_count = 0
+                    
+                if self._plateau_count >= 2:
+                    self._converged = True
+                
+        return self._converged
     
     def register_lateral(self, layer_type: str, size: int):
         """Create and register lateral connections for layer_type."""
@@ -69,10 +100,25 @@ class PCLayer(nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
         flash: bool = False,
-        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # ADD THIS
+        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         use_cache: bool = False, 
     ):
         """Perform one predictive coding inference step."""
+        if getattr(self, "_converged", False):
+            if layer_type == "embed":
+                mu = self._mu_cache["embed"]
+                error = target_activity - mu
+                self._error_cache["embed"] = error.detach().clone()
+                return self._x_cache["embed"]
+            else:
+                mu = self._mu_cache[layer_type]
+                if layer_type == "linear_output":
+                    bu_err = target_activity - F.softmax(mu, dim=-1) 
+                else:    
+                    bu_err = target_activity - mu
+                self._error_cache[layer_type] = bu_err.detach().clone()
+                return self._x_cache[layer_type], mu
+
         self._reset_step_state()
         x = self._get_cached_state(layer_type)
 
@@ -100,7 +146,8 @@ class PCLayer(nn.Module):
             # compute energy
             error = target_activity - mu
             energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-            self._energy += energy
+            self._energy = energy # Store only the current energy
+            self._step_energies.append(energy)
             self._errors.extend(step_errors)
             return mu_word, mu_pos
         
@@ -157,7 +204,8 @@ class PCLayer(nn.Module):
         
         error = target_activity - mu
         energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-        self._energy += energy
+        self._energy = energy # Store only the current energy
+        self._step_energies.append(energy)
         self._errors.extend(step_errors)
 
         # update x cache
@@ -235,6 +283,10 @@ class PCLayer(nn.Module):
         self._energy = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
+        self._error_cache.clear()
+        self._converged = False
+        self._step_energies.clear()
+        self._plateau_count = 0
         
     def get_errors(self) -> list:
         """Get the list of error values accumulated during inference."""
