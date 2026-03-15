@@ -139,7 +139,12 @@ class PCTransformer(nn.Module):
         # Initialize streams or futures for parallel execution
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
 
-        for t in range(self.config.T):
+        max_steps = getattr(self.config, 'max_steps', 30)
+        should_break = False
+        for t in range(max_steps):
+            # Only update weights on the final inference step
+            is_last_step = (t == max_steps - 1) or should_break
+            do_update = self.training and is_last_step
             # Execute output layer
             td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
             execute_parallel(
@@ -149,8 +154,8 @@ class PCTransformer(nn.Module):
                 target_activity=target_logits,
                 layer_type="linear_output",
                 t=t,
-                T=self.config.T,
-                requires_update=True,
+                T=getattr(self.config, 'max_steps', 30),
+                requires_update=do_update,
                 td_err= td_mlp2,
                 layer=self.output.output,
                 layer_norm=None,
@@ -183,8 +188,8 @@ class PCTransformer(nn.Module):
                     target_activity=next_target,
                     layer_type="fc2",
                     t=t,
-                    T=self.config.T,
-                    requires_update=True,
+                    T=getattr(self.config, 'max_steps', 30),
+                    requires_update=do_update,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
@@ -204,8 +209,8 @@ class PCTransformer(nn.Module):
                     target_activity=block.mlp.pc_layer2.get_x("fc2"),
                     layer_type="fc1",
                     t=t,
-                    T=self.config.T,
-                    requires_update=True,
+                    T=getattr(self.config, 'max_steps', 30),
+                    requires_update=do_update,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
                     layer_norm=block.ln1, 
@@ -232,8 +237,8 @@ class PCTransformer(nn.Module):
                     target_activity=block.mlp.pc_layer1.get_x("fc1"),
                     layer_type="linear_attn",
                     t=t,
-                    T=self.config.T,
-                    requires_update=True,
+                    T=getattr(self.config, 'max_steps', 30),
+                    requires_update=do_update,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
                     layer_norm=block.ln1,
@@ -252,8 +257,8 @@ class PCTransformer(nn.Module):
                     target_activity=block.attn.pc_output.get_x("linear_attn"),
                     layer_type="attn",
                     t=t,
-                    T=self.config.T,
-                    requires_update=True,
+                    T=getattr(self.config, 'max_steps', 30),
+                    requires_update=do_update,
                     td_err= td_embed,
                     layer = None,
                     layer_norm=block.ln2,
@@ -266,7 +271,7 @@ class PCTransformer(nn.Module):
                 )
 
                 # Update cache after last iteration
-                if use_kv_cache and t == self.config.T - 1:
+                if use_kv_cache and t == getattr(self.config, 'max_steps', 30) - 1:
                     block.attn.kv_cache = block.attn.pc_qkv._last_kv_cache
     
             # Execute embedding layer
@@ -277,8 +282,8 @@ class PCTransformer(nn.Module):
                 target_activity=self.blocks[0].attn.pc_qkv.get_x("attn"),
                 layer_type="embed",
                 t=t,
-                T=self.config.T,
-                requires_update=True,
+                T=getattr(self.config, 'max_steps', 30),
+                requires_update=do_update,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
                 layer_norm= block.ln2,
@@ -290,6 +295,25 @@ class PCTransformer(nn.Module):
 
             # Synchronize all parallel tasks
             synchronize_execution(use_cuda, streams_or_futures)
+
+            all_converged = True
+            for module in self.modules():
+                if hasattr(module, "check_convergence"):
+                    converged = module.check_convergence(
+                        t, 
+                        getattr(self.config, 'min_steps', 2), 
+                        getattr(self.config, 'convergence_threshold', 0.01),
+                        getattr(self.config, 'healthy_energy_threshold', 0.0)
+                    )
+                    if not converged:
+                        all_converged = False
+            
+            if all_converged:
+                if should_break:
+                    break
+                else:
+                    # Flag next iteration to do weight update, then break
+                    should_break = True
         logits = self.output.pc_layer.get_mu("linear_output")
         return logits
     
