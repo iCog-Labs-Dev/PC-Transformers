@@ -98,11 +98,11 @@ def step_linear(
         mu = layer_norm(mu)
             
     if layer_type=="linear_output":
-        p = F.softmax(mu, dim=-1) 
+        probs = F.softmax(mu, dim=-1) 
         bu_err= target - p
         dE_dp= -bu_err
-        inner = (dE_dp * p).sum(dim=-1, keepdim=True)
-        dE_dmu = p * (dE_dp - inner)
+        norm_term = (dE_dp * p).sum(dim=-1, keepdim=True)
+        dE_dmu = p * (dE_dp - norm_term)
         error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
 
     else:    
@@ -224,8 +224,8 @@ def step_attn(
     dE_dA = torch.matmul(dE_dmu_heads, V.transpose(-2, -1))
 
     # Softmax vector-Jacobian product
-    inner = (dE_dA * attn_weights).sum(dim=-1, keepdim=True)
-    dE_dS = attn_weights * (dE_dA - inner)
+    norm_term = (dE_dA * attn_weights).sum(dim=-1, keepdim=True)
+    dE_dS = attn_weights * (dE_dA - norm_term)
 
     dE_dQ = torch.matmul(dE_dS, K) * scale
     dE_dK = torch.matmul(dE_dS.transpose(-2, -1), Q) * scale
