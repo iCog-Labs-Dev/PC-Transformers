@@ -58,9 +58,6 @@ def step_embed(
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
-    if t == T - 1:
-           finalize_step(mu, target, error, t, layer_type, energy_fn_name)
-  
     return mu, mu_word, mu_pos, error
     
 def step_linear(
@@ -99,10 +96,10 @@ def step_linear(
             
     if layer_type=="linear_output":
         probs = F.softmax(mu, dim=-1) 
-        bu_err= target - p
+        bu_err= target - probs
         dE_dp= -bu_err
-        norm_term = (dE_dp * p).sum(dim=-1, keepdim=True)
-        dE_dmu = p * (dE_dp - norm_term)
+        norm_term = (dE_dp * probs).sum(dim=-1, keepdim=True)
+        dE_dmu = probs * (dE_dp - norm_term)
         error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
 
     else:    
@@ -132,9 +129,6 @@ def step_linear(
             delta_b = local_lr * dE_dmu.mean(dim=(0, 1))
             delta_b = torch.clamp(delta_b, -0.01, 0.01)
             layer.bias.data.add_(delta_b)
-
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
 
     return x, mu, bu_err
 
@@ -263,9 +257,6 @@ def step_attn(
             v_proj.weight.data[h*head_dim:(h+1)*head_dim] += local_lr * dW_v
 
          
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
-     
     return x, mu, bu_err, new_kv_cache
     
 ENERGY_FUNCTIONS = {
