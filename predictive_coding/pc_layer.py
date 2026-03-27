@@ -55,7 +55,7 @@ class PCLayer(nn.Module):
         self._x_cache: Dict[str, torch.Tensor] = {}
         self._mu_cache: Dict[str, torch.Tensor] = {}
         self._error_cache: Dict[str, torch.Tensor] = {}
-        self._energy = 0.0
+        self._energy_list = []
         self._errors = []
     
     def register_lateral(self, layer_type: str, size: int):
@@ -121,7 +121,7 @@ class PCLayer(nn.Module):
             # compute energy
             error = target_activity - mu
             energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-            self._energy += energy
+            self._energy_list.append(energy)
             self._errors.extend(step_errors)
             return mu_word
         
@@ -181,7 +181,7 @@ class PCLayer(nn.Module):
         
         error = target_activity - mu
         energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-        self._energy += energy
+        self._energy_list.append(energy)
         self._errors.extend(step_errors)
 
         # update x cache
@@ -245,11 +245,11 @@ class PCLayer(nn.Module):
 
     def get_energy(self) -> Optional[float]:
         """Get the accumulated energy for the layer."""
-        return float(self._energy)
+        return float(sum(self._energy_list)) if self._energy_list else 0.0
 
     def clear_energy(self):
         """Clear the stored energy and cached states for the layer."""
-        self._energy = 0.0
+        self._energy_list = []
         self._x_cache.clear()
         self._mu_cache.clear()
         

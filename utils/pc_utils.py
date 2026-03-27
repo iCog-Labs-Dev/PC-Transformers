@@ -385,7 +385,7 @@ def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t
     device = mu.device
     target = target.to(device)
     error = error.to(device)
-    energy = float(energy_fn(mu, target, energy_fn_name).mean().item())
+    energy = float(energy_fn(mu, target, energy_fn_name).sum().item())
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     
