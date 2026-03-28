@@ -11,7 +11,7 @@ class OutputLayer(nn.Module):
         self.output = nn.Linear(config.n_embed, config.vocab_size)
         
         self.pc_layer = PCLayer(
-            T=config.max_steps,
+            max_steps=config.max_steps,
             lr=config.lr,
             update_bias = config.update_bias,
             energy_fn_name=config.output_energy_fn_name,
