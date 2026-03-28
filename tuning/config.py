@@ -45,7 +45,10 @@ def get_dynamic_model_config(trial, vocab_size, flash=False):
         combined_internal_weight = combined_internal_weight,
         combined_output_weight = combined_output_weight,
         use_flash_attention=flash,
-        alpha=alpha
+        alpha=alpha,
+        convergence_threshold=0.01,
+        healthy_energy_threshold=0.0,
+        min_steps=2,
     )
 
 def update_global_config(config):
@@ -55,7 +58,8 @@ def update_global_config(config):
         'dropout', 'lr', 'peak_learning_rate', 'warmup_steps',
         'update_bias', 'max_steps', 'internal_energy_fn_name', 'output_energy_fn_name',
         'batch_size', 'num_epochs', 'combined_internal_weight', 
-        'combined_output_weight', 'alpha'
+        'combined_output_weight', 'alpha', 'convergence_threshold',
+        'healthy_energy_threshold', 'min_steps'
     ]
     
     for key in config_keys:
