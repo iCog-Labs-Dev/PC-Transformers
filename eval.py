@@ -2,12 +2,11 @@ import time
 import math
 import torch
 import math
-from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from data_preparation.dataloader import get_loaders
 import torch.nn.functional as F
 from utils.model_utils import load_model
-from utils.config_utils import load_best_config
+from utils.config_utils import load_best_config, build_gpt_config
 from utils.model_utils import set_seed
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -111,29 +110,7 @@ def main():
     print(f"[Rank {local_rank}] Using device: {device}")    
     best_config = load_best_config()
     
-    config = GPTConfig(
-        vocab_size = vocab_size,
-        block_size = best_config["block_size"],
-        lr = best_config["peak_learning_rate"],
-        peak_learning_rate = best_config["peak_learning_rate"],
-        warmup_steps = best_config["warmup_steps"],
-        n_embed = best_config["n_embed"],
-        dropout = best_config["dropout"],
-        num_heads = best_config["num_heads"],
-        n_blocks = best_config["n_blocks"],
-        batch_size = best_config["batch_size"],
-        num_epochs = best_config["num_epochs"], 
-        update_bias = best_config["update_bias"],
-        internal_energy_fn_name=best_config["internal_energy_fn_name"],
-        output_energy_fn_name=best_config["output_energy_fn_name"],
-        combined_internal_weight=best_config["combined_internal_weight"],
-        combined_output_weight=best_config["combined_output_weight"],
-        use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"],
-        convergence_threshold=best_config.get("convergence_threshold", 0.01),
-        healthy_energy_threshold=best_config.get("healthy_energy_threshold", 0.0),
-        min_steps=best_config.get("min_steps", 2)
-    )
+    config = build_gpt_config(best_config, vocab_size=vocab_size)
   
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)

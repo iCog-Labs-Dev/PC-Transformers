@@ -1,8 +1,6 @@
 import torch
-from tokenizers import Tokenizer
-from predictive_coding.config import GPTConfig
 from utils.model_utils import load_model, decode_ids, compute_text_metrics
-from utils.config_utils import load_best_config
+from utils.config_utils import load_best_config, build_gpt_config
 from utils.model_utils import set_seed
 import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
@@ -56,6 +54,8 @@ def generate_text(model, config, input_ids, max_new_tokens, temperature, device 
     return input_tensor[0] 
 
 def text_generation(model, config, device = None,  max_samples=2, max_new_tokens=200, use_cache = True):
+    from tokenizers import Tokenizer
+
     decoded_preds = []
 
     tokenizer = Tokenizer.from_file("data_preparation/tokenizer.json")
@@ -84,27 +84,7 @@ def main():
     
     best_config = load_best_config()
 
-    config = GPTConfig(
-        vocab_size = vocab_size,
-        block_size = best_config["block_size"],
-        lr = best_config["peak_learning_rate"],
-        peak_learning_rate = best_config["peak_learning_rate"],
-        warmup_steps = best_config["warmup_steps"],
-        n_embed = best_config["n_embed"],
-        dropout = best_config["dropout"],
-        T = best_config["T"],
-        num_heads = best_config["num_heads"],
-        n_blocks = best_config["n_blocks"],
-        batch_size = best_config["batch_size"],
-        num_epochs = best_config["num_epochs"], 
-        update_bias = best_config["update_bias"],
-        internal_energy_fn_name=best_config["internal_energy_fn_name"],
-        output_energy_fn_name=best_config["output_energy_fn_name"],
-        combined_internal_weight=best_config["combined_internal_weight"],
-        combined_output_weight=best_config["combined_output_weight"],
-        use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]    
-    )
+    config = build_gpt_config(best_config, vocab_size=vocab_size)
     
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
@@ -113,7 +93,7 @@ def main():
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     if not dist.is_initialized() or dist.get_rank() == 0:
-        decoded_preds, decoded_targets = text_generation(model, config, device, max_samples=2, use_cache=True)
+        decoded_preds = text_generation(model, config, device, max_samples=2, use_cache=True)
         # if decoded_preds and decoded_targets and local_rank == 0:
         #     compute_text_metrics(decoded_preds, decoded_targets)
     
