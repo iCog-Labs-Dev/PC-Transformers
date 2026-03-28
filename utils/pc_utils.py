@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import gc
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Dict
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
@@ -22,7 +22,7 @@ def step_embed(
     energy_fn_name: str,
     requires_update: bool,
     layer_norm: Optional[nn.Module] = None,
-    )-> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    )-> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[Dict[str, Any]]]:
     """
     Predictive coding step for embedding layer.
     Returns (mu, mu_word, mu_pos, error)
@@ -46,21 +46,17 @@ def step_embed(
 
     error = target - mu_norm
         
-    if requires_update: 
-        with torch.no_grad():
-            flat_input_ids = input_ids.reshape(-1)
-            flat_update = error.reshape(-1, error.size(-1))
-            flat_position_ids = position_ids.reshape(-1)
-            
-            delta = local_lr * flat_update
-            delta = torch.clamp(delta, -0.01, 0.01)
-            
-            word_layer.weight.data.index_add_(0, flat_input_ids, delta)
-            pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
-            
+    update_state = None
+    if requires_update:
+        update_state = {
+            "kind": "embed",
+            "layer": layer,
+            "input_ids": input_ids.detach(),
+            "position_ids": position_ids.detach(),
+            "error": error.detach(),
+        }
 
-  
-    return mu, mu_word, mu_pos, error
+    return mu, mu_word, mu_pos, error, update_state
     
 def step_linear(
     t: int,
@@ -77,7 +73,7 @@ def step_linear(
     requires_update: bool,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module], 
-   ):
+   ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[Dict[str, Any]]]:
     """
     Predictive coding step for linear-like layers.
     Returns: (updated_x, mu, bu_err)
@@ -105,30 +101,31 @@ def step_linear(
     error_proj= bu_err @ layer.weight      
     error = error_proj- td_err if td_err is not None else error_proj  
     
+    lateral_x = None
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)
         x = x + local_lr * delta_x
 
         if requires_update:
-            lateral_conn.update_weights(x.detach())
+            lateral_x = x.detach()
     else:
-        x= x + local_lr * error 
+        x= x + local_lr * error
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
     
-    # parameter updates for the layer
+    update_state = None
     if requires_update:
-        delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
-        delta_W = torch.clamp(delta_W, -0.01, 0.01)
-        layer.weight.data.add_(delta_W)
-        if layer.bias is not None and update_bias:
-            delta_b = local_lr * bu_err.mean(dim=(0, 1))
-            delta_b = torch.clamp(delta_b, -0.01, 0.01)
-            layer.bias.data.add_(delta_b)
+        update_state = {
+            "kind": "linear",
+            "layer": layer,
+            "bu_err": bu_err.detach(),
+            "x_input": x_input.detach(),
+            "update_bias": update_bias,
+            "lateral_conn": lateral_conn,
+            "lateral_x": lateral_x,
+        }
 
-
-
-    return x, mu, bu_err
+    return x, mu, bu_err, update_state
 
 def step_attn(
     t: int,
@@ -150,7 +147,7 @@ def step_attn(
     flash: bool = False,
     kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     use_cache: bool = False,
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]], Optional[Dict[str, Any]]]:
     """
     Predictive coding step for attention with KV caching support.
     Returns (updated_x, mu, bu_err).
@@ -205,56 +202,36 @@ def step_attn(
     bu_err = target - mu  # B, T, D
     error = bu_err - td_err if td_err is not None else bu_err  
                 
+    lateral_x = None
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)
         x = x + local_lr * delta_x
         
         if requires_update:
-            lateral_conn.update_weights(x.detach())
+            lateral_x = x.detach()
     else:
         x = x + local_lr * error
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 
-    # PC update W_latent
+    K_update = K[:, :, -seq_len:, :]
+    V_update = V[:, :, -seq_len:, :]
+
+    update_state = None
     if requires_update:
-        with torch.no_grad():
-            B, S = batch_size, seq_len
+        update_state = {
+            "kind": "attn",
+            "proj_layers": proj_layers,
+            "q": Q.detach(),
+            "k": K_update.detach(),
+            "v": V_update.detach(),
+            "x_norm": x_norm.detach(),
+            "update_bias": update_bias,
+            "lateral_conn": lateral_conn,
+            "lateral_x": lateral_x,
+        }
 
-            K_update = K[:, :, -seq_len:, :] 
-            V_update = V[:, :, -seq_len:, :]
-            
-            # Multi-head Q, K, V updates
-            for h in range(num_heads):
-                q_slice = Q[:, h, :, :]  # [B, S, head_dim]
-                k_slice = K_update[:, h, :, :]
-                v_slice = V_update[:, h, :, :]
-                
-                dW_q_h = torch.einsum("bsd,bse->de", q_slice, x_norm) / (B * S)
-                dW_k_h = torch.einsum("bsd,bse->de", k_slice, x_norm) / (B * S)
-                dW_v_h = torch.einsum("bsd,bse->de", v_slice, x_norm) / (B * S)
-
-                start = h * head_dim
-                end = (h + 1) * head_dim
-                
-                q_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_q_h, -clamp_value, clamp_value)
-                k_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_k_h, -clamp_value, clamp_value)
-                v_proj.weight.data[start:end, :] += torch.clamp(local_lr * dW_v_h, -clamp_value, clamp_value)
-                
-                if update_bias:
-                    if q_proj.bias is not None:
-                        delta_b_q = (q_slice.mean(dim=(0, 1)) / (B * S))
-                        q_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_q, -clamp_value, clamp_value)
-                    if k_proj.bias is not None:
-                        delta_b_k = (k_slice.mean(dim=(0, 1)) / (B * S))
-                        k_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_k, -clamp_value, clamp_value)
-                    if v_proj.bias is not None:
-                        delta_b_v = (v_slice.mean(dim=(0, 1)) / (B * S))
-                        v_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_v, -clamp_value, clamp_value)
- 
-
-     
-    return x, mu, bu_err, new_kv_cache
+    return x, mu, bu_err, new_kv_cache, update_state
     
 ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    
