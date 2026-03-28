@@ -5,21 +5,20 @@ import math
 import time
 import torch.nn.functional as F
 import torch.distributed as dist
-from predictive_coding.config import GPTConfig
 from predictive_coding.pc_layer import PCLayer
 from model_architecture.pc_t_model import PCTransformer
 from data_preparation.dataloader import get_loaders
-from utils.config_utils import load_best_config
+from utils.config_utils import load_best_config, build_gpt_config
 from utils.pc_utils import cleanup_memory
 from utils.model_utils import set_seed
 from eval import evaluate
-from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_device, cleanup_memory
 import json
 import logging
 from data_preparation.config import vocab_size
+from visualization import plot_metrics
 
 """
 This script trains the predictive coding transformer model on the provided dataset.
@@ -122,11 +121,10 @@ def train(model, dataloader, config, global_step, device, logger):
             for name, mod in model.named_modules():
                 if isinstance(mod, PCLayer):
                     short_name = name.replace("module.", "")
-                    steps = len(mod._step_energies)
+                    steps = mod.get_step_count()
                     energies_str = ", ".join([f"{e:.4f}" for e in mod._step_energies])
-                    layer_stats.append(f"{short_name} (T={steps}): [{energies_str}]")
-            
-            stats_str = " | ".join(layer_stats)
+                    layer_stats.append(f"{short_name} (steps={steps}): [{energies_str}]")
+
             if logger:
                 logger.info(f"    Layer Stats:\n      " + "\n      ".join(layer_stats))
             else:
@@ -169,29 +167,7 @@ def main():
 
     logger = logging.getLogger(__name__)
    
-    config = GPTConfig(
-        vocab_size = vocab_size,
-        block_size = best_config["block_size"],
-        lr = best_config["lr"],
-        peak_learning_rate = best_config["peak_learning_rate"],
-        warmup_steps = best_config["warmup_steps"],
-        n_embed = best_config["n_embed"],
-        dropout = best_config["dropout"],
-        num_heads = best_config["num_heads"],
-        n_blocks = best_config["n_blocks"],
-        batch_size = best_config["batch_size"],
-        num_epochs = best_config["num_epochs"], 
-        update_bias = best_config["update_bias"],
-        internal_energy_fn_name=best_config["internal_energy_fn_name"],
-        output_energy_fn_name=best_config["output_energy_fn_name"],
-        combined_internal_weight=best_config["combined_internal_weight"],
-        combined_output_weight=best_config["combined_output_weight"],
-        use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"],
-        convergence_threshold=best_config.get("convergence_threshold", 0.01),
-        healthy_energy_threshold=best_config.get("healthy_energy_threshold", 0.0),
-        min_steps=best_config.get("min_steps", 2)
-    )
+    config = build_gpt_config(best_config, vocab_size=vocab_size)
     
     # Create a separate logger for hyperparameters
     param_logger = logging.getLogger('param_logger')
@@ -277,6 +253,7 @@ def main():
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
 
     if rank == 0:
+
         plot_metrics(
             train_energies,
             val_energies,
