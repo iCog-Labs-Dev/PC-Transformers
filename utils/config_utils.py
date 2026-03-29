@@ -1,6 +1,15 @@
 import os
 import re
 
+LAYER_T_KEYS = (
+    "embed_T",
+    "attn_T",
+    "linear_attn_T",
+    "fc1_T",
+    "fc2_T",
+    "linear_output_T",
+)
+
 def load_best_config():
     """
     Parses a result file and returns a dict of selected hyperparameters.
@@ -42,6 +51,7 @@ def load_best_config():
     }
 
     config = {}
+    legacy_t = None
     file_path = os.path.join(os.path.dirname(__file__), "..", "tuning", "bayesian_tuning_results.txt")
 
     if os.path.exists(file_path):
@@ -52,6 +62,11 @@ def load_best_config():
             match = re.match(r'(\w+):\s+(.*)', line)
             if match:
                 key, value = match.groups()
+                if key == "T":
+                    try:
+                        legacy_t = int(float(value))
+                    except ValueError:
+                        legacy_t = None
                 if key in selected_keys:
                     try:
                         num = float(value)
@@ -66,7 +81,10 @@ def load_best_config():
     else:
         print(f"[WARNING] Tuning result file not found: {file_path}")
         print(f"[INFO] Using fallback values for missing keys: {selected_keys - config.keys()}")
-        
+
+    if legacy_t is not None:
+        for layer_t_key in LAYER_T_KEYS:
+            config.setdefault(layer_t_key, legacy_t)
 
     # Fill in missing keys from fallback
     for key in selected_keys:
