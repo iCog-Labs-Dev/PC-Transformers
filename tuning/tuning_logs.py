@@ -1,6 +1,12 @@
 import logging
 import os
 
+def _format_metric(value, fmt: str) -> str:
+    try:
+        return format(float(value), fmt)
+    except (TypeError, ValueError):
+        return str(value)
+
 def initialize_logs(study_name: str):
     """Create and initialize summary and trial log files."""
     trials_path = f"tuning/{study_name}_trials.txt"
@@ -9,23 +15,27 @@ def initialize_logs(study_name: str):
     with open(trials_path, "w") as f:
         f.write(f"DETAILED TRIAL RESULTS - {study_name}\n")
         f.write(f"{'='*50}\n")
-        f.write("Objective: Minimize Averge Energy \n\n")
+        f.write("Objective: Minimize Combined Loss\n\n")
 
     return trials_path
+
 def log_trial_to_detailed_log(trials_path, trial, config, trial_time, avg_energy, write_header=False):
     """Appends trial information in tabular format to a trials log file."""
     avg_perplexity = trial.user_attrs.get("perplexity", "N/A")
+    ce_loss = trial.user_attrs.get("ce_loss", "N/A")
     combined_loss = trial.user_attrs.get("combined_loss", "N/A")
+    alpha = trial.user_attrs.get("alpha", "N/A")
     
     with open(trials_path, "a") as f:
         if write_header:
-            f.write(f"{'Trial':<6} | {'Time(s)':<8} | {'Avg Energy':<11} | {'Perplexity':<11} | {'Combined Loss':<11} | "
+            f.write(f"{'Trial':<6} | {'Time(s)':<8} | {'Avg Energy':<11} | {'Perplexity':<11} | {'CE Loss':<11} | {'Combined Loss':<13} | {'Alpha':<5} | "
                 f"{'n_embed':<7} | {'block_size':<10} | {'heads':<5} | {'blocks':<6} | {'Ts(E/A/LA/F1/F2/O)':<20} | "
                     f"{'LR':<8} | {'Warmup':<6} | {'Dropout':<7} | {'Bias':<5}\n")
-            f.write("-" * 160 + "\n")
+            f.write("-" * 190 + "\n")
 
         t_schedule = f"{config.embed_T}/{config.attn_T}/{config.linear_attn_T}/{config.fc1_T}/{config.fc2_T}/{config.linear_output_T}"
-        f.write(f"{trial.number:<6} | {trial_time:<8.1f} | {avg_energy:<11.6f} | {avg_perplexity:<11.4f} | {combined_loss:<11.6f} | "
+        f.write(f"{trial.number:<6} | {_format_metric(trial_time, '.1f'):<8} | {_format_metric(avg_energy, '.6f'):<11} | {_format_metric(avg_perplexity, '.4f'):<11} | "
+            f"{_format_metric(ce_loss, '.6f'):<11} | {_format_metric(combined_loss, '.6f'):<13} | {_format_metric(alpha, '.2f'):<5} | "
             f"{config.n_embed:<7} | {config.block_size:<10} | {config.num_heads:<5} | {config.n_blocks:<6} | {t_schedule:<20} |"
                 f"{config.peak_learning_rate:<8.2e} | {config.warmup_steps:<6} | {config.dropout:<7.3f} | {str(config.update_bias):<5}\n")
         
@@ -33,15 +43,19 @@ def write_final_results(results_path, trial):
     config = trial.user_attrs.get("config", {})
     energy = trial.user_attrs.get("energy", "N/A")
     perplexity = trial.user_attrs.get("perplexity", "N/A")
+    ce_loss = trial.user_attrs.get("ce_loss", "N/A")
     combined_loss = trial.user_attrs.get("combined_loss", "N/A")
+    alpha = trial.user_attrs.get("alpha", "N/A")
     
     with open(results_path, "w") as f:
-        f.write("COMBINED ENERGY OPTIMIZATION RESULTS\n")
-        f.write("====================================\n\n")
-        f.write(f"Best combined energy: {trial.value:.4f}\n")
-        f.write(f"Average Energy: {energy:.4f}\n")
-        f.write(f"Average Perplexity: {perplexity:.4f}\n")
-        f.write(f"Combined Loss: {combined_loss:.4f}\n\n")
+        f.write("COMBINED LOSS OPTIMIZATION RESULTS\n")
+        f.write("==================================\n\n")
+        f.write(f"Best combined loss: {_format_metric(trial.value, '.4f')}\n")
+        f.write(f"Average Energy: {_format_metric(energy, '.4f')}\n")
+        f.write(f"Average Perplexity: {_format_metric(perplexity, '.4f')}\n")
+        f.write(f"CE Loss: {_format_metric(ce_loss, '.4f')}\n")
+        f.write(f"Combined Loss: {_format_metric(combined_loss, '.4f')}\n")
+        f.write(f"Alpha: {_format_metric(alpha, '.2f')}\n\n")
         
         if config:
             f.write("Best Configuration:\n")
