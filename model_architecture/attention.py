@@ -20,6 +20,11 @@ class Attention(nn.Module):
         self.v = nn.Linear(config.n_embed, config.n_embed)
         self.output = nn.Linear(config.n_embed, config.n_embed)
 
+        for layer in [self.q, self.k, self.v, self.output]:
+            nn.init.xavier_uniform_(layer.weight)
+            if layer.bias is not None:
+                nn.init.zeros_(layer.bias)
+
         self.pc_qkv = PCLayer(
             T=config.T,
             lr=config.lr,

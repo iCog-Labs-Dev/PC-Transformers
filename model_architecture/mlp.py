@@ -13,6 +13,10 @@ class MLP(nn.Module):
         self.fc2 = nn.Linear(4 * config.n_embed, config.n_embed)
         self.dropout = nn.Dropout(config.dropout)
 
+        #use 'relu' nonlinearity as a proxy for GELU scaling
+        nn.init.kaiming_normal_(self.fc1.weight, mode='fan_in', nonlinearity='relu')
+        nn.init.kaiming_normal_(self.fc2.weight, mode='fan_in', nonlinearity='relu')
+
         self.pc_layer2 = PCLayer(
             T=config.T,
             lr=config.lr,
