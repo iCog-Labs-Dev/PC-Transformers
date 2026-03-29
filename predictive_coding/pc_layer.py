@@ -58,8 +58,8 @@ class PCLayer(nn.Module):
         target_activity: torch.Tensor,
         layer_type: str,
         t: int,
+        T: int,
         requires_update: bool,
-        T: Optional[int] = None,
         td_err:  Optional[torch.Tensor] = None,
         layer: Optional[nn.Module] = None,
         layer_norm: Optional[nn.Module] = None,
@@ -67,35 +67,23 @@ class PCLayer(nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
         flash: bool = False,
-        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # ADD THIS
+        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         use_cache: bool = False, 
-        embed_T: Optional[int] = None,
-        attn_T: Optional[int] = None,
-        linear_attn_T: Optional[int] = None,
-        fc1_T: Optional[int] = None,
-        fc2_T: Optional[int] = None,
-        linear_output_T: Optional[int] = None,
     ):
         """Perform one predictive coding inference step."""
         self._reset_step_state()
         x = self._get_cached_state(layer_type)
+        is_final_step = t == T - 1
 
-        layer_t_map = {
-            "embed": embed_T,
-            "attn": attn_T,
-            "linear_attn": linear_attn_T,
-            "fc1": fc1_T,
-            "fc2": fc2_T,
-            "linear_output": linear_output_T,
-        }
-        step_T = layer_t_map.get(layer_type)
-        if step_T is None:
-            step_T = T if T is not None else 1
+        if t >= T:
+            if layer_type == "embed":
+                return self._x_cache.get("embed", (None, None))
+            return x, self._mu_cache.get(layer_type, None)
 
         if layer_type == "embed":
             mu, mu_word, mu_pos, bu_err = step_embed(
                 t,
-                step_T,
+                T,
                 target_activity,
                 layer,
                 layer_type,
@@ -114,7 +102,7 @@ class PCLayer(nn.Module):
                 self._error_cache["embed"] = bu_err.detach().clone()
 
             # compute energy only at final inference step
-            if t == step_T - 1:
+            if is_final_step:
                 error = target_activity - mu
                 energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
                 self._energy += energy
@@ -125,7 +113,7 @@ class PCLayer(nn.Module):
             lateral_conn = self.lateral_connections.get(layer_type, None)
             x, mu, bu_err, new_kv_cache = step_attn(
                 t,
-                step_T,
+                T,
                 target_activity,
                 x,
                 lateral_conn,
@@ -152,7 +140,7 @@ class PCLayer(nn.Module):
             lateral_conn = self.lateral_connections.get(layer_type, None)
             x, mu, bu_err = step_linear(
                 t,
-                step_T,
+                T,
                 target_activity,
                 x,
                 layer, 
@@ -160,7 +148,7 @@ class PCLayer(nn.Module):
                 layer_type,
                 self.local_lr, 
                 self.clamp_value, 
-                self.energy_fn_name, 
+                self.energy_fn_name,
                 self.update_bias, 
                 requires_update,
                 td_err=td_err, 
@@ -169,10 +157,10 @@ class PCLayer(nn.Module):
             
         # cache and stats
         self._mu_cache[layer_type] = mu.detach().clone()  
-        if bu_err is not None: 
-         self._error_cache[layer_type] = bu_err.detach().clone()   
+        if bu_err is not None:
+            self._error_cache[layer_type] = bu_err.detach().clone()
         
-        if t == step_T - 1:
+        if is_final_step:
             error = target_activity - mu
             energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
             self._energy += energy

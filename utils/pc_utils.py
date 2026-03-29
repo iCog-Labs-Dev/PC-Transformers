@@ -22,7 +22,7 @@ def step_embed(
     energy_fn_name: str,
     requires_update: bool,
     layer_norm: Optional[nn.Module] = None,
-    )-> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Predictive coding step for embedding layer.
     Returns (mu, mu_word, mu_pos, error)
@@ -45,8 +45,10 @@ def step_embed(
     mu_norm=layer_norm(mu) if layer_norm is not None else mu
 
     error = target - mu_norm
-        
-    if requires_update: 
+
+    should_update = requires_update and t == T - 1
+
+    if should_update:
         with torch.no_grad():
             flat_input_ids = input_ids.reshape(-1)
             flat_update = error.reshape(-1, error.size(-1))
@@ -58,9 +60,6 @@ def step_embed(
             word_layer.weight.data.index_add_(0, flat_input_ids, delta)
             pos_layer.weight.data.index_add_(0, flat_position_ids, delta)
             
-    if t == T - 1:
-           finalize_step(mu, target, error, t, layer_type, energy_fn_name)
-  
     return mu, mu_word, mu_pos, error
     
 def step_linear(
@@ -78,7 +77,7 @@ def step_linear(
     requires_update: bool,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module], 
-   ):
+    ):
     """
     Predictive coding step for linear-like layers.
     Returns: (updated_x, mu, bu_err)
@@ -105,12 +104,14 @@ def step_linear(
     # project bottom-up error through weights
     error_proj= bu_err @ layer.weight      
     error = error_proj- td_err if td_err is not None else error_proj  
+
+    should_update = requires_update and t == T - 1
     
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)
         x = x + local_lr * delta_x
 
-        if requires_update:
+        if should_update:
             lateral_conn.update_weights(x.detach())
     else:
         x= x + local_lr * error 
@@ -118,7 +119,7 @@ def step_linear(
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
     
     # parameter updates for the layer
-    if requires_update:
+    if should_update:
         delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
         delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
@@ -126,9 +127,6 @@ def step_linear(
             delta_b = local_lr * bu_err.mean(dim=(0, 1))
             delta_b = torch.clamp(delta_b, -0.01, 0.01)
             layer.bias.data.add_(delta_b)
-
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
 
     return x, mu, bu_err
 
@@ -206,12 +204,13 @@ def step_attn(
     
     bu_err = target - mu  # B, T, D
     error = bu_err - td_err if td_err is not None else bu_err  
+    should_update = requires_update and t == T - 1
                 
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, error)
         x = x + local_lr * delta_x
         
-        if requires_update:
+        if should_update:
             lateral_conn.update_weights(x.detach())
     else:
         x = x + local_lr * error
@@ -219,7 +218,7 @@ def step_attn(
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 
     # PC update W_latent
-    if requires_update:
+    if should_update:
         with torch.no_grad():
             B, S = batch_size, seq_len
 
@@ -254,9 +253,6 @@ def step_attn(
                         delta_b_v = (v_slice.mean(dim=(0, 1)) / (B * S))
                         v_proj.bias.data[start:end] += torch.clamp(local_lr * delta_b_v, -clamp_value, clamp_value)
  
-    if t == T - 1:
-        finalize_step(mu, target, error, t, layer_type,energy_fn_name)
-     
     return x, mu, bu_err, new_kv_cache
     
 ENERGY_FUNCTIONS = {
