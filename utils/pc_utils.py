@@ -144,7 +144,7 @@ def step_linear(
     # parameter updates for the layer
     if requires_update:
         delta_W = local_lr * torch.einsum("bsv, bsh -> vh", bu_err, x_input.detach())
-        delta_W = torch.clamp(delta_W, -0.01, 0.01)
+        # delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
         if layer.bias is not None and update_bias:
             delta_b = local_lr * bu_err.mean(dim=(0, 1))
