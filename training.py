@@ -248,12 +248,7 @@ def main():
                 # Get the underlying model (handle both DDP and non-DDP cases)
                 model_to_save = model.module if hasattr(model, 'module') else model
                 checkpoint = {
-                    'epoch': epoch,
                     'model_state_dict': model_to_save.state_dict(),
-                    'train_energy': train_energy,
-                    'val_energy': val_energy,
-                    'train_perplexity': train_perplexity,
-                    'val_perplexity': val_perplexity
                 }
                 checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
                 torch.save(checkpoint, checkpoint_path)
@@ -271,12 +266,7 @@ def main():
         # Get the underlying model (handle both DDP and non-DDP cases)
         model_to_save = model.module if hasattr(model, 'module') else model
         final_checkpoint = {
-            'epoch': config.num_epochs,
             'model_state_dict': model_to_save.state_dict(),
-            'train_energy': train_energy,
-            'val_energy': val_energy,
-            'train_perplexity': train_perplexity,
-            'val_perplexity': val_perplexity
         }
         torch.save(final_checkpoint, 'checkpoints/final_model.pt')
         total_time = time.time() - start_time
