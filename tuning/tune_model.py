@@ -205,3 +205,64 @@ def run_phase1_trial(trial):
         if 'model' in locals():
             del model
         torch.cuda.empty_cache()
+
+def run_phase2_trial(trial, best_params):
+    """
+    Phase 2 Trial Execution
+    
+    This function fixes the architecture found in Phase 1 and fine-tunes the 
+    continuous parameters. While it still monitors energy for safety, it scores 
+    trials based on Perplexity (PPL) to find the most intelligent version of
+    the stable architecture.
+
+    Args:
+        trial (optuna.trial.Trial): The current Optuna trial object.
+        best_params (dict): The winning structural parameters from Phase 1.
+
+    Returns:
+        float: The validation perplexity score (Optuna attempts to minimize this).
+    """
+    continuous_params = define_search_space_phase2(trial, best_params)
+    params = {**best_params, **continuous_params}
+    
+    tuning_params = {k: v for k, v in params.items() if k in ['lr', 'inference_lr', 'dropout']}
+    print(f"[PPL Phase - Continuous Only] Trial {trial.number} | params: {tuning_params}")
+    print(f"[PPL Phase - Fixed] Architecture: n_blocks={params['n_blocks']}, num_heads={params['num_heads']}, "
+          f"n_embed={params['n_embed']}, T={params['T']}")
+
+    try:
+        model, config, train_loader, valid_loader, device = create_model(params)
+        start_time = time.time()
+
+        try:
+            train_energy, train_ppl, _ = train(model, train_loader, config, global_step=0, device=device, logger=None)
+            
+            if torch.isnan(torch.tensor(train_energy)) or train_energy > ENERGY_STABILITY_THRESHOLD:
+                reason = f"Unstable Energy during Phase 2: {train_energy}"
+                trial.set_user_attr("prune_reason", reason)
+                print(f"  {reason}")
+                raise optuna.TrialPruned()
+
+            val_energy, val_ppl = evaluate(model, config, valid_loader, max_batches=10, device=device)
+
+        except Exception as e:
+            if not isinstance(e, optuna.TrialPruned):
+                reason = f"Execution failed: {e}"
+                trial.set_user_attr("prune_reason", reason)
+                print(f"  {reason}")
+            raise optuna.TrialPruned()
+
+        total_time = time.time() - start_time
+        
+        trial.set_user_attr("val_energy", float(val_energy))
+        trial.set_user_attr("time", total_time)
+        for key, value in params.items():
+            trial.set_user_attr(f"param_{key}", value)
+
+        print(f"Trial {trial.number} Complete | Final Val PPL={val_ppl:.4f} | Time={total_time:.1f}s")
+        return float(val_ppl)
+
+    finally:
+        if 'model' in locals():
+            del model
+        torch.cuda.empty_cache()
