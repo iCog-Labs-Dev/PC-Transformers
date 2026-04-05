@@ -269,23 +269,38 @@ def step_attn(
     dE_dK = torch.matmul(dE_dS.transpose(-2, -1), Q) * scale
 
     # Gradients through RoPE (using transpose)
-    cos_s = cos[:S].unsqueeze(0).unsqueeze(0)
-    sin_s = sin[:S].unsqueeze(0).unsqueeze(0)
+    cos_q = cos[:S].unsqueeze(0).unsqueeze(0)
+    sin_q = sin[:S].unsqueeze(0).unsqueeze(0)
     
-    dE_dQ_raw = (dE_dQ * cos_s) + (rotate_half_transpose(dE_dQ) * sin_s)
-    dE_dK_raw = (dE_dK * cos_s) + (rotate_half_transpose(dE_dK) * sin_s)
+    K_len = K.size(2)
+    cos_k = cos[:K_len].unsqueeze(0).unsqueeze(0)
+    sin_k = sin[:K_len].unsqueeze(0).unsqueeze(0)
+    
+    dE_dQ_raw = (dE_dQ * cos_q) + (rotate_half_transpose(dE_dQ) * sin_q)
+    dE_dK_raw = (dE_dK * cos_k) + (rotate_half_transpose(dE_dK) * sin_k)
     
     delta_x = torch.zeros_like(x_norm)
 
     # Update x per head
     for h in range(num_heads):
-        delta_x_h = (
-            dE_dQ_raw[:, h] @ q_proj.weight[:, h*head_dim:(h+1)*head_dim].T +
-            dE_dK_raw[:, h] @ k_proj.weight[:, h*head_dim:(h+1)*head_dim].T +
-            dE_dV[:, h] @ v_proj.weight[:, h*head_dim:(h+1)*head_dim].T
-        )
-        delta_x += delta_x_h
+        dq = dE_dQ_raw[:, h]        # [B, S, head_dim]
+        dk = dE_dK_raw[:, h]        # [B, K_len, head_dim]
+        dv = dE_dV[:, h]            # [B, K_len, head_dim]
         
+        if dk.size(1) > S:
+            dk = dk[:, -S:, :]
+            dv = dv[:, -S:, :]
+        
+        wq = q_proj.weight[:, h*head_dim:(h+1)*head_dim]
+        wk = k_proj.weight[:, h*head_dim:(h+1)*head_dim]
+        wv = v_proj.weight[:, h*head_dim:(h+1)*head_dim]
+        
+        delta_q = torch.einsum('bsh,eh->bse', dq, wq)
+        delta_k = torch.einsum('bsh,eh->bse', dk, wk)
+        delta_v = torch.einsum('bsh,eh->bse', dv, wv)
+        
+        delta_x += delta_q + delta_k + delta_v
+            
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, delta_x)
         x = x + local_lr * delta_x
@@ -311,7 +326,21 @@ def step_attn(
                 q_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_q
                 k_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_k
                 v_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_v
-
+                if update_bias:
+                    if q_proj.bias is not None:
+                        db_q = dE_dQ_raw[:, h].mean(dim=(0, 1))
+                        db_q = torch.clamp(db_q, -0.01, 0.01)
+                        q_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_q
+                    
+                    if k_proj.bias is not None:
+                        db_k = dE_dK_raw[:, h].mean(dim=(0, 1))
+                        db_k = torch.clamp(db_k, -0.01, 0.01)
+                        k_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_k
+                    
+                    if v_proj.bias is not None:
+                        db_v = dE_dV[:, h].mean(dim=(0, 1))
+                        db_v = torch.clamp(db_v, -0.01, 0.01)
+                        v_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_v
     new_kv_cache = (K.detach(), V.detach()) if use_cache else None
     return x, mu, bu_err, new_kv_cache
 
