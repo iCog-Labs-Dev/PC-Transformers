@@ -66,7 +66,7 @@ def define_search_space(trial):
         "T": trial.suggest_int("T", min_T, min_T + 2),
         "batch_size": trial.suggest_categorical("batch_size", [8, 16]),
         "lr": trial.suggest_float("lr", 1e-5, 6e-5, log=True),
-        "inference_lr": trial.suggest_float("inference_lr", 0.05, 0.20, log=True),
+        # "inference_lr": trial.suggest_float("inference_lr", 0.05, 0.20, log=True),
         "dropout": trial.suggest_float("dropout", 0.0, 0.1),
     }
 
@@ -89,12 +89,12 @@ def define_search_space_phase2(trial, best_params):
             - dropout (float): Dropout probability
     """
     lr = best_params.get("lr", 1e-3)
-    inference_lr = best_params.get("inference_lr", 0.1)
+    # inference_lr = best_params.get("inference_lr", 0.1)
     dropout = best_params.get("dropout", 0.05)
     
     return {
         "lr": trial.suggest_float("lr", max(1e-5, lr * 0.5), min(6e-5, lr * 2.0), log=True),
-        "inference_lr": trial.suggest_float("inference_lr", max(0.05, inference_lr * 0.7), min(0.25, inference_lr * 1.3), log=True), 
+        # "inference_lr": trial.suggest_float("inference_lr", max(0.05, inference_lr * 0.7), min(0.25, inference_lr * 1.3), log=True), 
         "dropout": trial.suggest_float("dropout", max(0.0, dropout - 0.02), min(0.15, dropout + 0.02)),
     }
 
@@ -125,7 +125,7 @@ def create_model(params):
         vocab_size=vocab_size,
         block_size= max_len,
         lr=params["lr"],
-        inference_lr=params["inference_lr"],
+        # inference_lr=params["inference_lr"],
         peak_learning_rate=params["lr"],
         warmup_steps=100,
         n_embed=params["n_embed"],
@@ -226,7 +226,7 @@ def run_phase2_trial(trial, best_params):
     continuous_params = define_search_space_phase2(trial, best_params)
     params = {**best_params, **continuous_params}
     
-    tuning_params = {k: v for k, v in params.items() if k in ['lr', 'inference_lr', 'dropout']}
+    tuning_params = {k: v for k, v in params.items() if k in ['lr', 'dropout']}     # 'inference_lr'
     print(f"[PPL Phase - Continuous Only] Trial {trial.number} | params: {tuning_params}")
     print(f"[PPL Phase - Fixed] Architecture: n_blocks={params['n_blocks']}, num_heads={params['num_heads']}, "
           f"n_embed={params['n_embed']}, T={params['T']}")
@@ -315,7 +315,7 @@ def run_tuning_pipeline():
         for key in ['n_blocks', 'num_heads', 'n_embed', 'embed_mult', 'T', 'batch_size']:
             print(f"  {key}: {best_params.get(key)}")
         print(f"\nContinuous Parameters to be fine-tuned in Phase 2:")
-        for key in ['lr', 'inference_lr', 'dropout']:
+        for key in ['lr', 'dropout']:       # 'inference_lr'
             print(f"  {key}: {best_params.get(key)}")
     else:
         return None
@@ -324,7 +324,7 @@ def run_tuning_pipeline():
     print("PHASE 2: TPE optimizing Perplexity")
     print(f"{'='*60}")
     print("Strategy: Keep architecture/discrete parameters FIXED")
-    print("Only fine-tune: lr, inference_lr, dropout")
+    print("Only fine-tune: lr, dropout")  # 'inference_lr'
     
     study_ppl = optuna.create_study(
         study_name="pc_transformer_phase2_ppl",
@@ -358,7 +358,7 @@ def run_tuning_pipeline():
         print(f"Best PPL achieved: {best_ppl:.4f}")
         
         print(f"\nParameter changes from Phase 1 -> Phase 2:")
-        for key in ['lr', 'inference_lr', 'dropout']:
+        for key in ['lr', 'dropout']:  # 'inference_lr',
             phase1_val = best_params.get(key)
             phase2_val = final_params.get(key)
             change_pct = ((phase2_val - phase1_val) / phase1_val * 100) if phase1_val != 0 else 0
@@ -397,3 +397,36 @@ def run_tuning_pipeline():
             "improvement_pct": ((best_energy_ppl - best_ppl) / best_energy_ppl * 100) if isinstance(best_energy_ppl, float) and best_energy_ppl > 0 else 0
         }
     return None
+
+def main():
+    print("PC TRANSFORMER - TWO-PHASE HYPERPARAMETER TUNING")
+    print("="*60)
+    print("PHASE 1: Find stable architecture (minimize Energy)")
+    print("PHASE 2: Fine-tune continuous parameters (minimize Perplexity)")
+    print("="*60)
+
+    try:
+        results = run_tuning_pipeline()
+        if results:
+            print(f"\n{'='*60}")
+            print("TUNING COMPLETED SUCCESSFULLY")
+            print(f"{'='*60}")
+            print(f"Final Results:")
+            print(f"- Phase 1 Best Energy: {results['phase1_best_energy']:.4f}")
+            if isinstance(results['phase1_best_ppl'], float):
+                print(f"- Phase 1 Corresponding PPL: {results['phase1_best_ppl']:.4f}")
+            print(f"- Phase 2 Best PPL: {results['phase2_best_ppl']:.4f}")
+            if 'improvement_pct' in results and results['improvement_pct'] != 0:
+                print(f"- Improvement: {results['improvement_pct']:+.1f}%")
+            print(f"\n Parameters saved to: tuning/best_hyperparameters.txt")
+        else:
+            print("Tuning failed or was interrupted.")
+    except KeyboardInterrupt:
+        print("Tuning interrupted by user.")
+    except Exception as e:
+        print(f"Error during tuning: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    main()
