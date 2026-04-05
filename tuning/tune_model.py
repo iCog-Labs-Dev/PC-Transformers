@@ -10,6 +10,7 @@ sys.path.append(str(project_root))
 
 import torch
 import optuna
+from optuna.storages import JournalStorage, JournalFileStorage
 
 from training import train
 from eval import evaluate
@@ -266,3 +267,133 @@ def run_phase2_trial(trial, best_params):
         if 'model' in locals():
             del model
         torch.cuda.empty_cache()
+
+def run_tuning_pipeline():
+    """
+    Coordinates the two-phase tuning pipeline
+
+    This function manages the full transition from Phase 1 to Phase 2.
+
+    It initializes permanent storage to track progress, executes the 
+    architectural search, freezes the winning structure, and then launches 
+    the fine-tuning phase. It concludes by logging the final optimized
+    parameters and the total improvement achieved.
+
+    Returns:
+        dict: A summary of the best results and parameters from both phases.
+    """
+    tuning_path = Path("tuning")
+    tuning_path.mkdir(exist_ok=True)
+    
+    # Using JournalStorage to permanently bypass SQLite errors
+    storage_file = str(tuning_path / "optuna_journal.log")
+    storage = JournalStorage(JournalFileStorage(storage_file))
+
+    print("PHASE 1: TPE optimizing Energy")
+    study_energy = optuna.create_study(
+        study_name="pc_transformer_phase1_energy",
+        storage=storage,
+        load_if_exists=True,
+        direction="minimize",
+        sampler=optuna.samplers.TPESampler(seed=42, n_startup_trials=2),
+        pruner=optuna.pruners.HyperbandPruner(min_resource=1, max_resource=15, reduction_factor=2)
+    )
+
+    study_energy.optimize(run_phase1_trial, n_trials=50, n_jobs=1, show_progress_bar=False)
+
+    if study_energy.best_trial:
+        best_energy = study_energy.best_value
+        best_energy_ppl = study_energy.best_trial.user_attrs.get("val_ppl", "N/A")
+        best_params = study_energy.best_trial.params
+        
+        print(f"\n{'='*60}")
+        print("PHASE 1 COMPLETE")
+        print(f"{'='*60}")
+        print(f"Best Energy: {best_energy:.4f}")
+        print(f"Corresponding PPL: {best_energy_ppl}")
+        print(f"\nBest Architecture Parameters (FIXED for Phase 2):")
+        for key in ['n_blocks', 'num_heads', 'n_embed', 'embed_mult', 'T', 'batch_size']:
+            print(f"  {key}: {best_params.get(key)}")
+        print(f"\nContinuous Parameters to be fine-tuned in Phase 2:")
+        for key in ['lr', 'inference_lr', 'dropout']:
+            print(f"  {key}: {best_params.get(key)}")
+    else:
+        return None
+
+    print(f"\n{'='*60}")
+    print("PHASE 2: TPE optimizing Perplexity")
+    print(f"{'='*60}")
+    print("Strategy: Keep architecture/discrete parameters FIXED")
+    print("Only fine-tune: lr, inference_lr, dropout")
+    
+    study_ppl = optuna.create_study(
+        study_name="pc_transformer_phase2_ppl",
+        storage=storage,
+        load_if_exists=True,
+        direction="minimize",
+        sampler=optuna.samplers.TPESampler(
+            seed=42,
+            n_startup_trials=3,
+            multivariate=True,    
+            group=True,          
+            prior_weight=1.0,     
+            consider_endpoints=True  
+        )
+    )
+    
+    print(f"Resuming with {len(study_ppl.trials)} previous Phase 2 trials")
+
+    def phase2_trial_wrapper(trial):
+        return run_phase2_trial(trial, best_params)
+
+    study_ppl.optimize(phase2_trial_wrapper, n_trials=50, n_jobs=1, show_progress_bar=False)
+
+    if study_ppl.best_trial:
+        best_ppl = study_ppl.best_value
+        final_params = study_ppl.best_trial.params
+        
+        print(f"\n{'='*60}")
+        print("PHASE 2 COMPLETE")
+        print(f"{'='*60}")
+        print(f"Best PPL achieved: {best_ppl:.4f}")
+        
+        print(f"\nParameter changes from Phase 1 -> Phase 2:")
+        for key in ['lr', 'inference_lr', 'dropout']:
+            phase1_val = best_params.get(key)
+            phase2_val = final_params.get(key)
+            change_pct = ((phase2_val - phase1_val) / phase1_val * 100) if phase1_val != 0 else 0
+            print(f"  {key}: {phase1_val:.6f} -> {phase2_val:.6f} ({change_pct:+.1f}%)")
+        
+        with open("tuning/best_hyperparameters.txt", "w") as f:
+            f.write("="*60 + "\n")
+            f.write("BEST HYPERPARAMETERS\n")
+            f.write("="*60 + "\n\n")
+            
+            f.write("PHASE 1 - BEST FOR ENERGY:\n")
+            f.write("-" * 40 + "\n")
+            f.write(f"Best Energy: {best_energy:.6f}\n")
+            f.write(f"Corresponding PPL: {best_energy_ppl}\n")
+            f.write("-" * 40 + "\n")
+            for key, value in best_params.items():
+                f.write(f"{key} = {value}\n")
+            
+            f.write("\n" + "="*60 + "\n\n")
+            
+            f.write("PHASE 2 - BEST FOR PPL:\n")
+            f.write("-" * 40 + "\n")
+            f.write(f"Best PPL: {best_ppl:.6f}\n")
+            f.write("-" * 40 + "\n")
+            for key, value in final_params.items():
+                f.write(f"{key} = {value}\n")
+        
+        print(f"\n✓ Best hyperparameters saved to: tuning/best_hyperparameters.txt")
+        
+        return {
+            "phase1_best_energy": best_energy,
+            "phase1_best_ppl": best_energy_ppl,
+            "phase2_best_ppl": best_ppl,
+            "phase1_parameters": best_params,
+            "phase2_parameters": final_params,
+            "improvement_pct": ((best_energy_ppl - best_ppl) / best_energy_ppl * 100) if isinstance(best_energy_ppl, float) and best_energy_ppl > 0 else 0
+        }
+    return None
