@@ -67,3 +67,55 @@ def define_search_space_phase2(trial, best_params):
         "inference_lr": trial.suggest_float("inference_lr", max(0.05, inference_lr * 0.7), min(0.25, inference_lr * 1.3), log=True), 
         "dropout": trial.suggest_float("dropout", max(0.0, dropout - 0.02), min(0.15, dropout + 0.02)),
     }
+
+def create_model(params):
+    """
+    Assembles the model, config, and data for a single trial.
+
+    This function takes the hyperparameters suggested by Optuna and combines them 
+    with fixed, hardcoded configuration rules. It instantiates the model on the 
+    correct hardware device, initializes its specific lateral weights, and fetches 
+    the data loaders.
+
+    Args:
+        params (dict): The hyperparameters chosen by Optuna for this specific trial.
+
+    Returns:
+        tuple: A fully prepared training environment containing:
+            - model: PC-Transformer model
+            - config: The complete configuration blueprint
+            - train_loader: The dataset for training
+            - valid_loader: The dataset for validation
+            - device: The hardware device (CPU/GPU) being used
+
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    config = GPTConfig(
+        vocab_size=vocab_size,
+        block_size= max_len,
+        lr=params["lr"],
+        inference_lr=params["inference_lr"],
+        peak_learning_rate=params["lr"],
+        warmup_steps=100,
+        n_embed=params["n_embed"],
+        dropout=params["dropout"],
+        T=params["T"],
+        num_heads=params["num_heads"],
+        n_blocks=params["n_blocks"],
+        batch_size=params["batch_size"],
+        num_epochs=1, 
+        internal_energy_fn_name="pc_e", 
+        output_energy_fn_name="kld",    
+        combined_internal_weight=1.0,
+        combined_output_weight=1.0,
+        use_flash_attention=False,
+        alpha=0.5,
+        update_bias=True
+    )
+
+    model = PCTransformer(config).to(device)
+    model.register_all_lateral_weights() 
+    train_loader, valid_loader, _ = get_loaders(distributed=False)
+    
+    return model, config, train_loader, valid_loader, device
