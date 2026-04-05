@@ -1,3 +1,32 @@
+import sys
+import time
+import logging
+import warnings
+from pathlib import Path
+
+# Project Root Setup
+project_root = Path(__file__).resolve().parent.parent
+sys.path.append(str(project_root))
+
+import torch
+import optuna
+
+from training import train
+from eval import evaluate
+from predictive_coding.config import GPTConfig
+from data_preparation.dataloader import get_loaders
+from model_architecture.pc_t_model import PCTransformer
+
+from data_preparation.config import vocab_size, max_len
+
+# Silence warnings and Optuna spam
+warnings.filterwarnings('ignore')
+logging.getLogger().setLevel(logging.ERROR)
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+logging.getLogger('optuna').setLevel(logging.WARNING)
+
+ENERGY_STABILITY_THRESHOLD = 300
+
 def define_search_space(trial):
     """
     Defines the Phase 1 hyperparameter search space for Optuna trials.
@@ -119,3 +148,60 @@ def create_model(params):
     train_loader, valid_loader, _ = get_loaders(distributed=False)
     
     return model, config, train_loader, valid_loader, device
+
+def run_phase1_trial(trial):
+    """
+    Phase 1 Trial Execution
+    
+    This function builds a model using Phase 1 parameters and runs a brief 
+    training pass. It acts as a strict filter: if the model's energy explodes 
+    (becomes NaN or exceeds the threshold), the trial is immediately pruned.
+    Surviving models are evaluated and scored by their Energy.
+
+    Args:
+        trial (optuna.trial.Trial): The current Optuna trial object.
+
+    Returns:
+        float: The validation energy score (Optuna attempts to minimize this).
+    """
+    try:
+        params = define_search_space(trial)
+        print(f"[Energy Phase] Trial {trial.number} | params: {params}")
+
+        model, config, train_loader, valid_loader, device = create_model(params)
+        start_time = time.time()
+
+        try:
+            # We use the internal train function. If it explodes, it will return high energy or NaN.
+            train_energy, train_ppl, _ = train(model, train_loader, config, global_step=0, device=device, logger=None)
+            
+            if torch.isnan(torch.tensor(train_energy)) or train_energy > ENERGY_STABILITY_THRESHOLD:
+                reason = f"Unstable Energy: {train_energy}"
+                trial.set_user_attr("prune_reason", reason)
+                print(f"  {reason}")
+                raise optuna.TrialPruned()
+
+            # Evaluate on a subset of validation data
+            val_energy, val_ppl = evaluate(model, config, valid_loader, max_batches=10, device=device)
+
+        except Exception as e:
+            if not isinstance(e, optuna.TrialPruned):
+                reason = f"Execution failed: {e}"
+                trial.set_user_attr("prune_reason", reason)
+                print(f"  {reason}")
+            raise optuna.TrialPruned()
+
+        total_time = time.time() - start_time
+        
+        trial.set_user_attr("val_ppl", float(val_ppl))
+        trial.set_user_attr("time", total_time)
+        for key, value in params.items():
+            trial.set_user_attr(f"param_{key}", value)
+
+        print(f"Trial {trial.number} Complete | Val Energy={val_energy:.4f} | Val PPL={val_ppl:.4f} | Time={total_time:.1f}s")
+        return float(val_energy)
+
+    finally:
+        if 'model' in locals():
+            del model
+        torch.cuda.empty_cache()
