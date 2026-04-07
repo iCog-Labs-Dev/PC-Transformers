@@ -106,6 +106,7 @@ def step_linear(
     lateral_conn: Optional[Any], 
     layer_type: str,
     local_lr: float,
+    inference_lr: float,
     clamp_value: float,
     energy_fn_name: str,
     update_bias: bool,
@@ -147,11 +148,11 @@ def step_linear(
     error = error_proj- td_err if td_err is not None else error_proj  
    
     if lateral_conn is not None:
-        x = x + local_lr * lateral_conn.forward(x, error)
+        x = x + inference_lr * lateral_conn.forward(x, error)
         if requires_update:
             lateral_conn.update_weights(x.detach())
     else:
-        x = x + local_lr * error 
+        x = x + inference_lr * error 
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
     
@@ -175,6 +176,7 @@ def step_attn(
     proj_layers: dict,
     layer_type: str,
     local_lr: float,
+    inference_lr: float,
     clamp_value: float,
     energy_fn_name: str,
     update_bias: bool,
@@ -303,12 +305,12 @@ def step_attn(
             
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, delta_x)
-        x = x + local_lr * delta_x
+        x = x + inference_lr * delta_x
         
         if requires_update:
             lateral_conn.update_weights(x.detach())
     else:
-        x = x + local_lr * delta_x
+        x = x + inference_lr * delta_x
 
     x = torch.clamp(x, -abs(clamp_value), abs(clamp_value))
 

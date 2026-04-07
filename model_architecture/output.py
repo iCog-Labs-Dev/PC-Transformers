@@ -13,6 +13,7 @@ class OutputLayer(nn.Module):
         self.pc_layer = PCLayer(
             T=config.T,
             lr=config.lr,
+            inference_lr=config.inference_lr,
             update_bias = config.update_bias,
             energy_fn_name=config.output_energy_fn_name,
         )
