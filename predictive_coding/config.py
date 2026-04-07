@@ -26,6 +26,7 @@ class GPTConfig:
     vocab_size: int
     block_size: int
     lr: float
+    inference_lr: float
     peak_learning_rate: Optional[float]
     warmup_steps: Optional[int] 
     n_embed: int 

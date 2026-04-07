@@ -20,6 +20,7 @@ class PCLayer(nn.Module):
         self,
         T: int,
         lr: float,
+        inference_lr: float,
         update_bias: bool,
         energy_fn_name: str,
         num_heads: Optional[int] = None,
@@ -29,6 +30,7 @@ class PCLayer(nn.Module):
         self.rope_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
         self.T = T
         self.local_lr = lr
+        self.inference_lr = inference_lr
         self.update_bias = update_bias
         self.clamp_value = 3.0
         self.energy_fn_name = energy_fn_name 
@@ -46,7 +48,7 @@ class PCLayer(nn.Module):
     def register_lateral(self, layer_type: str, size: int):
         """Create and register lateral connections for layer_type."""
         if layer_type not in self.lateral_connections:
-            self.lateral_connections[layer_type] = LateralConnections(size, self.local_lr)
+            self.lateral_connections[layer_type] = LateralConnections(size, self.local_lr, self.inference_lr)
             self.add_module(f"lateral_{layer_type}", self.lateral_connections[layer_type])
 
     def _reset_step_state(self) -> None:
@@ -120,6 +122,7 @@ class PCLayer(nn.Module):
                 proj_layers,
                 layer_type,
                 self.local_lr,
+                self.inference_lr,
                 self.clamp_value,
                 self.energy_fn_name,
                 self.update_bias,
@@ -148,6 +151,7 @@ class PCLayer(nn.Module):
                 lateral_conn,  
                 layer_type,
                 self.local_lr, 
+                self.inference_lr,
                 self.clamp_value, 
                 self.energy_fn_name, 
                 self.update_bias, 
@@ -253,7 +257,14 @@ class PCLayer(nn.Module):
     def set_learning_rate(self, lr: float):
         """Set the local learning rate for the layer."""
         self.local_lr = float(lr)
+    def set_inference_learning_rate(self, inference_lr: float):
+        """Set the inference learning rate for the layer."""
+        self.inference_lr = float(inference_lr)
         
     def get_learning_rate(self) -> float:
         """Get the current local learning rate for the layer."""
         return float(self.local_lr)
+    
+    def get_inference_learning_rate(self) -> float:
+        """Get the current inference learning rate for the layer."""
+        return float(self.inference_lr)

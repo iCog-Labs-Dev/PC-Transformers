@@ -35,6 +35,7 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
             vocab_size = vocab_size,
             block_size = best_config["block_size"],
             lr = best_config["lr"],
+            inference_lr = best_config["inference_lr"],
             peak_learning_rate = best_config["peak_learning_rate"],
             warmup_steps = best_config["warmup_steps"],
             n_embed = best_config["n_embed"],
