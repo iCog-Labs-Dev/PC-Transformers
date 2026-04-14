@@ -44,9 +44,6 @@ def train(model, dataloader, config, global_step, device, logger):
 
         # total_steps = len(dataloader) * config.num_epochs
         
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size - 1)
-
         if global_step < config.warmup_steps:
             lr = config.lr + global_step / config.warmup_steps * (
                 config.peak_learning_rate - config.lr)
@@ -66,9 +63,6 @@ def train(model, dataloader, config, global_step, device, logger):
                 module.set_learning_rate(lr)
                 
         global_step += 1
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size-1)
-            
             
         logits = model(target_ids, input_ids)
         ce_loss = F.cross_entropy(

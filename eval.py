@@ -45,11 +45,6 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
         input_ids = batch["input_ids"].to(device)
         targets = batch["target_ids"].to(device)
 
-        # Clip targets to valid range before using them for loss calculation
-        if targets.max() >= vocab_size:
-            targets = torch.clamp(targets, max=vocab_size-1)
-       
-
         logits = model(targets, input_ids)
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),

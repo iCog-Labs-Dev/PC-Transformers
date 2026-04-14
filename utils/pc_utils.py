@@ -77,10 +77,6 @@ def step_embed(
     Returns (mu, mu_word, error).
     """
     word_layer: nn.Embedding = layer["word"]
-    
-    vocab_size = word_layer.weight.size(0)
-    if input_ids.max() >= vocab_size:
-        input_ids = torch.clamp(input_ids, max=vocab_size-1)
          
     mu_word = word_layer(input_ids)
     mu = mu_word 
@@ -368,8 +364,6 @@ def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t
     
 def ids_to_one_hot(input_ids: torch.Tensor, vocab_size: int) -> torch.Tensor:
     device = input_ids.device
-    if input_ids.max() >= vocab_size:
-        input_ids = torch.clamp(input_ids, max=vocab_size-1)
     return F.one_hot(input_ids, num_classes=vocab_size).float().to(device)
 
 def cleanup_memory():

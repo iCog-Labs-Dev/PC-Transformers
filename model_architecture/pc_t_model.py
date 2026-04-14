@@ -70,13 +70,6 @@ class PCTransformer(nn.Module):
         device = input_ids.device
         vocab_size = self.output.config.vocab_size
         
-        # Clip input_ids and target_ids to valid range before using them
-        if input_ids.max() >= vocab_size:
-            input_ids = torch.clamp(input_ids, max=vocab_size-1)
-        
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size-1)
-        
         target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
