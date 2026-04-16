@@ -244,8 +244,8 @@ class PCLayer(nn.Module):
         return self._error_cache.get(layer_type, None)
 
     def get_energy(self) -> Optional[float]:
-        """Get the accumulated energy for the layer."""
-        return float(sum(self._energy_list)) if self._energy_list else 0.0
+        """Get the last converged energy for the layer."""
+        return float(self._energy_list[-1]) if self._energy_list else 0.0
 
     def clear_energy(self):
         """Clear the stored energy and cached states for the layer."""
@@ -254,8 +254,12 @@ class PCLayer(nn.Module):
         self._mu_cache.clear()
         
     def get_errors(self) -> list:
-        """Get the list of error values accumulated during inference."""
-        return self._errors
+        """Get the errors from the most recent converged iteration."""
+        # Each step can contribute multiple error entries, so we find the last unique 'step'
+        if not self._errors:
+            return []
+        last_step_val = self._errors[-1]["step"]
+        return [err for err in self._errors if err["step"] == last_step_val]
 
     def clear_errors(self):
         """Clear the stored errors for the layer."""
