@@ -15,5 +15,4 @@ vocab_size = 1024
 special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
 
 # Training parameters
-batch_size = 8
-max_len = 208   # sequence length 
+max_len = 64   # sequence length 

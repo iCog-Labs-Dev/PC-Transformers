@@ -146,7 +146,7 @@ def create_model(params):
 
     model = PCTransformer(config).to(device)
     model.register_all_lateral_weights() 
-    train_loader, valid_loader, _ = get_loaders(distributed=False)
+    train_loader, valid_loader, _ = get_loaders(batch_size=params["batch_size"], distributed=False)
     
     return model, config, train_loader, valid_loader, device
 

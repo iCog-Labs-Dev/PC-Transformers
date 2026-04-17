@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from torch.utils.data import DataLoader, DistributedSampler
-from data_preparation.config import encoded_dir, max_len, batch_size
+from data_preparation.config import encoded_dir, max_len
 from data_preparation.dataset import EncodedDataset
 
 def get_datasets():
@@ -14,7 +14,7 @@ def get_datasets():
     
     return train_dataset, valid_dataset, test_dataset
 
-def get_loaders(distributed: bool = False):
+def get_loaders(batch_size: int, distributed: bool = False):
     """Wrap datasets into PyTorch DataLoaders with batching and shuffling."""
     train_dataset, valid_dataset, test_dataset = get_datasets()
     

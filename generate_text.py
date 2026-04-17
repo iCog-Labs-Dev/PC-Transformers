@@ -10,7 +10,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device
 import argparse
-from data_preparation.config import vocab_size
+from data_preparation.config import vocab_size, max_len
 
 """
 This script generates text using the trained predictive coding transformer model.
@@ -88,7 +88,7 @@ def main():
 
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size = best_config["block_size"],
+        block_size = max_len,
         lr = best_config["peak_learning_rate"],
         inference_lr = best_config["inference_lr"],
         peak_learning_rate = best_config["peak_learning_rate"],

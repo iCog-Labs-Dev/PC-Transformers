@@ -13,7 +13,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device
 import argparse
-from data_preparation.config import vocab_size
+from data_preparation.config import vocab_size, max_len
 
 """
 This script evaluates the performance of the predictive coding transformer model.
@@ -108,7 +108,7 @@ def main():
     
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size = best_config["block_size"],
+        block_size = max_len,
         lr = best_config["peak_learning_rate"],
         inference_lr = best_config["inference_lr"],
         peak_learning_rate = best_config["peak_learning_rate"],
@@ -134,7 +134,7 @@ def main():
     model = model.to(device)
     if use_ddp:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-    _, _, test_loader = get_loaders(distributed = use_ddp)
+    _, _, test_loader = get_loaders(batch_size=config.batch_size, distributed = use_ddp)
 
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()

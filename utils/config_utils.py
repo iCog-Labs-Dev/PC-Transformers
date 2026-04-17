@@ -38,14 +38,14 @@ def load_best_config():
     }
 
     config = {}
-    file_path = os.path.join(os.path.dirname(__file__), "..", "tuning", "bayesian_tuning_results.txt")
+    file_path = os.path.join(os.path.dirname(__file__), "..", "tuning", "best_hyperparameters.txt")
 
     if os.path.exists(file_path):
         with open(file_path, 'r') as f:
             content = f.read()
 
         for line in content.splitlines():
-            match = re.match(r'(\w+):\s+(.*)', line)
+            match = re.match(r'(\w+)\s*[:=]\s*(.*)', line)
             if match:
                 key, value = match.groups()
                 if key in selected_keys:
