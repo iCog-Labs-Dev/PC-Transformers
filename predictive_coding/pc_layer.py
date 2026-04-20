@@ -21,7 +21,6 @@ class PCLayer(nn.Module):
         T: int,
         lr: float,
         inference_lr: float,
-        update_bias: bool,
         energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
@@ -31,7 +30,6 @@ class PCLayer(nn.Module):
         self.T = T
         self.local_lr = lr
         self.inference_lr = inference_lr
-        self.update_bias = update_bias
         self.clamp_value = 3.0
         self.energy_fn_name = energy_fn_name 
         self.num_heads = num_heads
@@ -125,7 +123,6 @@ class PCLayer(nn.Module):
                 self.inference_lr,
                 self.clamp_value,
                 self.energy_fn_name,
-                self.update_bias,
                 requires_update,
                 self.num_heads,
                 self.n_embed,
@@ -154,7 +151,6 @@ class PCLayer(nn.Module):
                 self.inference_lr,
                 self.clamp_value, 
                 self.energy_fn_name, 
-                self.update_bias, 
                 requires_update,
                 td_err=td_err, 
                 layer_norm=layer_norm

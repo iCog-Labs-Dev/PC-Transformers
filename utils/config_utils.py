@@ -9,7 +9,7 @@ def load_best_config():
 
     selected_keys = {
         "block_size", "peak_learning_rate", "warmup_steps", "n_embed",
-        "dropout", "T", "num_heads", "n_blocks", "update_bias", "alpha",
+        "dropout", "T", "num_heads", "n_blocks", "alpha",
         "lr", "inference_lr", "batch_size", "num_epochs", "internal_energy_fn_name",
         "output_energy_fn_name", "combined_internal_weight",
         "combined_output_weight", "use_flash_attention"
@@ -24,7 +24,6 @@ def load_best_config():
         "T": 2,
         "num_heads": 32,
         "n_blocks": 12,
-        "update_bias": False,
         "alpha": 0.5,
         "lr": 0.0009606017304857476,
         "inference_lr": 0.096,
