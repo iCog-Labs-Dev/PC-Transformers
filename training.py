@@ -42,33 +42,26 @@ def train(model, dataloader, config, global_step, device, logger):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
 
-        # total_steps = len(dataloader) * config.num_epochs
+        total_steps = len(dataloader) * config.num_epochs
         
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size - 1)
-
         if global_step < config.warmup_steps:
             lr = config.lr + global_step / config.warmup_steps * (
                 config.peak_learning_rate - config.lr)
         else:
-            # # Cosine decay after warmup
-            # decay_step = global_step - config.warmup_steps
-            # decay_total = total_steps - config.warmup_steps
-            # cosine_decay = 0.5 * (1 + math.cos(math.pi * decay_step / decay_total))
+            # Cosine decay after warmup
+            decay_step = global_step - config.warmup_steps
+            decay_total = total_steps - config.warmup_steps
+            cosine_decay = 0.5 * (1 + math.cos(math.pi * decay_step / decay_total))
             
-            # # Minimum learning rate = 10% of peak_lr
-            # min_lr = 0.1 * config.peak_learning_rate
-            # lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
-            lr = config.peak_learning_rate
+            # Minimum learning rate = 10% of peak_lr
+            min_lr = 0.1 * config.peak_learning_rate
+            lr = min_lr + (config.peak_learning_rate - min_lr) * cosine_decay
 
         for module in model.modules():
             if hasattr(module, 'local_lr'):
                 module.set_learning_rate(lr)
                 
         global_step += 1
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size-1)
-            
             
         logits = model(target_ids, input_ids)
         ce_loss = F.cross_entropy(
@@ -168,7 +161,6 @@ def main():
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
         num_epochs = best_config["num_epochs"], 
-        update_bias = best_config["update_bias"],
         internal_energy_fn_name=best_config["internal_energy_fn_name"],
         output_energy_fn_name=best_config["output_energy_fn_name"],
         combined_internal_weight=best_config["combined_internal_weight"],
@@ -203,7 +195,7 @@ def main():
 
         model.module.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
+    train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_ddp)
     
     global_step = 0
     train_energies = []

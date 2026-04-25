@@ -70,13 +70,6 @@ class PCTransformer(nn.Module):
         device = input_ids.device
         vocab_size = self.output.config.vocab_size
         
-        # Clip input_ids and target_ids to valid range before using them
-        if input_ids.max() >= vocab_size:
-            input_ids = torch.clamp(input_ids, max=vocab_size-1)
-        
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size-1)
-        
         target_logits = ids_to_one_hot(target_ids, vocab_size).to(device)
         position_ids = torch.arange(S, device=input_ids.device).unsqueeze(0).expand(B, S)
 
@@ -158,7 +151,7 @@ class PCTransformer(nn.Module):
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=self.training,
                 td_err= td_mlp2,
                 layer=self.output.output,
                 layer_norm=None,
@@ -192,7 +185,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc2",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=self.training,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
@@ -213,7 +206,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=self.training,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
                     layer_norm=block.ln1, 
@@ -241,7 +234,7 @@ class PCTransformer(nn.Module):
                     layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=self.training,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
                     layer_norm=block.ln1,
@@ -261,7 +254,7 @@ class PCTransformer(nn.Module):
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=self.training,
                     td_err= td_embed,
                     layer = None,
                     layer_norm=block.ln2,
@@ -287,7 +280,7 @@ class PCTransformer(nn.Module):
                 layer_type="embed",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=self.training,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
                 layer_norm= block.ln2,

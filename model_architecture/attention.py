@@ -24,7 +24,6 @@ class Attention(nn.Module):
             T=config.T,
             lr=config.lr,
             inference_lr=config.inference_lr,
-            update_bias = config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,
             num_heads=config.num_heads,
             n_embed=config.n_embed,
@@ -34,7 +33,6 @@ class Attention(nn.Module):
             T=config.T,
             lr=config.lr,
             inference_lr=config.inference_lr,
-            update_bias = config.update_bias,
             energy_fn_name=config.internal_energy_fn_name,
         )
         

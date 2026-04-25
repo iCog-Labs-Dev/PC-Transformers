@@ -3,20 +3,20 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from torch.utils.data import DataLoader, DistributedSampler
-from data_preparation.config import encoded_dir, max_len, batch_size
+from data_preparation.config import encoded_dir
 from data_preparation.dataset import EncodedDataset
 
-def get_datasets():
+def get_datasets(block_size: int):
     """ Load train, validation, and test datasets from encoded token ID files."""
-    train_dataset = EncodedDataset(encoded_dir/"train.pt", max_len)
-    valid_dataset = EncodedDataset(encoded_dir/"valid.pt", max_len)
-    test_dataset = EncodedDataset(encoded_dir/"test.pt", max_len)
+    train_dataset = EncodedDataset(encoded_dir/"train.pt", block_size)
+    valid_dataset = EncodedDataset(encoded_dir/"valid.pt", block_size)
+    test_dataset = EncodedDataset(encoded_dir/"test.pt", block_size)
     
     return train_dataset, valid_dataset, test_dataset
 
-def get_loaders(distributed: bool = False):
+def get_loaders(batch_size: int, block_size: int, distributed: bool = False):
     """Wrap datasets into PyTorch DataLoaders with batching and shuffling."""
-    train_dataset, valid_dataset, test_dataset = get_datasets()
+    train_dataset, valid_dataset, test_dataset = get_datasets(block_size=block_size)
     
     if distributed:
         train_sampler = DistributedSampler(train_dataset)

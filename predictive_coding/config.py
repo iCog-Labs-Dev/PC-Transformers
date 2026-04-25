@@ -15,7 +15,6 @@ class GPTConfig:
         peak_learning_rate (float): Peak learning rate for learning rate scheduling.
         warmup_steps (int): Number of warmup steps for learning rate scheduling.
         T (int): Number of inference steps for predictive coding.
-        update_bias (bool): Whether to update bias terms during learning.
         num_heads (int): Number of attention heads.
         n_blocks (int): Number of transformer blocks.
         batch_size (int): Batch size for training/evaluation.
@@ -32,7 +31,6 @@ class GPTConfig:
     n_embed: int 
     dropout: float 
     T: int 
-    update_bias: bool 
     num_heads: int 
     n_blocks: int 
     batch_size: int

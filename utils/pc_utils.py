@@ -77,10 +77,6 @@ def step_embed(
     Returns (mu, mu_word, error).
     """
     word_layer: nn.Embedding = layer["word"]
-    
-    vocab_size = word_layer.weight.size(0)
-    if input_ids.max() >= vocab_size:
-        input_ids = torch.clamp(input_ids, max=vocab_size-1)
          
     mu_word = word_layer(input_ids)
     mu = mu_word 
@@ -109,7 +105,6 @@ def step_linear(
     inference_lr: float,
     clamp_value: float,
     energy_fn_name: str,
-    update_bias: bool,
     requires_update: bool,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module], 
@@ -161,7 +156,7 @@ def step_linear(
         delta_W = local_lr * torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
         delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
-        if layer.bias is not None and update_bias:
+        if layer.bias is not None:
             delta_b = local_lr * dE_dmu.mean(dim=(0, 1))
             layer.bias.data.add_(torch.clamp(delta_b, -0.01, 0.01))
 
@@ -179,7 +174,6 @@ def step_attn(
     inference_lr: float,
     clamp_value: float,
     energy_fn_name: str,
-    update_bias: bool,
     requires_update: bool,
     num_heads: int,
     n_embed: int,
@@ -328,21 +322,21 @@ def step_attn(
                 q_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_q
                 k_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_k
                 v_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_v
-                if update_bias:
-                    if q_proj.bias is not None:
-                        db_q = dE_dQ_raw[:, h].mean(dim=(0, 1))
-                        db_q = torch.clamp(db_q, -0.01, 0.01)
-                        q_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_q
-                    
-                    if k_proj.bias is not None:
-                        db_k = dE_dK_raw[:, h].mean(dim=(0, 1))
-                        db_k = torch.clamp(db_k, -0.01, 0.01)
-                        k_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_k
-                    
-                    if v_proj.bias is not None:
-                        db_v = dE_dV[:, h].mean(dim=(0, 1))
-                        db_v = torch.clamp(db_v, -0.01, 0.01)
-                        v_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_v
+                
+                if q_proj.bias is not None:
+                    db_q = dE_dQ_raw[:, h].mean(dim=(0, 1))
+                    db_q = torch.clamp(db_q, -0.01, 0.01)
+                    q_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_q
+                
+                if k_proj.bias is not None:
+                    db_k = dE_dK_raw[:, h].mean(dim=(0, 1))
+                    db_k = torch.clamp(db_k, -0.01, 0.01)
+                    k_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_k
+                
+                if v_proj.bias is not None:
+                    db_v = dE_dV[:, h].mean(dim=(0, 1))
+                    db_v = torch.clamp(db_v, -0.01, 0.01)
+                    v_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_v
     new_kv_cache = (K.detach(), V.detach()) if use_cache else None
     return x, mu, bu_err, new_kv_cache
 
@@ -368,8 +362,6 @@ def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t
     
 def ids_to_one_hot(input_ids: torch.Tensor, vocab_size: int) -> torch.Tensor:
     device = input_ids.device
-    if input_ids.max() >= vocab_size:
-        input_ids = torch.clamp(input_ids, max=vocab_size-1)
     return F.one_hot(input_ids, num_classes=vocab_size).float().to(device)
 
 def cleanup_memory():

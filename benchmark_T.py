@@ -45,7 +45,6 @@ def benchmark_T(T_values=[2, 3, 4, 5, 6, 8, 10], num_epochs=5):
             n_blocks = best_config["n_blocks"],  
             batch_size = best_config["batch_size"],
             num_epochs = num_epochs,
-            update_bias = best_config["update_bias"],
             internal_energy_fn_name = best_config["internal_energy_fn_name"],
             output_energy_fn_name = best_config["output_energy_fn_name"],
             combined_internal_weight = best_config["combined_internal_weight"],
@@ -61,7 +60,7 @@ def benchmark_T(T_values=[2, 3, 4, 5, 6, 8, 10], num_epochs=5):
             model = DDP(model, device_ids=[local_rank], output_device=local_rank)
         
         # Get data loaders
-        train_loader, valid_loader, _ = get_loaders(distributed=use_ddp)
+        train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_ddp)
         
         # Train for specified epochs
         train_energies = []

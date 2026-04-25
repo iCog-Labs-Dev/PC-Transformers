@@ -45,11 +45,6 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
         input_ids = batch["input_ids"].to(device)
         targets = batch["target_ids"].to(device)
 
-        # Clip targets to valid range before using them for loss calculation
-        if targets.max() >= vocab_size:
-            targets = torch.clamp(targets, max=vocab_size-1)
-       
-
         logits = model(targets, input_ids)
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
@@ -125,7 +120,6 @@ def main():
         n_blocks = best_config["n_blocks"],
         batch_size = best_config["batch_size"],
         num_epochs = best_config["num_epochs"], 
-        update_bias = best_config["update_bias"],
         internal_energy_fn_name=best_config["internal_energy_fn_name"],
         output_energy_fn_name=best_config["output_energy_fn_name"],
         combined_internal_weight=best_config["combined_internal_weight"],
@@ -139,7 +133,7 @@ def main():
     model = model.to(device)
     if use_ddp:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-    _, _, test_loader = get_loaders(distributed = use_ddp)
+    _, _, test_loader = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed = use_ddp)
 
     # Max batches can be set to limit evaluation, or None for full dataset
     start_time = time.time()

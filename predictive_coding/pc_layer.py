@@ -21,7 +21,6 @@ class PCLayer(nn.Module):
         T: int,
         lr: float,
         inference_lr: float,
-        update_bias: bool,
         energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
@@ -31,7 +30,6 @@ class PCLayer(nn.Module):
         self.T = T
         self.local_lr = lr
         self.inference_lr = inference_lr
-        self.update_bias = update_bias
         self.clamp_value = 3.0
         self.energy_fn_name = energy_fn_name 
         self.num_heads = num_heads
@@ -125,7 +123,6 @@ class PCLayer(nn.Module):
                 self.inference_lr,
                 self.clamp_value,
                 self.energy_fn_name,
-                self.update_bias,
                 requires_update,
                 self.num_heads,
                 self.n_embed,
@@ -154,7 +151,6 @@ class PCLayer(nn.Module):
                 self.inference_lr,
                 self.clamp_value, 
                 self.energy_fn_name, 
-                self.update_bias, 
                 requires_update,
                 td_err=td_err, 
                 layer_norm=layer_norm
@@ -193,13 +189,6 @@ class PCLayer(nn.Module):
         """
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
-            vocab_size = layer["word"].weight.size(0)
-            if input_ids.max() >= vocab_size:
-                input_ids = torch.clamp(input_ids, max=vocab_size-1)
-            
-            max_pos = layer["pos"].weight.size(0)
-            if position_ids.max() >= max_pos:
-                position_ids = torch.clamp(position_ids, max=max_pos-1)
             
             x_word = layer["word"].weight[input_ids] 
             x_pos = layer["pos"].weight[position_ids] 
