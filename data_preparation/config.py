@@ -13,6 +13,3 @@ test_path = data_dir / "test.csv"
 # Tokenizer parameters
 vocab_size = 1024
 special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
-
-# Training parameters
-max_len = 64   # sequence length 

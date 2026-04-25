@@ -18,7 +18,7 @@ from predictive_coding.config import GPTConfig
 from data_preparation.dataloader import get_loaders
 from model_architecture.pc_t_model import PCTransformer
 
-from data_preparation.config import vocab_size, max_len
+from data_preparation.config import vocab_size
 
 # Silence warnings and Optuna spam
 warnings.filterwarnings('ignore')
@@ -64,6 +64,7 @@ def define_search_space(trial):
         "n_embed": n_embed,
         "embed_mult": embed_mult,
         "T": trial.suggest_int("T", min_T, min_T + 2),
+        "block_size": trial.suggest_categorical("block_size", [32, 64, 128]),
         "batch_size": trial.suggest_categorical("batch_size", [8, 16]),
         "lr": trial.suggest_float("lr", 1e-5, 6e-5, log=True),
         "inference_lr": trial.suggest_float("inference_lr", 0.05, 0.20, log=True),
@@ -123,7 +124,7 @@ def create_model(params):
     
     config = GPTConfig(
         vocab_size=vocab_size,
-        block_size= max_len,
+        block_size= params["block_size"],
         lr=params["lr"],
         inference_lr=params["inference_lr"],
         peak_learning_rate=params["lr"],
@@ -145,7 +146,7 @@ def create_model(params):
 
     model = PCTransformer(config).to(device)
     model.register_all_lateral_weights() 
-    train_loader, valid_loader, _ = get_loaders(batch_size=params["batch_size"], distributed=False)
+    train_loader, valid_loader, _ = get_loaders(batch_size=params["batch_size"], block_size=params["block_size"], distributed=False)
     
     return model, config, train_loader, valid_loader, device
 
@@ -228,7 +229,7 @@ def run_phase2_trial(trial, best_params):
     tuning_params = {k: v for k, v in params.items() if k in ['lr', 'inference_lr', 'dropout']}
     print(f"[PPL Phase - Continuous Only] Trial {trial.number} | params: {tuning_params}")
     print(f"[PPL Phase - Fixed] Architecture: n_blocks={params['n_blocks']}, num_heads={params['num_heads']}, "
-          f"n_embed={params['n_embed']}, T={params['T']}")
+          f"n_embed={params['n_embed']}, T={params['T']}, block_size={params['block_size']}")
 
     try:
         model, config, train_loader, valid_loader, device = create_model(params)
@@ -311,7 +312,7 @@ def run_tuning_pipeline():
         print(f"Best Energy: {best_energy:.4f}")
         print(f"Corresponding PPL: {best_energy_ppl}")
         print(f"\nBest Architecture Parameters (FIXED for Phase 2):")
-        for key in ['n_blocks', 'num_heads', 'n_embed', 'embed_mult', 'T', 'batch_size']:
+        for key in ['n_blocks', 'num_heads', 'n_embed', 'embed_mult', 'T', 'batch_size', 'block_size']:
             print(f"  {key}: {best_params.get(key)}")
         print(f"\nContinuous Parameters to be fine-tuned in Phase 2:")
         for key in ['lr', 'inference_lr', 'dropout']:
@@ -323,7 +324,7 @@ def run_tuning_pipeline():
     print("PHASE 2: TPE optimizing Perplexity")
     print(f"{'='*60}")
     print("Strategy: Keep architecture/discrete parameters FIXED")
-    print("Only fine-tune: lr, , dropout")
+    print("Only fine-tune: lr, inference_lr, dropout")
     
     study_ppl = optuna.create_study(
         study_name="pc_transformer_phase2_ppl",

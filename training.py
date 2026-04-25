@@ -19,7 +19,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_device, cleanup_memory
 import json
 import logging
-from data_preparation.config import vocab_size, max_len
+from data_preparation.config import vocab_size
 
 """
 This script trains the predictive coding transformer model on the provided dataset.
@@ -149,7 +149,7 @@ def main():
    
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size = max_len,
+        block_size = best_config["block_size"],
         lr = best_config["lr"],
         inference_lr = best_config["inference_lr"],
         peak_learning_rate = best_config["peak_learning_rate"],
@@ -195,7 +195,7 @@ def main():
 
         model.module.register_all_lateral_weights()
 
-    train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, distributed=use_ddp)
+    train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_ddp)
     
     global_step = 0
     train_energies = []

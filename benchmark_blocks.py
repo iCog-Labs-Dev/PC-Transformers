@@ -60,7 +60,7 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
             model = DDP(model, device_ids=[local_rank], output_device=local_rank)
         
         # Get data loaders
-        train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, distributed=use_ddp)
+        train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_ddp)
         
         # Train for specified epochs
         train_energies = []
