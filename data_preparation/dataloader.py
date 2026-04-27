@@ -33,7 +33,7 @@ def get_loaders(batch_size: int, block_size: int, distributed: bool = False, str
         batch_size= batch_size, 
         sampler=train_sampler,
         shuffle=(train_sampler is None), 
-        drop_last=True
+        drop_last=False
     )
     valid_loader = DataLoader(
         valid_dataset, 
