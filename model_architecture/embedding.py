@@ -16,5 +16,11 @@ class Embedding_Layer(nn.Module):
             T=config.T,
             lr=config.lr,
             inference_lr=config.inference_lr,
-            energy_fn_name=config.internal_energy_fn_name,                    
+            energy_fn_name=config.internal_energy_fn_name, 
+            optimizer_name=config.optimizer_name,
+            optimizer_beta1=config.optimizer_beta1,
+            optimizer_beta2=config.optimizer_beta2,
+            optimizer_eps=config.optimizer_eps,
+            optimizer_momentum=config.optimizer_momentum,
+            optimizer_weight_decay=config.optimizer_weight_decay,
         )
