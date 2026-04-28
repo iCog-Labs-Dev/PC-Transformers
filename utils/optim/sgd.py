@@ -1,6 +1,5 @@
 import torch
 
-
 def step_update(param, update, eta):
     """
     Runs one step of SGD over a set of parameters given updates.
