@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import gc
 from typing import Optional, Tuple, Any
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
+from utils.optim.optim_utils import PCOptimizer
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
@@ -71,6 +72,7 @@ def step_embed(
     energy_fn_name: str,
     requires_update: bool,
     layer_norm: Optional[nn.Module] = None,
+    optimizer: Optional[PCOptimizer] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Predictive coding step for embedding layer.
@@ -88,9 +90,14 @@ def step_embed(
         with torch.no_grad():
             flat_input_ids = input_ids.reshape(-1)
             flat_update = error.reshape(-1, error.size(-1))
-            delta = torch.clamp(local_lr * flat_update, -0.01, 0.01)
-            word_layer.weight.data.index_add_(0, flat_input_ids, delta)
-            
+            if optimizer is not None:
+                update_word = torch.zeros_like(word_layer.weight)
+                update_word.index_add_(0, flat_input_ids, flat_update)
+                optimizer.step_param(word_layer.weight, update_word, local_lr, clamp_value=0.01)
+            else:
+                delta = torch.clamp(local_lr * flat_update, -0.01, 0.01)
+                word_layer.weight.data.index_add_(0, flat_input_ids, delta)
+
     return mu, mu_word, error
     
 def step_linear(
@@ -108,6 +115,7 @@ def step_linear(
     requires_update: bool,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module], 
+    optimizer: Optional[PCOptimizer] = None,
    ):
     """
     Predictive coding step for linear-like layers.
@@ -145,7 +153,7 @@ def step_linear(
     if lateral_conn is not None:
         x = x + inference_lr * lateral_conn.forward(x, error)
         if requires_update:
-            lateral_conn.update_weights(x.detach())
+            lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
     else:
         x = x + inference_lr * error 
 
@@ -153,12 +161,19 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        delta_W = local_lr * torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
-        delta_W = torch.clamp(delta_W, -0.01, 0.01)
-        layer.weight.data.add_(delta_W)
+        update_w = torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
+        if optimizer is not None:
+            optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
+        else:
+            delta_W = torch.clamp(local_lr * update_w, -0.01, 0.01)
+            layer.weight.data.add_(delta_W)
         if layer.bias is not None:
-            delta_b = local_lr * dE_dmu.mean(dim=(0, 1))
-            layer.bias.data.add_(torch.clamp(delta_b, -0.01, 0.01))
+            update_b = dE_dmu.mean(dim=(0, 1))
+            if optimizer is not None:
+                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
+            else:
+                delta_b = torch.clamp(local_lr * update_b, -0.01, 0.01)
+                layer.bias.data.add_(delta_b)
 
     return x, mu, bu_err
 
@@ -183,6 +198,7 @@ def step_attn(
     flash: bool = False,
     kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     use_cache: bool = False,
+    optimizer: Optional[PCOptimizer] = None,
     ):
     """
     Predictive coding step for attention using Sine-Cosine RoPE.
@@ -302,7 +318,7 @@ def step_attn(
         x = x + inference_lr * delta_x
         
         if requires_update:
-            lateral_conn.update_weights(x.detach())
+             lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=clamp_value)
     else:
         x = x + inference_lr * delta_x
 
@@ -310,33 +326,46 @@ def step_attn(
 
     if requires_update:
         with torch.no_grad():
+            update_q = torch.zeros_like(q_proj.weight)
+            update_k = torch.zeros_like(k_proj.weight)
+            update_v = torch.zeros_like(v_proj.weight)
+
+            update_b_q = torch.zeros_like(q_proj.bias) if q_proj.bias is not None else None
+            update_b_k = torch.zeros_like(k_proj.bias) if k_proj.bias is not None else None
+            update_b_v = torch.zeros_like(v_proj.bias) if v_proj.bias is not None else None
+
             for h in range(num_heads):
-                dW_q = torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h])
-                dW_k = torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h])
-                dW_v = torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h])
-                
-                dW_q = torch.clamp(dW_q, -0.01, 0.01)
-                dW_k = torch.clamp(dW_k, -0.01, 0.01)
-                dW_v = torch.clamp(dW_v, -0.01, 0.01)
-                
-                q_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_q
-                k_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_k
-                v_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_v
-                
-                if q_proj.bias is not None:
-                    db_q = dE_dQ_raw[:, h].mean(dim=(0, 1))
-                    db_q = torch.clamp(db_q, -0.01, 0.01)
-                    q_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_q
-                
-                if k_proj.bias is not None:
-                    db_k = dE_dK_raw[:, h].mean(dim=(0, 1))
-                    db_k = torch.clamp(db_k, -0.01, 0.01)
-                    k_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_k
-                
-                if v_proj.bias is not None:
-                    db_v = dE_dV[:, h].mean(dim=(0, 1))
-                    db_v = torch.clamp(db_v, -0.01, 0.01)
-                    v_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_v
+                update_q[:, h*head_dim:(h+1)*head_dim] = torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h])
+                update_k[:, h*head_dim:(h+1)*head_dim] = torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h])
+                update_v[:, h*head_dim:(h+1)*head_dim] = torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h])
+
+                if update_b_q is not None:
+                    update_b_q[h*head_dim:(h+1)*head_dim] = dE_dQ_raw[:, h].mean(dim=(0, 1))
+                if update_b_k is not None:
+                    update_b_k[h*head_dim:(h+1)*head_dim] = dE_dK_raw[:, h].mean(dim=(0, 1))
+                if update_b_v is not None:
+                    update_b_v[h*head_dim:(h+1)*head_dim] = dE_dV[:, h].mean(dim=(0, 1))
+
+            if optimizer is not None:
+                optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=0.01)
+                optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=0.01)
+                optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=0.01)
+                if update_b_q is not None:
+                    optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=0.01)
+                if update_b_k is not None:
+                    optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=0.01)
+                if update_b_v is not None:
+                    optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=0.01)
+            else:
+                q_proj.weight.data.add_(torch.clamp(local_lr * update_q, -0.01, 0.01))
+                k_proj.weight.data.add_(torch.clamp(local_lr * update_k, -0.01, 0.01))
+                v_proj.weight.data.add_(torch.clamp(local_lr * update_v, -0.01, 0.01))
+                if update_b_q is not None:
+                    q_proj.bias.data.add_(torch.clamp(local_lr * update_b_q, -0.01, 0.01))
+                if update_b_k is not None:
+                    k_proj.bias.data.add_(torch.clamp(local_lr * update_b_k, -0.01, 0.01))
+                if update_b_v is not None:
+                    v_proj.bias.data.add_(torch.clamp(local_lr * update_b_v, -0.01, 0.01))
     new_kv_cache = (K.detach(), V.detach()) if use_cache else None
     return x, mu, bu_err, new_kv_cache
 
