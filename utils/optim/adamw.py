@@ -37,7 +37,6 @@ def adamw_step(opt_params, theta, updates, eta=0.001, beta1=0.9, beta2=0.999, ep
     
     return (new_g1, new_g2, time_step), new_theta
 
-
 def adamw_init(theta):
     device = theta[0].device if len(theta) > 0 else torch.device("cpu")
     time_step = torch.tensor(0.0, device=device)
