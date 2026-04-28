@@ -49,6 +49,5 @@ class GPTConfig:
     optimizer_beta1: float = 0.9
     optimizer_beta2: float = 0.999
     optimizer_eps: float = 1e-8
-    optimizer_weight_bound: float = 0.0
     optimizer_momentum: float = 0.9
     optimizer_weight_decay: float = 0.01

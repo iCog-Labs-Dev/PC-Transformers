@@ -39,8 +39,6 @@ class PCOptimizer:
         beta1: float = 0.9,
         beta2: float = 0.999,
         eps: float = 1e-8,
-        sign_value: float = -1.0,
-        weight_bound: float = 0.0,
         momentum: float = 0.9,
         weight_decay: float = 0.01
     ) -> None:
@@ -48,8 +46,6 @@ class PCOptimizer:
         self.beta1 = float(beta1)
         self.beta2 = float(beta2)
         self.eps = float(eps)
-        self.sign_value = float(sign_value)
-        self.weight_bound = float(weight_bound)
         self.momentum = float(momentum)
         self.weight_decay = float(weight_decay)
         self._state: Dict[int, Any] = {}

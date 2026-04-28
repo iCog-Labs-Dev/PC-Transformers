@@ -176,7 +176,6 @@ def main():
         optimizer_beta1 = best_config["optimizer_beta1"],
         optimizer_beta2 = best_config["optimizer_beta2"],
         optimizer_eps = best_config["optimizer_eps"],
-        optimizer_weight_bound = best_config["optimizer_weight_bound"],
         optimizer_momentum=best_config.get("optimizer_momentum", 0.9),
         optimizer_weight_decay=weight_decay,
     
