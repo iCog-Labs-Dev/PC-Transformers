@@ -5,7 +5,6 @@ def step_update(param, update, momentum_buffer, eta, momentum):
     _param = param + eta * v_new
     return _param, v_new
 
-
 def sgd_momentum_step(opt_params, theta, updates, eta=0.001, momentum=0.9):
     time_step, momentum_buffers = opt_params
     time_step = time_step + 1
