@@ -59,18 +59,7 @@ class PCOptimizer:
         return init_fn([param])
 
     def _sync_state_device(self, state, param: torch.Tensor):
-        # if self.opt_name == "adam":
-        #     g1, g2, time_step = state
-        #     if g1[0].device != param.device:
-        #         g1 = [g.to(param.device) for g in g1]
-        #     if g2[0].device != param.device:
-        #         g2 = [g.to(param.device) for g in g2]
-        #     if time_step.device != param.device:
-        #         time_step = time_step.to(param.device)
-        #     return g1, g2, time_step
-        # if state.device != param.device:
-        #     return state.to(param.device)
-        # return state
+       
         if isinstance(state, torch.Tensor):
             #state is a single tensor -SGD time_step
                 if state.device != param.device:
@@ -138,9 +127,12 @@ class PCOptimizer:
             )
         elif self.opt_name == "adamw":
             step_fn = get_opt_step_fn(
-                self.opt_name, 
+                self.opt_name,
                 eta=lr,
-                weight_decay=self.weight_decay
+                beta1=self.beta1,
+                beta2=self.beta2,
+                eps=self.eps,
+                weight_decay=self.weight_decay,
             )
         else:
             step_fn = get_opt_step_fn(self.opt_name, eta=lr)
