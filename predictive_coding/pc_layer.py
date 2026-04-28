@@ -9,6 +9,7 @@ from utils.pc_utils import (
     step_attn,
     finalize_step,
 )
+from utils.optim.optim_utils import PCOptimizer
 from predictive_coding.lateral_connc import LateralConnections
 
 class PCLayer(nn.Module):
@@ -24,6 +25,12 @@ class PCLayer(nn.Module):
         energy_fn_name: str,
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
+        optimizer_name: str = "adam",
+        optimizer_beta1: float = 0.9,
+        optimizer_beta2: float = 0.999,
+        optimizer_eps: float = 1e-8,
+        optimizer_momentum: float = 0.9,
+        optimizer_weight_decay: float = 0.01,
     ):
         super().__init__()
         self.rope_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
@@ -31,9 +38,17 @@ class PCLayer(nn.Module):
         self.local_lr = lr
         self.inference_lr = inference_lr
         self.clamp_value = 3.0
-        self.energy_fn_name = energy_fn_name 
+        self.energy_fn_name = energy_fn_name
         self.num_heads = num_heads
         self.n_embed = n_embed
+        self.optimizer = PCOptimizer(
+            opt_name=optimizer_name,
+            beta1=optimizer_beta1,
+            beta2=optimizer_beta2,
+            eps=optimizer_eps,
+            momentum=optimizer_momentum,
+            weight_decay=optimizer_weight_decay,
+        )
         
         self.lateral_connections: Dict[str, LateralConnections] = {}
         
@@ -95,6 +110,7 @@ class PCLayer(nn.Module):
                 self.energy_fn_name,
                 requires_update,
                 layer_norm=layer_norm,
+                optimizer=self.optimizer,
             )            
             # store for later retrieval
             self._x_cache["embed"] = (mu_word)
@@ -132,6 +148,7 @@ class PCLayer(nn.Module):
                 flash=flash, 
                 kv_cache=kv_cache,  
                 use_cache=use_cache,
+                optimizer=self.optimizer,
             )
             # Store cache for retrieval
             if use_cache:
@@ -153,7 +170,8 @@ class PCLayer(nn.Module):
                 self.energy_fn_name, 
                 requires_update,
                 td_err=td_err, 
-                layer_norm=layer_norm
+                layer_norm=layer_norm,
+                optimizer=self.optimizer,
             )
             
         # cache and stats
