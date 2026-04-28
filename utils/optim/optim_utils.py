@@ -17,10 +17,7 @@ def get_opt_init_fn(opt="adam"):
 
 
 def get_opt_step_fn(opt="adam", **kwargs):
-    # return {
-    #     "adam": functools.partial(adam_step, **kwargs),
-    #     "sgd": functools.partial(sgd_step, **kwargs),
-    # }[opt]
+    
     if opt == "sgd_momentum":
         momentum = kwargs.pop("momentum", 0.9)
         return functools.partial(sgd_momentum_step, momentum=momentum, **kwargs)
