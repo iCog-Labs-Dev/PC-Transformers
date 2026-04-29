@@ -335,16 +335,16 @@ def step_attn(
             update_b_v = torch.zeros_like(v_proj.bias) if v_proj.bias is not None else None
 
             for h in range(num_heads):
-                update_q[:, h*head_dim:(h+1)*head_dim] = torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h])
-                update_k[:, h*head_dim:(h+1)*head_dim] = torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h])
-                update_v[:, h*head_dim:(h+1)*head_dim] = torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h])
+                update_q[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h]), -0.01, 0.01)
+                update_k[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h]), -0.01, 0.01)
+                update_v[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h]), -0.01, 0.01)
 
                 if update_b_q is not None:
-                    update_b_q[h*head_dim:(h+1)*head_dim] = dE_dQ_raw[:, h].mean(dim=(0, 1))
+                    update_b_q[h*head_dim:(h+1)*head_dim] = torch.clamp(dE_dQ_raw[:, h].mean(dim=(0, 1)), -0.01, 0.01)
                 if update_b_k is not None:
-                    update_b_k[h*head_dim:(h+1)*head_dim] = dE_dK_raw[:, h].mean(dim=(0, 1))
+                    update_b_k[h*head_dim:(h+1)*head_dim] = torch.clamp(dE_dK_raw[:, h].mean(dim=(0, 1)), -0.01, 0.01)
                 if update_b_v is not None:
-                    update_b_v[h*head_dim:(h+1)*head_dim] = dE_dV[:, h].mean(dim=(0, 1))
+                    update_b_v[h*head_dim:(h+1)*head_dim] = torch.clamp(dE_dV[:, h].mean(dim=(0, 1)), -0.01, 0.01)
 
             if optimizer is not None:
                 optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=0.01)
