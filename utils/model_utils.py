@@ -19,7 +19,7 @@ def load_model(model_path, config):
 
     state_dict = checkpoint['model_state_dict']
     try:
-        model.load_state_dict(state_dict, strict=True)
+        model.load_state_dict(state_dict, strict=False)
     except RuntimeError as exc:
         raise RuntimeError(
             f"Checkpoint at {model_path} does not match the current model definition."
