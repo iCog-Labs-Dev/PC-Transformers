@@ -6,17 +6,20 @@ from torch.utils.data import DataLoader, DistributedSampler
 from data_preparation.config import encoded_dir
 from data_preparation.dataset import EncodedDataset
 
-def get_datasets(block_size: int):
+def get_datasets(block_size: int, stride: int = 1):
     """ Load train, validation, and test datasets from encoded token ID files."""
-    train_dataset = EncodedDataset(encoded_dir/"train.pt", block_size)
-    valid_dataset = EncodedDataset(encoded_dir/"valid.pt", block_size)
-    test_dataset = EncodedDataset(encoded_dir/"test.pt", block_size)
+    train_dataset = EncodedDataset(encoded_dir/"train.pt", block_size, stride=stride)
+    valid_dataset = EncodedDataset(encoded_dir/"valid.pt", block_size, stride=stride)
+    test_dataset = EncodedDataset(encoded_dir/"test.pt", block_size, stride=stride)
     
     return train_dataset, valid_dataset, test_dataset
 
-def get_loaders(batch_size: int, block_size: int, distributed: bool = False):
+def get_loaders(batch_size: int, block_size: int, distributed: bool = False, stride: int = 1):
     """Wrap datasets into PyTorch DataLoaders with batching and shuffling."""
-    train_dataset, valid_dataset, test_dataset = get_datasets(block_size=block_size)
+    train_dataset, valid_dataset, test_dataset = get_datasets(
+        block_size=block_size,
+        stride=stride,
+    )
     
     if distributed:
         train_sampler = DistributedSampler(train_dataset)
