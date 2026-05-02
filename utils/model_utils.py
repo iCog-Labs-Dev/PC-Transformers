@@ -11,13 +11,20 @@ def load_model(model_path, config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
     checkpoint = torch.load(model_path, map_location=device, weights_only=True)
-    
-    if 'model_state' in checkpoint:
-        state_dict = checkpoint['model_state']
-    else:
-        state_dict = checkpoint
-        
-    model.load_state_dict(state_dict, strict=False)
+
+    if not isinstance(checkpoint, dict) or 'model_state_dict' not in checkpoint:
+        raise ValueError(
+            f"Checkpoint at {model_path} must contain a 'model_state_dict' entry."
+        )
+
+    state_dict = checkpoint['model_state_dict']
+    try:
+        model.load_state_dict(state_dict, strict=False)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"Checkpoint at {model_path} does not match the current model definition."
+        ) from exc
+
     print(f"Model loaded successfully from {model_path}")
     return model
 
