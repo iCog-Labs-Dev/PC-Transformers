@@ -11,6 +11,9 @@ sys.path.append(str(project_root))
 import torch
 import optuna
 from optuna.storages import JournalStorage, JournalFileStorage
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from utils.device_utils import setup_device
 
 from training import train
 from eval import evaluate
@@ -27,6 +30,23 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 logging.getLogger('optuna').setLevel(logging.WARNING)
 
 ENERGY_STABILITY_THRESHOLD = 300
+
+def get_rank():
+    """Return current process rank; defaults to 0 if distributed is not initialized."""
+    return dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+
+def is_rank0():
+    """Check if current process is rank 0 (main process)."""
+    return get_rank() == 0
+
+def broadcast_object(obj):
+    """Broadcast a Python object from rank 0 to all processes; returns the synced object."""
+    if not dist.is_available() or not dist.is_initialized():
+        return obj
+
+    obj_list = [obj]
+    dist.broadcast_object_list(obj_list, src=0)
+    return obj_list[0]
 
 def define_search_space(trial):
     """
@@ -99,7 +119,7 @@ def define_search_space_phase2(trial, best_params):
         "dropout": trial.suggest_float("dropout", max(0.0, dropout - 0.02), min(0.15, dropout + 0.02)),
     }
 
-def create_model(params):
+def create_model(params, device, use_ddp=False, local_rank=0):
     """
     Assembles the model, config, and data for a single trial.
 
@@ -120,8 +140,6 @@ def create_model(params):
             - device: The hardware device (CPU/GPU) being used
 
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
     config = GPTConfig(
         vocab_size=vocab_size,
         block_size= params["block_size"],
@@ -147,11 +165,98 @@ def create_model(params):
     model = PCTransformer(config)
     model.register_all_lateral_weights() 
     model = model.to(device)
-    train_loader, valid_loader, _ = get_loaders(batch_size=params["batch_size"], block_size=params["block_size"], distributed=False)
+
+    if use_ddp:
+        model = DDP(
+            model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=True,
+        )
+
+    train_loader, valid_loader, _ = get_loaders(
+        batch_size=params["batch_size"], 
+        block_size=params["block_size"], 
+        distributed=use_ddp
+    )
     
     return model, config, train_loader, valid_loader, device
 
-def run_phase1_trial(trial):
+def run_trial_with_params(params, trial_number, device, use_ddp, local_rank):
+    """Run one training/evaluation trial with given params; returns metrics or instability flag (DDP-aware)."""
+    model = None
+
+    try:
+        model, config, train_loader, valid_loader, device = create_model(
+            params,
+            device=device,
+            use_ddp=use_ddp,
+            local_rank=local_rank,
+        )
+
+        if hasattr(train_loader, "sampler") and isinstance(
+            train_loader.sampler,
+            torch.utils.data.DistributedSampler,
+        ):
+            train_loader.sampler.set_epoch(trial_number)
+
+        start_time = time.time()
+
+        train_energy, train_ppl, _ = train(
+            model,
+            train_loader,
+            config,
+            global_step=0,
+            device=device,
+            logger=None,
+        )
+
+        unstable = (
+            torch.isnan(torch.tensor(train_energy)).item()
+            or train_energy > ENERGY_STABILITY_THRESHOLD
+        )
+
+        if use_ddp:
+            unstable_tensor = torch.tensor(int(unstable), device=device)
+            dist.all_reduce(unstable_tensor, op=dist.ReduceOp.MAX)
+            unstable = bool(unstable_tensor.item())
+
+        if unstable:
+            return {
+                "unstable": True,
+                "train_energy": train_energy,
+            }
+
+        val_energy, val_ppl = evaluate(
+            model,
+            config,
+            valid_loader,
+            max_batches=10,
+            device=device,
+        )
+
+        if use_ddp:
+            metrics = torch.tensor([val_energy, val_ppl], dtype=torch.float32, device=device)
+            dist.all_reduce(metrics, op=dist.ReduceOp.SUM)
+            metrics /= dist.get_world_size()
+            val_energy, val_ppl = metrics.tolist()
+
+        return {
+            "unstable": False,
+            "train_energy": train_energy,
+            "train_ppl": train_ppl,
+            "val_energy": val_energy,
+            "val_ppl": val_ppl,
+            "time": time.time() - start_time,
+        }
+
+    finally:
+        if model is not None:
+            del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+def run_phase1_trial(trial, device, use_ddp, local_rank):
     """
     Phase 1 Trial Execution
     
@@ -166,49 +271,47 @@ def run_phase1_trial(trial):
     Returns:
         float: The validation energy score (Optuna attempts to minimize this).
     """
-    try:
-        params = define_search_space(trial)
-        print(f"[Energy Phase] Trial {trial.number} | params: {params}")
+    params = define_search_space(trial)
 
-        model, config, train_loader, valid_loader, device = create_model(params)
-        start_time = time.time()
+    if use_ddp:
+        broadcast_object({
+            "cmd": "trial",
+            "trial_number": trial.number,
+            "params": params,
+        })
 
-        try:
-            # We use the internal train function. If it explodes, it will return high energy or NaN.
-            train_energy, train_ppl, _ = train(model, train_loader, config, global_step=0, device=device, logger=None)
-            
-            if torch.isnan(torch.tensor(train_energy)) or train_energy > ENERGY_STABILITY_THRESHOLD:
-                reason = f"Unstable Energy: {train_energy}"
-                trial.set_user_attr("prune_reason", reason)
-                print(f"  {reason}")
-                raise optuna.TrialPruned()
+    print(f"[Energy Phase] Trial {trial.number} | params: {params}")
 
-            # Evaluate on a subset of validation data
-            val_energy, val_ppl = evaluate(model, config, valid_loader, max_batches=10, device=device)
+    result = run_trial_with_params(
+        params=params,
+        trial_number=trial.number,
+        device=device,
+        use_ddp=use_ddp,
+        local_rank=local_rank,
+    )
 
-        except Exception as e:
-            if not isinstance(e, optuna.TrialPruned):
-                reason = f"Execution failed: {e}"
-                trial.set_user_attr("prune_reason", reason)
-                print(f"  {reason}")
-            raise optuna.TrialPruned()
+    if result["unstable"]:
+        reason = f"Unstable Energy: {result['train_energy']}"
+        trial.set_user_attr("prune_reason", reason)
+        print(f"  {reason}")
+        raise optuna.TrialPruned()
+    
+    trial.set_user_attr("val_ppl", float(result["val_ppl"]))
+    trial.set_user_attr("time", result["time"])
 
-        total_time = time.time() - start_time
-        
-        trial.set_user_attr("val_ppl", float(val_ppl))
-        trial.set_user_attr("time", total_time)
-        for key, value in params.items():
-            trial.set_user_attr(f"param_{key}", value)
+    for key, value in params.items():
+        trial.set_user_attr(f"param_{key}", value)
 
-        print(f"Trial {trial.number} Complete | Val Energy={val_energy:.4f} | Val PPL={val_ppl:.4f} | Time={total_time:.1f}s")
-        return float(val_energy)
+    print(
+        f"Trial {trial.number} Complete | "
+        f"Val Energy={result['val_energy']:.4f} | "
+        f"Val PPL={result['val_ppl']:.4f} | "
+        f"Time={result['time']:.1f}s"
+    )
 
-    finally:
-        if 'model' in locals():
-            del model
-        torch.cuda.empty_cache()
+    return float(result["val_energy"])
 
-def run_phase2_trial(trial, best_params):
+def run_phase2_trial(trial, best_params, device, use_ddp, local_rank):
     """
     Phase 2 Trial Execution
     
@@ -227,49 +330,63 @@ def run_phase2_trial(trial, best_params):
     continuous_params = define_search_space_phase2(trial, best_params)
     params = {**best_params, **continuous_params}
     
+    if use_ddp:
+        broadcast_object({
+            "cmd": "trial",
+            "trial_number": trial.number,
+            "params": params,
+        })
+
     tuning_params = {k: v for k, v in params.items() if k in ['lr', 'inference_lr', 'dropout']}
     print(f"[PPL Phase - Continuous Only] Trial {trial.number} | params: {tuning_params}")
     print(f"[PPL Phase - Fixed] Architecture: n_blocks={params['n_blocks']}, num_heads={params['num_heads']}, "
           f"n_embed={params['n_embed']}, T={params['T']}, block_size={params['block_size']}")
 
-    try:
-        model, config, train_loader, valid_loader, device = create_model(params)
-        start_time = time.time()
+    result = run_trial_with_params(
+        params=params,
+        trial_number=trial.number,
+        device=device,
+        use_ddp=use_ddp,
+        local_rank=local_rank,
+    )
 
-        try:
-            train_energy, train_ppl, _ = train(model, train_loader, config, global_step=0, device=device, logger=None)
-            
-            if torch.isnan(torch.tensor(train_energy)) or train_energy > ENERGY_STABILITY_THRESHOLD:
-                reason = f"Unstable Energy during Phase 2: {train_energy}"
-                trial.set_user_attr("prune_reason", reason)
-                print(f"  {reason}")
-                raise optuna.TrialPruned()
+    if result["unstable"]:
+        reason = f"Unstable Energy during Phase 2: {result['train_energy']}"
+        trial.set_user_attr("prune_reason", reason)
+        print(f"  {reason}")
+        raise optuna.TrialPruned()
 
-            val_energy, val_ppl = evaluate(model, config, valid_loader, max_batches=10, device=device)
+    trial.set_user_attr("val_energy", float(result["val_energy"]))
+    trial.set_user_attr("time", result["time"])
 
-        except Exception as e:
-            if not isinstance(e, optuna.TrialPruned):
-                reason = f"Execution failed: {e}"
-                trial.set_user_attr("prune_reason", reason)
-                print(f"  {reason}")
-            raise optuna.TrialPruned()
+    for key, value in params.items():
+        trial.set_user_attr(f"param_{key}", value)
 
-        total_time = time.time() - start_time
-        
-        trial.set_user_attr("val_energy", float(val_energy))
-        trial.set_user_attr("time", total_time)
-        for key, value in params.items():
-            trial.set_user_attr(f"param_{key}", value)
+    print(
+        f"Trial {trial.number} Complete | "
+        f"Final Val PPL={result['val_ppl']:.4f} | "
+        f"Time={result['time']:.1f}s"
+    )
 
-        print(f"Trial {trial.number} Complete | Final Val PPL={val_ppl:.4f} | Time={total_time:.1f}s")
-        return float(val_ppl)
+    return float(result["val_ppl"])
 
-    finally:
-        if 'model' in locals():
-            del model
-        torch.cuda.empty_cache()
+def ddp_worker_loop(device, use_ddp, local_rank):
+    """Listen for broadcasted commands and execute trials until a stop signal is received."""
+    while True:
+        command = broadcast_object(None)
 
-def run_tuning_pipeline():
+        if command["cmd"] == "stop":
+            break
+
+        run_trial_with_params(
+            params=command["params"],
+            trial_number=command["trial_number"],
+            device=device,
+            use_ddp=use_ddp,
+            local_rank=local_rank,
+        )
+
+def run_tuning_pipeline(device, use_ddp, local_rank):
     """
     Coordinates the two-phase tuning pipeline
 
@@ -300,7 +417,17 @@ def run_tuning_pipeline():
         pruner=optuna.pruners.HyperbandPruner(min_resource=1, max_resource=15, reduction_factor=2)
     )
 
-    study_energy.optimize(run_phase1_trial, n_trials=50, n_jobs=1, show_progress_bar=False)
+    study_energy.optimize(
+        lambda trial: run_phase1_trial(
+            trial,
+            device=device,
+            use_ddp=use_ddp,
+            local_rank=local_rank,
+        ),
+        n_trials=50,
+        n_jobs=1,
+        show_progress_bar=False,
+    )
 
     if study_energy.best_trial:
         best_energy = study_energy.best_value
@@ -319,6 +446,8 @@ def run_tuning_pipeline():
         for key in ['lr', 'inference_lr', 'dropout']:
             print(f"  {key}: {best_params.get(key)}")
     else:
+        if use_ddp:
+            broadcast_object({"cmd": "stop"})
         return None
 
     print(f"\n{'='*60}")
@@ -345,7 +474,13 @@ def run_tuning_pipeline():
     print(f"Resuming with {len(study_ppl.trials)} previous Phase 2 trials")
 
     def phase2_trial_wrapper(trial):
-        return run_phase2_trial(trial, best_params)
+        return run_phase2_trial(
+            trial,
+            best_params,
+            device=device,
+            use_ddp=use_ddp,
+            local_rank=local_rank,
+        )
 
     study_ppl.optimize(phase2_trial_wrapper, n_trials=50, n_jobs=1, show_progress_bar=False)
 
@@ -388,7 +523,10 @@ def run_tuning_pipeline():
                 f.write(f"{key} = {value}\n")
         
         print(f"\n✓ Best hyperparameters saved to: tuning/best_hyperparameters.txt")
-        
+       
+        if use_ddp:
+            broadcast_object({"cmd": "stop"})
+
         return {
             "phase1_best_energy": best_energy,
             "phase1_best_ppl": best_energy_ppl,
@@ -397,9 +535,27 @@ def run_tuning_pipeline():
             "phase2_parameters": final_params,
             "improvement_pct": ((best_energy_ppl - best_ppl) / best_energy_ppl * 100) if isinstance(best_energy_ppl, float) and best_energy_ppl > 0 else 0
         }
+
+    if use_ddp:
+        broadcast_object({"cmd": "stop"})
     return None
 
 def main():
+    local_rank, device, use_ddp = setup_device()
+
+    if use_ddp and not dist.is_initialized():
+        dist.init_process_group(backend="nccl")
+
+    rank = get_rank()
+
+    if use_ddp and not is_rank0():
+        try:
+            ddp_worker_loop(device, use_ddp, local_rank)
+        finally:
+            if dist.is_initialized():
+                dist.destroy_process_group()
+        return
+
     print("PC TRANSFORMER - TWO-PHASE HYPERPARAMETER TUNING")
     print("="*60)
     print("PHASE 1: Find stable architecture (minimize Energy)")
@@ -407,7 +563,7 @@ def main():
     print("="*60)
 
     try:
-        results = run_tuning_pipeline()
+        results = run_tuning_pipeline(device, use_ddp, local_rank)
         if results:
             print(f"\n{'='*60}")
             print("TUNING COMPLETED SUCCESSFULLY")
@@ -428,6 +584,9 @@ def main():
         print(f"Error during tuning: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        if use_ddp and dist.is_initialized():
+            dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()
