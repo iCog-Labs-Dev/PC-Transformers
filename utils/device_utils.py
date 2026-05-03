@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from typing import List, Callable, Any, Optional
 import os
 import gc
@@ -91,3 +92,30 @@ def setup_device():
         device = torch.device("cpu")
         ddp = False
     return local_rank, device, ddp
+
+def sync_pc_weights(model):
+    """
+    Manually average PC-updated weights across DDP ranks.
+
+    Needed because this model updates parameters directly during forward,
+    so DDP gradient hooks are bypassed.
+    """
+    if not dist.is_available() or not dist.is_initialized():
+        return
+
+    world_size = dist.get_world_size()
+    if world_size == 1:
+        return
+
+    base_model = model.module if hasattr(model, "module") else model
+
+    with torch.no_grad():
+        for name, param in base_model.named_parameters():
+            if not torch.is_floating_point(param):
+                continue
+
+            dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+            param.data.div_(world_size)
+
+            if name.endswith("W_lateral"):
+                param.data.copy_(F.normalize(param.data, p=2, dim=1))

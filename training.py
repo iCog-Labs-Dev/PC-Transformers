@@ -16,7 +16,7 @@ from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from utils.device_utils import setup_device, cleanup_memory
+from utils.device_utils import setup_device, cleanup_memory, sync_pc_weights
 import json
 import logging
 from data_preparation.config import vocab_size
@@ -64,6 +64,9 @@ def train(model, dataloader, config, global_step, device, logger):
         global_step += 1
             
         logits = model(target_ids, input_ids)
+
+        sync_pc_weights(model)
+
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             target_ids.view(-1),
@@ -196,13 +199,17 @@ def main():
         param_logger.info("Saving the hyperparameters configurations:")
         param_logger.info(config_json)
 
-    model = PCTransformer(config).to(device)
-    if use_ddp:
-        model = DDP(model, device_ids=[local_rank], 
-                    output_device=local_rank, 
-                    find_unused_parameters=True)
+    model = PCTransformer(config)
+    model.register_all_lateral_weights()
+    model = model.to(device)
 
-        model.module.register_all_lateral_weights()
+    if use_ddp:
+        model = DDP(
+            model, 
+            device_ids=[local_rank], 
+            output_device=local_rank, 
+            find_unused_parameters=True
+        )
 
     train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_ddp)
     
