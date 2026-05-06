@@ -46,6 +46,7 @@ class GPTConfig:
     use_flash_attention: bool
     alpha: float
     optimizer_name: str = "adam"
+    output_optimizer_name: str = "adam"
     optimizer_beta1: float = 0.9
     optimizer_beta2: float = 0.999
     optimizer_eps: float = 1e-8
