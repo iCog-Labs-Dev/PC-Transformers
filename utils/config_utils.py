@@ -13,11 +13,12 @@ def load_best_config():
         "lr", "inference_lr", "batch_size", "num_epochs", "internal_energy_fn_name",
         "output_energy_fn_name", "combined_internal_weight",
         "combined_output_weight", "use_flash_attention",
-        "optimizer_name", "optimizer_beta1", "optimizer_beta2", "optimizer_eps"
+        "optimizer_name", "optimizer_beta1", "optimizer_beta2", "optimizer_eps",
+        "optimizer_weight_decay", "optimizer_momentum"
     }
 
     fallback_values = {
-        "block_size": 64,
+       "block_size": 64,
         "peak_learning_rate": 0.009606017304857476,
         "warmup_steps": 59,
         "n_embed": 512,
@@ -38,7 +39,9 @@ def load_best_config():
         "optimizer_name": "adam",
         "optimizer_beta1": 0.9,
         "optimizer_beta2": 0.999,
-        "optimizer_eps": 1e-8
+        "optimizer_eps": 1e-8,
+        "optimizer_weight_decay": 0.1,
+        "optimizer_momentum": 0.9, #
     }
 
     config = {}
