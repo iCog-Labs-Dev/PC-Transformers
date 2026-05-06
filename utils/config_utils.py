@@ -13,7 +13,7 @@ def load_best_config():
         "lr", "inference_lr", "batch_size", "num_epochs", "internal_energy_fn_name",
         "output_energy_fn_name", "combined_internal_weight",
         "combined_output_weight", "use_flash_attention",
-        "optimizer_name", "optimizer_beta1", "optimizer_beta2", "optimizer_eps",
+        "optimizer_name", "output_optimizer_name", "optimizer_beta1", "optimizer_beta2", "optimizer_eps",
         "optimizer_weight_decay", "optimizer_momentum"
     }
 
@@ -37,6 +37,7 @@ def load_best_config():
         "combined_output_weight": 0.12200444202569516,
         "use_flash_attention": False,
         "optimizer_name": "sgd",
+        "output_optimizer_name": "adam",
         "optimizer_beta1": 0.9,
         "optimizer_beta2": 0.999,
         "optimizer_eps": 1e-8,
