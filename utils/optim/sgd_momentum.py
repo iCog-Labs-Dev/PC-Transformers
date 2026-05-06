@@ -1,7 +1,7 @@
 import torch
 
 def step_update(param, update, momentum_buffer, eta, momentum):
-    v_new = momentum * momentum_buffer + update
+    v_new = momentum * momentum_buffer + (1 - momentum) * update
     _param = param + eta * v_new
     return _param, v_new
 
