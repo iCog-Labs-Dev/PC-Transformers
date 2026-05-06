@@ -169,6 +169,7 @@ def main():
         use_flash_attention=best_config["use_flash_attention"],
         alpha = best_config["alpha"],
         optimizer_name = best_config["optimizer_name"],
+        output_optimizer_name = best_config.get("output_optimizer_name", "adam"),
         optimizer_beta1 = best_config["optimizer_beta1"],
         optimizer_beta2 = best_config["optimizer_beta2"],
         optimizer_eps = best_config["optimizer_eps"],
