@@ -146,11 +146,7 @@ def main():
         root_logger.addHandler(file_h)
 
     logger = logging.getLogger(__name__)
-    weight_decay = (
-        best_config.get("optimizer_weight_decay_pc", 0.001)
-        if best_config["optimizer_name"] == "adamw"
-        else best_config.get("optimizer_weight_decay", 0.01)
-    )
+    weight_decay = best_config.get("optimizer_weight_decay", 0.1)
    
     config = GPTConfig(
         vocab_size = vocab_size,
@@ -177,7 +173,7 @@ def main():
         optimizer_beta2 = best_config["optimizer_beta2"],
         optimizer_eps = best_config["optimizer_eps"],
         optimizer_momentum=best_config.get("optimizer_momentum", 0.9),
-        optimizer_weight_decay=weight_decay,
+        optimizer_weight_decay=best_config.get("optimizer_weight_decay", 0.1),
     
     )
     
