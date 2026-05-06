@@ -21,6 +21,10 @@ class GPTConfig:
         num_epochs (int): Number of training epochs.
         energy_fn_name (str): Name of the energy function to use for error computation.
         use_flash_attention (bool): Whether to use FlashAttention.
+        optimizer_name (str): Optimizer to use for PC weight updates (adam or sgd).
+        optimizer_beta1 (float): Adam beta1 coefficient.
+        optimizer_beta2 (float): Adam beta2 coefficient.
+        optimizer_eps (float): Adam epsilon.
     """
     vocab_size: int
     block_size: int
@@ -41,3 +45,10 @@ class GPTConfig:
     combined_output_weight: float
     use_flash_attention: bool
     alpha: float
+    optimizer_name: str = "adam"
+    output_optimizer_name: str = "adam"
+    optimizer_beta1: float = 0.9
+    optimizer_beta2: float = 0.999
+    optimizer_eps: float = 1e-8
+    optimizer_momentum: float = 0.9
+    optimizer_weight_decay: float = 0.01

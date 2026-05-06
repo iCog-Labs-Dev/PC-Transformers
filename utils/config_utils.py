@@ -12,28 +12,37 @@ def load_best_config():
         "dropout", "T", "num_heads", "n_blocks", "alpha",
         "lr", "inference_lr", "batch_size", "num_epochs", "internal_energy_fn_name",
         "output_energy_fn_name", "combined_internal_weight",
-        "combined_output_weight", "use_flash_attention"
+        "combined_output_weight", "use_flash_attention",
+        "optimizer_name", "output_optimizer_name", "optimizer_beta1", "optimizer_beta2", "optimizer_eps",
+        "optimizer_weight_decay", "optimizer_momentum"
     }
 
     fallback_values = {
-        "block_size": 64,
-        "peak_learning_rate": 0.009606017304857476,
-        "warmup_steps": 59,
-        "n_embed": 512,
+       "block_size": 208,
+        "peak_learning_rate": 0.003223786832283688,
+        "warmup_steps": 369,
+        "n_embed": 160,
         "dropout": 0.46876145412214615,
         "T": 2,
-        "num_heads": 32,
-        "n_blocks": 12,
+        "num_heads": 10,
+        "n_blocks": 3,
         "alpha": 0.5,
-        "lr": 0.0009606017304857476,
+        "lr": 0.003223786832283688,
         "inference_lr": 0.096,
         "batch_size": 8,
-        "num_epochs": 10,
+        "num_epochs": 5,
         "internal_energy_fn_name": "pc_e",
         "output_energy_fn_name": "pc_e",
         "combined_internal_weight": 0.8779955579743048,
         "combined_output_weight": 0.12200444202569516,
-        "use_flash_attention": False
+        "use_flash_attention": False,
+        "optimizer_name": "sgd",
+        "output_optimizer_name": "adam",
+        "optimizer_beta1": 0.9,
+        "optimizer_beta2": 0.999,
+        "optimizer_eps": 1e-8,
+        "optimizer_weight_decay": 0.01,
+        "optimizer_momentum": 0.9, #for sgd_momentum
     }
 
     config = {}

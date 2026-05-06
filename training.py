@@ -146,6 +146,7 @@ def main():
         root_logger.addHandler(file_h)
 
     logger = logging.getLogger(__name__)
+    weight_decay = best_config.get("optimizer_weight_decay", 0.1)
    
     config = GPTConfig(
         vocab_size = vocab_size,
@@ -166,7 +167,15 @@ def main():
         combined_internal_weight=best_config["combined_internal_weight"],
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
-        alpha = best_config["alpha"]
+        alpha = best_config["alpha"],
+        optimizer_name = best_config["optimizer_name"],
+        output_optimizer_name = best_config.get("output_optimizer_name", "adam"),
+        optimizer_beta1 = best_config["optimizer_beta1"],
+        optimizer_beta2 = best_config["optimizer_beta2"],
+        optimizer_eps = best_config["optimizer_eps"],
+        optimizer_momentum=best_config.get("optimizer_momentum", 0.9),
+        optimizer_weight_decay=best_config.get("optimizer_weight_decay", 0.1),
+    
     )
     
     # Create a separate logger for hyperparameters
