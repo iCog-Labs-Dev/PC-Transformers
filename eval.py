@@ -127,9 +127,12 @@ def main():
         use_flash_attention=best_config["use_flash_attention"],
         alpha = best_config["alpha"],
         optimizer_name = best_config["optimizer_name"],
+        output_optimizer_name = best_config.get("output_optimizer_name", "adam"),
         optimizer_beta1 = best_config["optimizer_beta1"],
         optimizer_beta2 = best_config["optimizer_beta2"],
         optimizer_eps = best_config["optimizer_eps"],
+        optimizer_momentum = best_config.get("optimizer_momentum", 0.9),
+        optimizer_weight_decay = best_config.get("optimizer_weight_decay", 0.1),
     )
   
     model_path = "checkpoints/final_model.pt"
