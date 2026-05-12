@@ -3,16 +3,13 @@ from pathlib import Path
 from torch.utils.data import Dataset
 
 class EncodedDataset(Dataset):
-<<<<<<< HEAD
-    """ Dataset that splits token ID tensors into input-target sequences for next-token prediction using sliding window."""
-    def __init__(self, file_path, block_size, stride=None):
+
+    """ Dataset that splits token ID tensors into input-target sequences for next-token prediction, with padding."""
+    def __init__(self, file_path, block_size, stride=None, pad_token_id=3):
+
         if block_size < 1:
             raise ValueError("block_size must be at least 1.")
 
-=======
-    """ Dataset that splits token ID tensors into input-target sequences for next-token prediction, with padding."""
-    def __init__(self, file_path, block_size, pad_token_id=3):
->>>>>>> a53d33d (Optimize data loading: Implement sequence padding and disable drop_last to prevent data loss on small datasets.)
         self.block_size = block_size
         self.stride = 1 if stride is None else stride
         if self.stride < 1:
