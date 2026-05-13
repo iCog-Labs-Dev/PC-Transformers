@@ -11,5 +11,12 @@ valid_path = data_dir / "validation.csv"
 test_path = data_dir / "test.csv"
 
 # Tokenizer parameters
-vocab_size = 1024
-special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
+vocab_size = 11707
+
+# [MASK] exists only for BERT masked language modeling.
+# special_tokens = ["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
+special_tokens = ["[UNK]", "[BOS]", "[EOS]", "[PAD]"]
+
+# Training parameters
+batch_size = 8
+max_len = 208   # sequence length 
