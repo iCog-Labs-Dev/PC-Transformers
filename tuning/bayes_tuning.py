@@ -25,7 +25,7 @@ Usage:  torchrun --nproc-per-node=<NUM_GPU> tuning/bayes_tuning.py
 
 """
 
-def run_tuning(n_trials=30, study_name="bayesian_tuning", local_rank=0, device=None, flash=False, enable_batch_logging=False):
+def run_tuning(n_trials=5, study_name="bayesian_tuning", local_rank=0, device=None, flash=False, enable_batch_logging=False):
     """Run clean dynamic hyperparameter tuning"""
     storage_url = f"sqlite:///tuning/{study_name}.db"
     if local_rank == 0:

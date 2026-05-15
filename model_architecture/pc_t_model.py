@@ -148,6 +148,9 @@ class PCTransformer(nn.Module):
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
 
         for t in range(self.config.T):
+            # Only update weights on the final time step to prevent destructive learning
+            should_update_weights = (t == self.config.T - 1)
+
             # Execute output layer
             td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
             execute_parallel(
@@ -158,7 +161,7 @@ class PCTransformer(nn.Module):
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=should_update_weights,
                 td_err= td_mlp2,
                 layer=self.output.output,
                 layer_norm=None,
@@ -166,7 +169,6 @@ class PCTransformer(nn.Module):
                 input_ids=None,
                 position_ids=None,
                 flash=False
-
             )
 
             # Iterate through blocks in reverse order for parallel execution
@@ -192,7 +194,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc2",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=should_update_weights,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
                     layer_norm=layer_norm2,
@@ -200,7 +202,6 @@ class PCTransformer(nn.Module):
                     input_ids=None,
                     position_ids=None,
                     flash=False
-
                 )
                 td_attn_op = block.attn.pc_output.get_td_err("linear_attn") if t > 0 else None
 
@@ -213,7 +214,7 @@ class PCTransformer(nn.Module):
                     layer_type="fc1",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=should_update_weights,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
                     layer_norm=block.ln1, 
@@ -221,7 +222,6 @@ class PCTransformer(nn.Module):
                     input_ids=None,
                     position_ids=None,
                     flash=False
-
                 )
                 
                 if idx == 0:
@@ -241,7 +241,7 @@ class PCTransformer(nn.Module):
                     layer_type="linear_attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=should_update_weights,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
                     layer_norm=block.ln1,
@@ -249,7 +249,6 @@ class PCTransformer(nn.Module):
                     input_ids=None,
                     position_ids=None,
                     flash=False
-
                 )
 
                 # Execute attention QKV
@@ -261,7 +260,7 @@ class PCTransformer(nn.Module):
                     layer_type="attn",
                     t=t,
                     T=self.config.T,
-                    requires_update=True,
+                    requires_update=should_update_weights,
                     td_err= td_embed,
                     layer = None,
                     layer_norm=block.ln2,
@@ -287,7 +286,7 @@ class PCTransformer(nn.Module):
                 layer_type="embed",
                 t=t,
                 T=self.config.T,
-                requires_update=True,
+                requires_update=should_update_weights,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
                 layer_norm= block.ln2,
@@ -301,4 +300,3 @@ class PCTransformer(nn.Module):
             synchronize_execution(use_cuda, streams_or_futures)
         logits = self.output.pc_layer.get_mu("linear_output")
         return logits
-    

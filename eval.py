@@ -32,11 +32,11 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
     
-    if local_rank == 0:
-        if max_batches is None:
-            print(f"Evaluating on the full test set...")
-        else:
-            print(f"Evaluating on up to {max_batches} batches...")
+    # if local_rank == 0:
+    #     if max_batches is None:
+    #         print(f"Evaluating on the full test set...")
+    #     else:
+    #         print(f"Evaluating on up to {max_batches} batches...")
    
     for batch_idx, batch in enumerate(dataloader):
         if max_batches is not None and batch_idx >= max_batches:
@@ -86,16 +86,16 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
         batch_count += 1
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
-        if not dist.is_initialized() or dist.get_rank() == 0:
-            print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
+        # if not dist.is_initialized() or dist.get_rank() == 0:
+            # print(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
    
     avg_energy = total_energy / batch_count if batch_count > 0 else 0.0
     avg_ce_loss = total_ce_loss / batch_count if batch_count > 0 else 0.0
     avg_perplexity = math.exp(avg_ce_loss) if avg_ce_loss < 100 else float("inf")
   
-    if not dist.is_initialized() or dist.get_rank() == 0:
-        print(f"Total Batches Processed: {batch_idx + 1}")
-        print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
+    # if not dist.is_initialized() or dist.get_rank() == 0:
+        # print(f"Total Batches Processed: {batch_idx + 1}")
+        # print(f"Avg CE Loss: {avg_ce_loss:.4f} | Avg Energy: {avg_energy:.4f} | Avg Perplexity: {avg_perplexity:.4f}")
 
     return avg_energy, avg_perplexity
 

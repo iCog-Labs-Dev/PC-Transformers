@@ -111,7 +111,8 @@ def train(model, dataloader, config, global_step, device, logger):
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
-        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 10 == 0:
+        # if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 1 == 0:
+        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) == 1 :
             if logger:
                 logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
             else:
@@ -240,9 +241,9 @@ def main():
         val_perplexities.append(val_perplexity)
 
         if rank == 0:
-            logger.info(f"Epoch {epoch + 1}/{config.num_epochs} | "
-                  f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
-                  f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
+            # logger.info(f"Epoch {epoch + 1}/{config.num_epochs} | "
+                #   f"Train Energy: {train_energy:.4f} | Train Perplexity: {train_perplexity:.4f} | "
+                #   f"Val Energy: {val_energy:.4f} | Val Perplexity: {val_perplexity:.4f}")
 
             if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
                 os.makedirs("checkpoints", exist_ok=True)

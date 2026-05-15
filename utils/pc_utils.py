@@ -108,6 +108,7 @@ def step_linear(
     local_lr: float,
     inference_lr: float,
     clamp_value: float,
+    # clamp_W: float,
     energy_fn_name: str,
     update_bias: bool,
     requires_update: bool,
@@ -158,7 +159,10 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        delta_W = local_lr * torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
+        B, S, _ = dE_dmu.shape  # <-- FIX: Extract batch and sequence length
+        
+        # <-- FIX: Divide local_lr by (B * S) to convert sum to mean
+        delta_W = (local_lr / (B * S)) * torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
         delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
         if layer.bias is not None and update_bias:
@@ -317,9 +321,10 @@ def step_attn(
     if requires_update:
         with torch.no_grad():
             for h in range(num_heads):
-                dW_q = torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h])
-                dW_k = torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h])
-                dW_v = torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h])
+                # <-- FIX: Divide by (B * S) to prevent exploding gradients
+                dW_q = torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h]) / (B * S)
+                dW_k = torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h]) / (B * S)
+                dW_v = torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h]) / (B * S)
                 
                 dW_q = torch.clamp(dW_q, -0.01, 0.01)
                 dW_k = torch.clamp(dW_k, -0.01, 0.01)
