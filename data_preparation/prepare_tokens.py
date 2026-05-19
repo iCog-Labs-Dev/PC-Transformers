@@ -25,7 +25,7 @@ def build_tokenizer():
 
     trainer = BpeTrainer(
         special_tokens = special_tokens,
-        vocab_size = vocab_size + len(special_tokens)
+        vocab_size = vocab_size 
         )
 
     paths = [train_path, valid_path, test_path]

@@ -12,5 +12,5 @@ test_path = data_dir / "test.csv"
 
 # Tokenizer parameters
 
-vocab_size = 11707 # Optimized subword-centric vocabulary size after GPT2
+vocab_size = 11711 # Optimized subword-centric vocabulary size after GPT2
 special_tokens = ["[UNK]", "[BOS]", "[EOS]", "[PAD]"]
