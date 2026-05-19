@@ -55,7 +55,7 @@ class PCLayer(nn.Module):
         self._x_cache: Dict[str, torch.Tensor] = {}
         self._mu_cache: Dict[str, torch.Tensor] = {}
         self._error_cache: Dict[str, torch.Tensor] = {}
-        self._energy = 0.0
+        self._energy_scalar = 0.0
         self._errors = []
     
     def register_lateral(self, layer_type: str, size: int):
@@ -121,7 +121,7 @@ class PCLayer(nn.Module):
             # compute energy
             error = target_activity - mu
             energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-            self._energy += energy
+            self._energy_scalar = energy  # overwrite each step; only the last T-step survives
             self._errors.extend(step_errors)
             return mu_word
         
@@ -181,7 +181,7 @@ class PCLayer(nn.Module):
         
         error = target_activity - mu
         energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-        self._energy += energy
+        self._energy_scalar = energy  # overwrite each step; only the last T-step survives
         self._errors.extend(step_errors)
 
         # update x cache
@@ -244,18 +244,22 @@ class PCLayer(nn.Module):
         return self._error_cache.get(layer_type, None)
 
     def get_energy(self) -> Optional[float]:
-        """Get the accumulated energy for the layer."""
-        return float(self._energy)
+        """Get the energy from the final inference step (T) for the layer."""
+        return float(self._energy_scalar)
 
     def clear_energy(self):
         """Clear the stored energy and cached states for the layer."""
-        self._energy = 0.0
+        self._energy_scalar = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
         
     def get_errors(self) -> list:
-        """Get the list of error values accumulated during inference."""
-        return self._errors
+        """Get the errors from the most recent converged iteration."""
+        # Each step can contribute multiple error entries, so we find the last unique 'step'
+        if not self._errors:
+            return []
+        last_step_val = self._errors[-1]["step"]
+        return [err for err in self._errors if err["step"] == last_step_val]
 
     def clear_errors(self):
         """Clear the stored errors for the layer."""

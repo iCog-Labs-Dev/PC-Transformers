@@ -25,7 +25,7 @@ def build_tokenizer():
 
     trainer = BpeTrainer(
         special_tokens = special_tokens,
-        vocab_size = vocab_size
+        vocab_size = vocab_size 
         )
 
     paths = [train_path, valid_path, test_path]
@@ -34,7 +34,8 @@ def build_tokenizer():
             raise FileNotFoundError(f"Dataset file not found at: {path}")
 
     start_time = time.perf_counter()
-    tokenizer.train(files=[str(train_path)], trainer=trainer)
+    paths = [train_path, valid_path, test_path]
+    tokenizer.train(files=[str(p) for p in paths], trainer=trainer)
     elapsed = time.perf_counter() - start_time
 
     tokenizer.save(str(tokenizer_path))

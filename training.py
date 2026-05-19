@@ -37,7 +37,7 @@ def train(model, dataloader, config, global_step, device, logger):
 
     base_model = model.module if hasattr(model, 'module') else model
     output_pc_layer = base_model.output.pc_layer
-    
+        
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
@@ -67,7 +67,7 @@ def train(model, dataloader, config, global_step, device, logger):
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             target_ids.view(-1),
-            ignore_index=0
+            ignore_index=3  # 3 == [PAD] token ID, matches pad_token_id in dataset.py
         )
         total_ce_loss += ce_loss.item()
 

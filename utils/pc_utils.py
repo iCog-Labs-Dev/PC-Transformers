@@ -254,7 +254,8 @@ def step_attn(
     mu = mu_heads.transpose(1, 2).contiguous().view(B, S, E)
     bu_err = target - mu
     
-    error = bu_err - td_err if td_err is not None else bu_err  
+    # deleted to insert the delta_x after the for loop below
+    # error = bu_err - td_err if td_err is not None else bu_err  
      
     scale = 1.0 / (head_dim ** 0.5)
 
@@ -312,7 +313,10 @@ def step_attn(
         delta_v = torch.einsum('bsh,eh->bse', dv, wv)
         
         delta_x += delta_q + delta_k + delta_v
-            
+
+    # Update delta_x with TD error if provided
+    delta_x = delta_x - td_err if td_err is not None else delta_x
+
     if lateral_conn is not None:
         delta_x = lateral_conn.forward(x, delta_x)
         x = x + inference_lr * delta_x
@@ -385,7 +389,7 @@ def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t
     device = mu.device
     target = target.to(device)
     error = error.to(device)
-    energy = float(energy_fn(mu, target, energy_fn_name).mean().item())
+    energy = float(energy_fn(mu, target, energy_fn_name).sum().item())
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     
