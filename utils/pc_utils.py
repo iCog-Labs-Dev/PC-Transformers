@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import gc
 from typing import Optional, Tuple, Any
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
+import logging
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
@@ -136,9 +137,10 @@ def step_linear(
     if layer_type=="linear_output":
         probs = F.softmax(mu, dim=-1) 
         bu_err= target - probs
-        dE_dp= bu_err
-        norm_term = (dE_dp * probs).sum(dim=-1, keepdim=True)
-        dE_dmu = probs * (dE_dp - norm_term)
+        # dE_dp= bu_err
+        # norm_term = (dE_dp * probs).sum(dim=-1, keepdim=True)
+        # dE_dmu = probs * (dE_dp - norm_term)
+        dE_dmu = bu_err
         error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
 
     else:    
@@ -159,9 +161,9 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        B, S, _ = dE_dmu.shape  # <-- FIX: Extract batch and sequence length
+        B, S, _ = dE_dmu.shape  #: Extract batch and sequence length
         
-        # <-- FIX: Divide local_lr by (B * S) to convert sum to mean
+        #  Divide local_lr by (B * S) to convert sum to mean
         delta_W = (local_lr / (B * S)) * torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
         delta_W = torch.clamp(delta_W, -0.01, 0.01)
         layer.weight.data.add_(delta_W)
@@ -297,13 +299,15 @@ def step_attn(
             dk = dk[:, -S:, :]
             dv = dv[:, -S:, :]
         
-        wq = q_proj.weight[:, h*head_dim:(h+1)*head_dim]
-        wk = k_proj.weight[:, h*head_dim:(h+1)*head_dim]
-        wv = v_proj.weight[:, h*head_dim:(h+1)*head_dim]
+        # Correctly slice along dim 0 (out_features). Shape becomes [head_dim, E]
+        wq = q_proj.weight[h*head_dim:(h+1)*head_dim, :]
+        wk = k_proj.weight[h*head_dim:(h+1)*head_dim, :]
+        wv = v_proj.weight[h*head_dim:(h+1)*head_dim, :]
         
-        delta_q = torch.einsum('bsh,eh->bse', dq, wq)
-        delta_k = torch.einsum('bsh,eh->bse', dk, wk)
-        delta_v = torch.einsum('bsh,eh->bse', dv, wv)
+        # Adjust einsum to match the new shape: 'he' represents [head_dim, E]
+        delta_q = torch.einsum('bsh,he->bse', dq, wq)
+        delta_k = torch.einsum('bsh,he->bse', dk, wk)
+        delta_v = torch.einsum('bsh,he->bse', dv, wv)
         
         delta_x += delta_q + delta_k + delta_v
             
@@ -321,41 +325,29 @@ def step_attn(
     if requires_update:
         with torch.no_grad():
             for h in range(num_heads):
-                # <-- FIX: Divide by (B * S) to prevent exploding gradients
-                dW_q = torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h]) / (B * S)
-                dW_k = torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h]) / (B * S)
-                dW_v = torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h]) / (B * S)
+                # Swap einsum output to 'de' to get shape [head_dim, E] matching the weight slice
+                dW_q = torch.einsum("btd,bte->de", dE_dQ_raw[:, h], x_norm) / (B * S)
+                dW_k = torch.einsum("btd,bte->de", dE_dK_raw[:, h], x_norm) / (B * S)
+                dW_v = torch.einsum("btd,bte->de", dE_dV[:, h], x_norm) / (B * S)
                 
                 dW_q = torch.clamp(dW_q, -0.01, 0.01)
                 dW_k = torch.clamp(dW_k, -0.01, 0.01)
                 dW_v = torch.clamp(dW_v, -0.01, 0.01)
                 
-                q_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_q
-                k_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_k
-                v_proj.weight.data[:, h*head_dim:(h+1)*head_dim] += local_lr * dW_v
-                if update_bias:
-                    if q_proj.bias is not None:
-                        db_q = dE_dQ_raw[:, h].mean(dim=(0, 1))
-                        db_q = torch.clamp(db_q, -0.01, 0.01)
-                        q_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_q
-                    
-                    if k_proj.bias is not None:
-                        db_k = dE_dK_raw[:, h].mean(dim=(0, 1))
-                        db_k = torch.clamp(db_k, -0.01, 0.01)
-                        k_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_k
-                    
-                    if v_proj.bias is not None:
-                        db_v = dE_dV[:, h].mean(dim=(0, 1))
-                        db_v = torch.clamp(db_v, -0.01, 0.01)
-                        v_proj.bias.data[h*head_dim:(h+1)*head_dim] += local_lr * db_v
+                # Apply updates to dim 0 (out_features)
+                q_proj.weight.data[h*head_dim:(h+1)*head_dim, :] += local_lr * dW_q
+                k_proj.weight.data[h*head_dim:(h+1)*head_dim, :] += local_lr * dW_k
+                v_proj.weight.data[h*head_dim:(h+1)*head_dim, :] += local_lr * dW_v
     new_kv_cache = (K.detach(), V.detach()) if use_cache else None
     return x, mu, bu_err, new_kv_cache
 
 ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    
-    "kld": lambda mu, x: torch.clamp(
-        F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), min=0.0, max=100.0
-    ),
+    # "kld": lambda mu, x: torch.clamp(
+    #     F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), min=0.0, max=100.0
+    # ),
+    "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean")/ mu.size(1),
+    # "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="mean"),
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
@@ -367,7 +359,10 @@ def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t
     device = mu.device
     target = target.to(device)
     error = error.to(device)
+    
     energy = float(energy_fn(mu, target, energy_fn_name).mean().item())
+    # logger = logging.getLogger(__name__)
+    # logger.info(f"(pc_utils.py) step {t+1} for {layer_type} using {energy_fn_name}: {energy:.6f}")
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     
