@@ -39,6 +39,8 @@ def train(model, dataloader, config, global_step, device, logger):
     output_pc_layer = base_model.output.pc_layer
     
     for batch_idx, batch in enumerate(dataloader):
+        # logger = logging.getLogger(__name__)
+        # logger.info(f"  Batch {batch_idx + 1} started")
         input_ids = batch["input_ids"].to(device)
         target_ids = batch["target_ids"].to(device)
 
@@ -66,8 +68,8 @@ def train(model, dataloader, config, global_step, device, logger):
                 module.set_learning_rate(lr)
                 
         global_step += 1
-        if target_ids.max() >= vocab_size:
-            target_ids = torch.clamp(target_ids, max=vocab_size-1)
+        # if target_ids.max() >= vocab_size:
+        #     target_ids = torch.clamp(target_ids, max=vocab_size-1)
             
             
         logits = model(target_ids, input_ids)
@@ -111,8 +113,8 @@ def train(model, dataloader, config, global_step, device, logger):
 
         perplexity = math.exp(ce_loss.item()) if ce_loss.item() < 100 else float("inf")
 
-        # if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 1 == 0:
-        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) == 1 :
+        if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) % 20 == 0:
+        # if (not dist.is_initialized() or dist.get_rank() == 0) and (batch_idx + 1) == 1 :
             if logger:
                 logger.info(f"  Batch {batch_idx + 1}/{len(dataloader)} | Batch Energy: {batch_energy:.4f} | Perplexity: {perplexity:.4f}")
             else:
@@ -224,7 +226,7 @@ def main():
         if rank == 0:
             logger.info(f"Epoch {epoch + 1}/{config.num_epochs}")
 
-        model.train()
+        # model.train()
         train_energy, train_perplexity, global_step = train(
             model, train_loader, config, global_step, device, logger
         )
