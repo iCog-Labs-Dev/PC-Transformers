@@ -6,7 +6,6 @@ from utils.config_utils import load_best_config
 from utils.model_utils import set_seed
 import torch.nn.functional as F
 from data_preparation.dataloader import get_loaders
-from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from utils.device_utils import setup_device
 import argparse
@@ -19,7 +18,7 @@ It takes a prompt, generates new tokens, and prints the prompt, target, and gene
 Usage: torchrun --nproc-per-node=<NUM_GPU> generate_text.py
 
 """
-local_rank, device, use_ddp = setup_device()
+local_rank, device, use_distributed = setup_device()
 
 def generate_text(model, config, input_ids, max_new_tokens, temperature, device = None, use_cache=True):
     model.eval()
@@ -79,7 +78,7 @@ def main():
     parser.add_argument('--flash', action='store_true', help='Enable FlashAttention for attention layers')
     args = parser.parse_args()
 
-    if use_ddp and not dist.is_initialized():
+    if use_distributed and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
     print(f"[Rank {local_rank}] Using device: {device}")
@@ -118,15 +117,17 @@ def main():
     model_path = "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     model = model.to(device)
-    if use_ddp:
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    
+    if use_distributed:
+        for param in model.parameters():
+            dist.broadcast(param.data, src=0)
 
     if not dist.is_initialized() or dist.get_rank() == 0:
         decoded_preds, decoded_targets = text_generation(model, config, device, max_samples=2, use_cache=True)
         # if decoded_preds and decoded_targets and local_rank == 0:
         #     compute_text_metrics(decoded_preds, decoded_targets)
     
-    if use_ddp and dist.is_initialized():
+    if use_distributed and dist.is_initialized():
         dist.barrier()
         dist.destroy_process_group()
 

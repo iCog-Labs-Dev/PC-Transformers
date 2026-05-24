@@ -12,7 +12,6 @@ import torch
 import optuna
 from optuna.storages import JournalStorage, JournalFileStorage
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_device
 
 from training import train
@@ -119,7 +118,7 @@ def define_search_space_phase2(trial, best_params):
         "dropout": trial.suggest_float("dropout", max(0.0, dropout - 0.02), min(0.15, dropout + 0.02)),
     }
 
-def create_model(params, device, use_ddp=False, local_rank=0):
+def create_model(params, device, use_distributed=False, local_rank=0):
     """
     Assembles the model, config, and data for a single trial.
 
@@ -166,23 +165,19 @@ def create_model(params, device, use_ddp=False, local_rank=0):
     model.register_all_lateral_weights() 
     model = model.to(device)
 
-    if use_ddp:
-        model = DDP(
-            model,
-            device_ids=[local_rank],
-            output_device=local_rank,
-            find_unused_parameters=True,
-        )
+    if use_distributed:
+        for param in model.parameters():
+            dist.broadcast(param.data, src=0)
 
     train_loader, valid_loader, _ = get_loaders(
         batch_size=params["batch_size"], 
         block_size=params["block_size"], 
-        distributed=use_ddp
+        distributed=use_distributed
     )
     
     return model, config, train_loader, valid_loader, device
 
-def run_trial_with_params(params, trial_number, device, use_ddp, local_rank):
+def run_trial_with_params(params, trial_number, device, use_distributed, local_rank):
     """Run one training/evaluation trial with given params; returns metrics or instability flag (DDP-aware)."""
     model = None
 
@@ -190,7 +185,7 @@ def run_trial_with_params(params, trial_number, device, use_ddp, local_rank):
         model, config, train_loader, valid_loader, device = create_model(
             params,
             device=device,
-            use_ddp=use_ddp,
+            use_distributed=use_distributed,
             local_rank=local_rank,
         )
 
@@ -216,7 +211,7 @@ def run_trial_with_params(params, trial_number, device, use_ddp, local_rank):
             or train_energy > ENERGY_STABILITY_THRESHOLD
         )
 
-        if use_ddp:
+        if use_distributed:
             unstable_tensor = torch.tensor(int(unstable), device=device)
             dist.all_reduce(unstable_tensor, op=dist.ReduceOp.MAX)
             unstable = bool(unstable_tensor.item())
@@ -235,7 +230,7 @@ def run_trial_with_params(params, trial_number, device, use_ddp, local_rank):
             device=device,
         )
 
-        if use_ddp:
+        if use_distributed:
             metrics = torch.tensor([val_energy, val_ppl], dtype=torch.float32, device=device)
             dist.all_reduce(metrics, op=dist.ReduceOp.SUM)
             metrics /= dist.get_world_size()
@@ -256,7 +251,7 @@ def run_trial_with_params(params, trial_number, device, use_ddp, local_rank):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-def run_phase1_trial(trial, device, use_ddp, local_rank):
+def run_phase1_trial(trial, device, use_distributed, local_rank):
     """
     Phase 1 Trial Execution
     
@@ -273,7 +268,7 @@ def run_phase1_trial(trial, device, use_ddp, local_rank):
     """
     params = define_search_space(trial)
 
-    if use_ddp:
+    if use_distributed:
         broadcast_object({
             "cmd": "trial",
             "trial_number": trial.number,
@@ -286,7 +281,7 @@ def run_phase1_trial(trial, device, use_ddp, local_rank):
         params=params,
         trial_number=trial.number,
         device=device,
-        use_ddp=use_ddp,
+        use_distributed=use_distributed,
         local_rank=local_rank,
     )
 
@@ -311,7 +306,7 @@ def run_phase1_trial(trial, device, use_ddp, local_rank):
 
     return float(result["val_energy"])
 
-def run_phase2_trial(trial, best_params, device, use_ddp, local_rank):
+def run_phase2_trial(trial, best_params, device, use_distributed, local_rank):
     """
     Phase 2 Trial Execution
     
@@ -330,7 +325,7 @@ def run_phase2_trial(trial, best_params, device, use_ddp, local_rank):
     continuous_params = define_search_space_phase2(trial, best_params)
     params = {**best_params, **continuous_params}
     
-    if use_ddp:
+    if use_distributed:
         broadcast_object({
             "cmd": "trial",
             "trial_number": trial.number,
@@ -346,7 +341,7 @@ def run_phase2_trial(trial, best_params, device, use_ddp, local_rank):
         params=params,
         trial_number=trial.number,
         device=device,
-        use_ddp=use_ddp,
+        use_distributed=use_distributed,
         local_rank=local_rank,
     )
 
@@ -370,7 +365,7 @@ def run_phase2_trial(trial, best_params, device, use_ddp, local_rank):
 
     return float(result["val_ppl"])
 
-def ddp_worker_loop(device, use_ddp, local_rank):
+def distributed_worker_loop(device, use_distributed, local_rank):
     """Listen for broadcasted commands and execute trials until a stop signal is received."""
     while True:
         command = broadcast_object(None)
@@ -382,11 +377,11 @@ def ddp_worker_loop(device, use_ddp, local_rank):
             params=command["params"],
             trial_number=command["trial_number"],
             device=device,
-            use_ddp=use_ddp,
+            use_distributed=use_distributed,
             local_rank=local_rank,
         )
 
-def run_tuning_pipeline(device, use_ddp, local_rank):
+def run_tuning_pipeline(device, use_distributed, local_rank):
     """
     Coordinates the two-phase tuning pipeline
 
@@ -421,7 +416,7 @@ def run_tuning_pipeline(device, use_ddp, local_rank):
         lambda trial: run_phase1_trial(
             trial,
             device=device,
-            use_ddp=use_ddp,
+            use_distributed=use_distributed,
             local_rank=local_rank,
         ),
         n_trials=50,
@@ -446,7 +441,7 @@ def run_tuning_pipeline(device, use_ddp, local_rank):
         for key in ['lr', 'inference_lr', 'dropout']:
             print(f"  {key}: {best_params.get(key)}")
     else:
-        if use_ddp:
+        if use_distributed:
             broadcast_object({"cmd": "stop"})
         return None
 
@@ -478,7 +473,7 @@ def run_tuning_pipeline(device, use_ddp, local_rank):
             trial,
             best_params,
             device=device,
-            use_ddp=use_ddp,
+            use_distributed=use_distributed,
             local_rank=local_rank,
         )
 
@@ -524,7 +519,7 @@ def run_tuning_pipeline(device, use_ddp, local_rank):
         
         print(f"\n✓ Best hyperparameters saved to: tuning/best_hyperparameters.txt")
        
-        if use_ddp:
+        if use_distributed:
             broadcast_object({"cmd": "stop"})
 
         return {
@@ -536,21 +531,21 @@ def run_tuning_pipeline(device, use_ddp, local_rank):
             "improvement_pct": ((best_energy_ppl - best_ppl) / best_energy_ppl * 100) if isinstance(best_energy_ppl, float) and best_energy_ppl > 0 else 0
         }
 
-    if use_ddp:
+    if use_distributed:
         broadcast_object({"cmd": "stop"})
     return None
 
 def main():
-    local_rank, device, use_ddp = setup_device()
+    local_rank, device, use_distributed = setup_device()
 
-    if use_ddp and not dist.is_initialized():
+    if use_distributed and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
     rank = get_rank()
 
-    if use_ddp and not is_rank0():
+    if use_distributed and not is_rank0():
         try:
-            ddp_worker_loop(device, use_ddp, local_rank)
+            distributed_worker_loop(device, use_distributed, local_rank)
         finally:
             if dist.is_initialized():
                 dist.destroy_process_group()
@@ -563,7 +558,7 @@ def main():
     print("="*60)
 
     try:
-        results = run_tuning_pipeline(device, use_ddp, local_rank)
+        results = run_tuning_pipeline(device, use_distributed, local_rank)
         if results:
             print(f"\n{'='*60}")
             print("TUNING COMPLETED SUCCESSFULLY")
@@ -585,7 +580,7 @@ def main():
         import traceback
         traceback.print_exc()
     finally:
-        if use_ddp and dist.is_initialized():
+        if use_distributed and dist.is_initialized():
             dist.destroy_process_group()
 
 if __name__ == "__main__":

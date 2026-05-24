@@ -107,10 +107,8 @@ def sync_pc_weights(model):
     if world_size == 1:
         return
 
-    base_model = model.module if hasattr(model, "module") else model
-
     with torch.no_grad():
-        for name, param in base_model.named_parameters():
+        for name, param in model.named_parameters():
             if not torch.is_floating_point(param):
                 continue
 

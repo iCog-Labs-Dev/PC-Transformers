@@ -15,9 +15,9 @@ from model_architecture.pc_t_model import PCTransformer
 
 def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
     """Run controlled experiments varying only n_blocks"""
-    local_rank, device, use_ddp = setup_device()
+    local_rank, device, use_distributed = setup_device()
     
-    if use_ddp and not dist.is_initialized():
+    if use_distributed and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
     
     # Load best config
@@ -59,12 +59,12 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
         
         # Initialize model
         model = PCTransformer(config).to(device)
-        if use_ddp:
-            from torch.nn.parallel import DistributedDataParallel as DDP
-            model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+        if use_distributed:
+            for param in model.parameters():
+                dist.broadcast(param.data, src=0)
         
         # Get data loaders
-        train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_ddp)
+        train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_distributed)
         
         # Train for specified epochs
         train_energies = []
@@ -120,7 +120,7 @@ def benchmark_blocks(block_values=[2, 3, 4, 5, 6], num_epochs=5):
         # Create plots
         plot_blocks_benchmark(results, output_dir)
     
-    if use_ddp:
+    if use_distributed:
         dist.destroy_process_group()
 
 def plot_blocks_benchmark(results, output_dir):

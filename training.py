@@ -15,7 +15,6 @@ from utils.model_utils import set_seed
 from eval import evaluate
 from visualization import plot_metrics
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.device_utils import setup_device, cleanup_memory, sync_pc_weights
 import json
 import logging
@@ -35,8 +34,7 @@ def train(model, dataloader, config, global_step, device, logger):
     total_energy = 0.0
     batch_count = 0
 
-    base_model = model.module if hasattr(model, 'module') else model
-    output_pc_layer = base_model.output.pc_layer
+    output_pc_layer = model.output.pc_layer
         
     for batch_idx, batch in enumerate(dataloader):
         input_ids = batch["input_ids"].to(device)
@@ -121,8 +119,8 @@ def train(model, dataloader, config, global_step, device, logger):
 
 def main():
     set_seed(42)
-    local_rank, device, use_ddp = setup_device()
-    if use_ddp and not dist.is_initialized():
+    local_rank, device, use_distributed = setup_device()
+    if use_distributed and not dist.is_initialized():
         dist.init_process_group(backend="nccl")
 
     rank = dist.get_rank() if dist.is_initialized() else 0
@@ -203,15 +201,11 @@ def main():
     model.register_all_lateral_weights()
     model = model.to(device)
 
-    if use_ddp:
-        model = DDP(
-            model, 
-            device_ids=[local_rank], 
-            output_device=local_rank, 
-            find_unused_parameters=True
-        )
+    if use_distributed:
+        for param in model.parameters():
+            dist.broadcast(param.data, src=0)
 
-    train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_ddp)
+    train_loader, valid_loader, _ = get_loaders(batch_size=config.batch_size, block_size=config.block_size, distributed=use_distributed)
     
     global_step = 0
     train_energies = []
@@ -254,10 +248,9 @@ def main():
 
             if (epoch + 1) % 5 == 0 or epoch == config.num_epochs - 1:
                 os.makedirs("checkpoints", exist_ok=True)
-                # Get the underlying model (handle both DDP and non-DDP cases)
-                model_to_save = model.module if hasattr(model, 'module') else model
+                # Get the underlying model (handle both single and multi-gpu cases)
                 checkpoint = {
-                    'model_state_dict': model_to_save.state_dict(),
+                    'model_state_dict': model.state_dict(),
                 }
                 checkpoint_path = f'checkpoints/model_epoch_{epoch+1}.pt'
                 torch.save(checkpoint, checkpoint_path)
@@ -272,10 +265,9 @@ def main():
         )
 
         os.makedirs("checkpoints", exist_ok=True)
-        # Get the underlying model (handle both DDP and non-DDP cases)
-        model_to_save = model.module if hasattr(model, 'module') else model
+        # Get the underlying model (handle both single and multi-gpu cases)
         final_checkpoint = {
-            'model_state_dict': model_to_save.state_dict(),
+            'model_state_dict': model.state_dict(),
         }
         torch.save(final_checkpoint, 'checkpoints/final_model.pt')
         total_time = time.time() - start_time
@@ -284,7 +276,7 @@ def main():
         logger.info("========== Training completed ==========")
 
     # dist.destroy_process_group()
-    if use_ddp and dist.is_initialized():
+    if use_distributed and dist.is_initialized():
         dist.destroy_process_group()
 
 
