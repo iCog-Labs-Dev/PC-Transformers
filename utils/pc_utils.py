@@ -112,6 +112,7 @@ def step_linear(
     inference_lr: float,
     clamp_value: float,
     energy_fn_name: str,
+    update_bias: bool,
     requires_update: bool,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module], 
@@ -159,13 +160,13 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        update_w = torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
+        update_w = torch.einsum("bsv,bsh->vh", dE_dmu, x_input.detach()) / (B * S)
         if optimizer is not None:
             optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
         else:
             delta_W = torch.clamp(local_lr * update_w, -0.01, 0.01)
             layer.weight.data.add_(delta_W)
-        if layer.bias is not None:
+        if layer.bias is not None and update_bias:
             update_b = dE_dmu.mean(dim=(0, 1))
             if optimizer is not None:
                 optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
