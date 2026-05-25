@@ -32,7 +32,7 @@ def load_best_config():
         "batch_size": 8,
         "num_epochs": 5,
         "internal_energy_fn_name": "pc_e",
-        "output_energy_fn_name": "pc_e",
+        "output_energy_fn_name": "ce",
         "combined_internal_weight": 0.8779955579743048,
         "combined_output_weight": 0.12200444202569516,
         "use_flash_attention": False,
