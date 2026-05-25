@@ -112,11 +112,11 @@ def step_linear(
     inference_lr: float,
     clamp_value: float,
     energy_fn_name: str,
-    update_bias: bool,
     requires_update: bool,
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module], 
     optimizer: Optional[PCOptimizer] = None,
+    update_bias: bool = True,
    ):
     """
     Predictive coding step for linear-like layers.
@@ -160,6 +160,7 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
+        B, S, _ = dE_dmu.shape  #: Extract batch and sequence length
         update_w = torch.einsum("bsv,bsh->vh", dE_dmu, x_input.detach()) / (B * S)
         if optimizer is not None:
             optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
