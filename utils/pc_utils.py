@@ -136,18 +136,15 @@ def step_linear(
         mu = layer_norm(mu)
             
     if layer_type=="linear_output":
-        probs = F.softmax(mu, dim=-1) 
-        bu_err= target - probs
-        dE_dp= bu_err
-        norm_term = (dE_dp * probs).sum(dim=-1, keepdim=True)
-        dE_dmu = probs * (dE_dp - norm_term)
-        error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
+        probs  = F.softmax(mu, dim=-1)
+        bu_err = target - probs   # reconstruction error (probability space)
+        dE_dmu = bu_err   # CE gradient w.r.t. logits
 
     else:    
         bu_err = target - mu 
         dE_dmu = bu_err
-        error_proj= dE_dmu @ layer.weight
-            
+        
+    error_proj= dE_dmu @ layer.weight       
     error = error_proj- td_err if td_err is not None else error_proj  
    
     if lateral_conn is not None:
@@ -374,7 +371,13 @@ def step_attn(
     return x, mu, bu_err, new_kv_cache
 
 ENERGY_FUNCTIONS = {
-    "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    
+    "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,
+    # Added: CE energy for output layer
+    "ce": lambda mu, x: F.cross_entropy(
+        mu.reshape(-1, mu.size(-1)),
+        x.argmax(dim=-1).reshape(-1),
+        reduction="mean",
+    ),   
     "kld": lambda mu, x: torch.clamp(
         F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), min=0.0, max=100.0
     ),
@@ -385,11 +388,17 @@ def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Te
         raise ValueError(f"Unknown energy function: {energy_fn_name}. Choose from {list(ENERGY_FUNCTIONS.keys())}")
     return ENERGY_FUNCTIONS[energy_fn_name](mu, x)
 
-def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t: int, layer_type: str, energy_fn_name: str):
+def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t: int, layer_type: str, energy_fn_name: str, output_energy_fn_name: str = "ce"): # added: CE for output layer
     device = mu.device
     target = target.to(device)
     error = error.to(device)
-    energy = float(energy_fn(mu, target, energy_fn_name).sum().item())
+    # Route output layer to CE, hidden layers to pc_e
+    fn_name = (
+        output_energy_fn_name     # "ce"   — linear_output
+        if layer_type == "linear_output"
+        else energy_fn_name       # "pc_e" — all hidden layers
+    )
+    energy = float(energy_fn(mu, target, fn_name).sum().item())
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     
