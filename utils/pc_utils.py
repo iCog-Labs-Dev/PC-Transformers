@@ -129,11 +129,6 @@ def step_linear(
         x_input = x
         
     mu = layer(x_input)
-        
-    if layer_type == "fc1":
-        mu = F.gelu(mu)
-    elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
-        mu = layer_norm(mu)
             
     if layer_type=="linear_output":
         probs  = F.softmax(mu, dim=-1)
