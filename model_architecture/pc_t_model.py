@@ -37,10 +37,10 @@ class PCTransformer(nn.Module):
         """
         for block in self.blocks:
             block.attn.pc_qkv.register_lateral("attn", block.attn.q.in_features)
-            block.attn.pc_output.register_lateral("linear", block.attn.output.in_features)
+            block.attn.pc_output.register_lateral("linear_attn", block.attn.output.in_features)
             block.mlp.pc_layer1.register_lateral("fc1", block.mlp.fc1.in_features)
-            block.mlp.pc_layer2.register_lateral("linear", block.mlp.fc2.in_features)
-        self.output.pc_layer.register_lateral("linear", self.output.output.in_features)
+            block.mlp.pc_layer2.register_lateral("fc2", block.mlp.fc2.in_features)
+        self.output.pc_layer.register_lateral("linear_output", self.output.output.in_features)
 
         for module in self.modules():
             if hasattr(module, 'W_latents'):
