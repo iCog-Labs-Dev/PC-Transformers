@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import gc
+import logging  
 from typing import Optional, Tuple, Any
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 from utils.optim.optim_utils import PCOptimizer
@@ -116,7 +117,6 @@ def step_linear(
     td_err: Optional[torch.Tensor],
     layer_norm: Optional[nn.Module], 
     optimizer: Optional[PCOptimizer] = None,
-    update_bias: bool = True,
    ):
     """
     Predictive coding step for linear-like layers.
@@ -141,7 +141,6 @@ def step_linear(
         bu_err= target - probs
         dE_dmu = bu_err
         error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
-
     else:    
         bu_err = target - mu 
         dE_dmu = bu_err
@@ -167,13 +166,6 @@ def step_linear(
         else:
             delta_W = torch.clamp(local_lr * update_w, -0.01, 0.01)
             layer.weight.data.add_(delta_W)
-        if layer.bias is not None and update_bias:
-            update_b = dE_dmu.mean(dim=(0, 1))
-            if optimizer is not None:
-                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
-            else:
-                delta_b = torch.clamp(local_lr * update_b, -0.01, 0.01)
-                layer.bias.data.add_(delta_b)
 
     return x, mu, bu_err
 
@@ -199,7 +191,6 @@ def step_attn(
     kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     use_cache: bool = False,
     optimizer: Optional[PCOptimizer] = None,
-    update_bias: bool = True,
     ):
     """
     Predictive coding step for attention using Sine-Cosine RoPE.
@@ -337,10 +328,6 @@ def step_attn(
             update_k = torch.zeros_like(k_proj.weight)
             update_v = torch.zeros_like(v_proj.weight)
 
-            update_b_q = torch.zeros_like(q_proj.bias) if q_proj.bias is not None else None
-            update_b_k = torch.zeros_like(k_proj.bias) if k_proj.bias is not None else None
-            update_b_v = torch.zeros_like(v_proj.bias) if v_proj.bias is not None else None
-
             for h in range(num_heads):
                 start = h * head_dim
                 end = (h + 1) * head_dim
@@ -360,46 +347,21 @@ def step_attn(
                 update_k[start:end, :] = torch.einsum("btd,bte->de", dK_h, x_norm) / (B * S)
                 update_v[start:end, :] = torch.einsum("btd,bte->de", dV_h, x_norm) / (B * S)
 
-                # CHANGED FROM NEW: bias updates are controlled by update_bias.
-                if update_bias:
-                    if update_b_q is not None:
-                        update_b_q[start:end] = dQ_h.mean(dim=(0, 1))
-                    if update_b_k is not None:
-                        update_b_k[start:end] = dK_h.mean(dim=(0, 1))
-                    if update_b_v is not None:
-                        update_b_v[start:end] = dV_h.mean(dim=(0, 1))
-
             if optimizer is not None:
                 optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=0.01)
                 optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=0.01)
                 optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=0.01)
-
-                if update_bias:
-                    if update_b_q is not None:
-                        optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=0.01)
-                    if update_b_k is not None:
-                        optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=0.01)
-                    if update_b_v is not None:
-                        optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=0.01)
             else:
                 q_proj.weight.add_(torch.clamp(local_lr * update_q, -0.01, 0.01))
                 k_proj.weight.add_(torch.clamp(local_lr * update_k, -0.01, 0.01))
                 v_proj.weight.add_(torch.clamp(local_lr * update_v, -0.01, 0.01))
-
-                if update_bias:
-                    if update_b_q is not None:
-                        q_proj.bias.add_(torch.clamp(local_lr * update_b_q, -0.01, 0.01))
-                    if update_b_k is not None:
-                        k_proj.bias.add_(torch.clamp(local_lr * update_b_k, -0.01, 0.01))
-                    if update_b_v is not None:
-                        v_proj.bias.add_(torch.clamp(local_lr * update_b_v, -0.01, 0.01))
 
     new_kv_cache = (K.detach(), V.detach()) if use_cache else None
     return x, mu, bu_err, new_kv_cache
 
 ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    
-    "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean")/ mu.size(1),
+    "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), #/ mu.size(1)
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
@@ -412,6 +374,13 @@ def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t
     target = target.to(device)
     error = error.to(device)
     energy = float(energy_fn(mu, target, energy_fn_name).sum().item())
+    
+    # =======================================
+    # LAYER-BY-LAYER ENERGY LOGGING (for debugging and analysis)
+    # logger = logging.getLogger(__name__)
+    # logger.info(f"(pc_utils.py) step {t+1} for {layer_type} using {energy_fn_name}: {energy:.6f}")
+    # =====================================================================
+    
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     
