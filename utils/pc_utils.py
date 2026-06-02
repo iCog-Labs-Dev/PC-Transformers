@@ -84,7 +84,7 @@ def step_embed(
     mu = mu_word 
     mu_norm = layer_norm(mu) if layer_norm is not None else mu
 
-    error = target - mu_norm
+    error = target - mu
         
     if requires_update: 
         with torch.no_grad():
@@ -121,9 +121,9 @@ def step_linear(
     Predictive coding step for linear-like layers.
     Returns: (updated_x, mu, bu_err)
     """
-    if layer_norm is not None and layer_type == "fc1":
-        x_input = layer_norm(x)
-    elif layer_type == "fc2":
+    # if layer_norm is not None and layer_type == "fc1":
+    #     x_input = layer_norm(x)
+    if layer_type == "fc2":
         x_input = F.gelu(x)
     else:
         x_input = x
@@ -199,7 +199,7 @@ def step_attn(
     assert proj_layers is not None, "proj_layers dict is required for attention"
 
     device = x.device
-    x_norm = layer_norm(x) if layer_norm is not None else x
+    x_norm = x #if layer_norm is not None else x
 
     q_proj = proj_layers["q_proj"]
     k_proj = proj_layers["k_proj"]
