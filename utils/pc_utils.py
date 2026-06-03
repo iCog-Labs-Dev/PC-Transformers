@@ -82,8 +82,7 @@ def step_embed(
          
     mu_word = word_layer(input_ids)
     mu = mu_word 
-    mu_norm = layer_norm(mu) if layer_norm is not None else mu
-
+    
     error = target - mu
         
     if requires_update: 
@@ -366,7 +365,7 @@ def step_attn(
     return x, mu, bu_err, new_kv_cache
 
 ENERGY_FUNCTIONS = {
-    "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,
+    "pc_e": lambda mu, x: ((x - mu) ** 2) * 0.5,
     # Added: CE energy for output layer
     "ce": lambda mu, x: F.cross_entropy(
         mu.reshape(-1, mu.size(-1)),
