@@ -18,7 +18,7 @@ def get_loaders(batch_size: int, block_size: int, distributed: bool = False, str
     """Wrap datasets into PyTorch DataLoaders with batching and shuffling."""
     train_dataset, valid_dataset, test_dataset = get_datasets(
         block_size=block_size,
-        stride=block_size,
+        stride=stride,
     )
     
     if distributed:

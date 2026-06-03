@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Dict, Tuple
-import logging
 
 from utils.pc_utils import (
     x_init,
@@ -39,7 +38,7 @@ class PCLayer(nn.Module):
         self.local_lr = lr
         self.inference_lr = inference_lr
         self.clamp_value = 3.0
-        self.energy_fn_name = energy_fn_name 
+        self.energy_fn_name = energy_fn_name
         self.num_heads = num_heads
         self.n_embed = n_embed
         self.optimizer = PCOptimizer(
@@ -56,7 +55,7 @@ class PCLayer(nn.Module):
         self._x_cache: Dict[str, torch.Tensor] = {}
         self._mu_cache: Dict[str, torch.Tensor] = {}
         self._error_cache: Dict[str, torch.Tensor] = {}
-        self._energy = 0.0
+        self._energy_scalar = 0.0
         self._errors = []
     
     def register_lateral(self, layer_type: str, size: int):
@@ -87,7 +86,7 @@ class PCLayer(nn.Module):
         position_ids: Optional[torch.Tensor] = None,
         rope_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None, 
         flash: bool = False,
-        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  
+        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # ADD THIS
         use_cache: bool = False, 
     ):
         """Perform one predictive coding inference step."""
@@ -97,7 +96,7 @@ class PCLayer(nn.Module):
         if rope_cache is not None:
             self.rope_cache = rope_cache
 
-        # Execute Layer Specific Logic
+
         if layer_type == "embed":
             mu, mu_word, bu_err = step_embed(
                 t,
@@ -154,8 +153,7 @@ class PCLayer(nn.Module):
             # Store cache for retrieval
             if use_cache:
                 self._last_kv_cache = new_kv_cache
-            current_x = x
-            
+        
         else:
             lateral_conn = self.lateral_connections.get(layer_type, None)
             x, mu, bu_err = step_linear(
@@ -172,45 +170,23 @@ class PCLayer(nn.Module):
                 self.energy_fn_name, 
                 requires_update,
                 td_err=td_err, 
-                layer_norm=layer_norm
+                layer_norm=layer_norm,
+                optimizer=self.optimizer,
             )
-            current_x = x
-
-        def safe_norm(tensor):
-            return tensor.norm().item() if isinstance(tensor, torch.Tensor) else 0.0
-
-        td_err_mag = safe_norm(td_err)
-        bu_err_mag = safe_norm(bu_err)
-        x_mag = safe_norm(current_x)
-        
-        # w_mag = 0.0
-        # if isinstance(layer, nn.Module) and hasattr(layer, 'weight') and layer.weight is not None:
-        #     w_mag = layer.weight.norm().item()
-        # elif isinstance(layer, dict) and "word" in layer:
-        #     w_mag = layer["word"].weight.norm().item()
-        # elif proj_layers is not None and "q_proj" in proj_layers:
-        #     w_mag = proj_layers["q_proj"].weight.norm().item()
-
-        # logger = logging.getLogger(__name__)
-        # logger.info(f"    -> [Step {t+1}] {layer_type:<15} | x_mag: {x_mag:.4f} | w_mag: {w_mag:.4f} | td_err: {td_err_mag:.4f} | bu_err: {bu_err_mag:.4f}")
-        # =====================================================================
-
+            
         # cache and stats
         self._mu_cache[layer_type] = mu.detach().clone()  
         if bu_err is not None: 
-            self._error_cache[layer_type] = bu_err.detach().clone()   
+         self._error_cache[layer_type] = bu_err.detach().clone()   
         
         error = target_activity - mu
         energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-        self._energy += energy
+        self._energy_scalar = energy  # overwrite each step; only the last T-step survives
         self._errors.extend(step_errors)
 
         # update x cache
-        self._x_cache[layer_type] = current_x
-        
-        if layer_type == "embed":
-            return current_x
-        return current_x, mu
+        self._x_cache[layer_type] = x
+        return x, mu
 
     def init_x(
         self,
@@ -225,6 +201,9 @@ class PCLayer(nn.Module):
     ):
         """
         Initialize cached activity `x` for the layer type.
+        - embed: stores (x_word, x_pos) from embedding weights
+        - attn: creates random initialization shaped (B, S, H_out)
+        - linear/others: random init sized to layer input dimension
         """
         if layer_type == "embed":
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
@@ -265,18 +244,22 @@ class PCLayer(nn.Module):
         return self._error_cache.get(layer_type, None)
 
     def get_energy(self) -> Optional[float]:
-        """Get the average accumulated energy for the layer over T steps."""
-        return float(self._energy) / self.T if self.T > 0 else 0.0
+        """Get the energy from the final inference step (T) for the layer."""
+        return float(self._energy_scalar)
 
     def clear_energy(self):
         """Clear the stored energy and cached states for the layer."""
-        self._energy = 0.0
+        self._energy_scalar = 0.0
         self._x_cache.clear()
         self._mu_cache.clear()
         
     def get_errors(self) -> list:
-        """Get the list of error values accumulated during inference."""
-        return self._errors
+        """Get the errors from the most recent converged iteration."""
+        # Each step can contribute multiple error entries, so we find the last unique 'step'
+        if not self._errors:
+            return []
+        last_step_val = self._errors[-1]["step"]
+        return [err for err in self._errors if err["step"] == last_step_val]
 
     def clear_errors(self):
         """Clear the stored errors for the layer."""

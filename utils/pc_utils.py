@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import gc
-import logging  
 from typing import Optional, Tuple, Any
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 from utils.optim.optim_utils import PCOptimizer
@@ -139,8 +138,11 @@ def step_linear(
     if layer_type=="linear_output":
         probs = F.softmax(mu, dim=-1) 
         bu_err= target - probs
-        dE_dmu = bu_err
+        dE_dp= bu_err
+        norm_term = (dE_dp * probs).sum(dim=-1, keepdim=True)
+        dE_dmu = probs * (dE_dp - norm_term)
         error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
+
     else:    
         bu_err = target - mu 
         dE_dmu = bu_err
@@ -159,13 +161,19 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        B, S, _ = dE_dmu.shape  #: Extract batch and sequence length
-        update_w = torch.einsum("bsv,bsh->vh", dE_dmu, x_input.detach()) / (B * S)
+        update_w = torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
         if optimizer is not None:
             optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
         else:
             delta_W = torch.clamp(local_lr * update_w, -0.01, 0.01)
             layer.weight.data.add_(delta_W)
+        if layer.bias is not None:
+            update_b = dE_dmu.mean(dim=(0, 1))
+            if optimizer is not None:
+                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
+            else:
+                delta_b = torch.clamp(local_lr * update_b, -0.01, 0.01)
+                layer.bias.data.add_(delta_b)
 
     return x, mu, bu_err
 
@@ -296,15 +304,13 @@ def step_attn(
             dk = dk[:, -S:, :]
             dv = dv[:, -S:, :]
         
-        # Correctly slice along row instead of column
-        wq = q_proj.weight[h*head_dim:(h+1)*head_dim, :]
-        wk = k_proj.weight[h*head_dim:(h+1)*head_dim, :]
-        wv = v_proj.weight[h*head_dim:(h+1)*head_dim, :]
+        wq = q_proj.weight[:, h*head_dim:(h+1)*head_dim]
+        wk = k_proj.weight[:, h*head_dim:(h+1)*head_dim]
+        wv = v_proj.weight[:, h*head_dim:(h+1)*head_dim]
         
-        # Adjust einsum to match the new shape: 'he' represents [head_dim, E]
-        delta_q = torch.einsum('bsh,he->bse', dq, wq)
-        delta_k = torch.einsum('bsh,he->bse', dk, wk)
-        delta_v = torch.einsum('bsh,he->bse', dv, wv)
+        delta_q = torch.einsum('bsh,eh->bse', dq, wq)
+        delta_k = torch.einsum('bsh,eh->bse', dk, wk)
+        delta_v = torch.einsum('bsh,eh->bse', dv, wv)
         
         delta_x += delta_q + delta_k + delta_v
 
@@ -328,40 +334,50 @@ def step_attn(
             update_k = torch.zeros_like(k_proj.weight)
             update_v = torch.zeros_like(v_proj.weight)
 
+            update_b_q = torch.zeros_like(q_proj.bias) if q_proj.bias is not None else None
+            update_b_k = torch.zeros_like(k_proj.bias) if k_proj.bias is not None else None
+            update_b_v = torch.zeros_like(v_proj.bias) if v_proj.bias is not None else None
+
             for h in range(num_heads):
-                start = h * head_dim
-                end = (h + 1) * head_dim
+                update_q[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h]), -0.01, 0.01)
+                update_k[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h]), -0.01, 0.01)
+                update_v[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h]), -0.01, 0.01)
 
-                dQ_h = dE_dQ_raw[:, h]
-                dK_h = dE_dK_raw[:, h]
-                dV_h = dE_dV[:, h]
-
-                # If cache is active, update projections only from current tokens.
-                if dK_h.size(1) > S:
-                    dK_h = dK_h[:, -S:, :]
-                    dV_h = dV_h[:, -S:, :]
-
-                # Fill row blocks [head_dim, E], not column blocks [E, head_dim],
-                # and normalize by B*S.
-                update_q[start:end, :] = torch.einsum("btd,bte->de", dQ_h, x_norm) / (B * S)
-                update_k[start:end, :] = torch.einsum("btd,bte->de", dK_h, x_norm) / (B * S)
-                update_v[start:end, :] = torch.einsum("btd,bte->de", dV_h, x_norm) / (B * S)
+                if update_b_q is not None:
+                    update_b_q[h*head_dim:(h+1)*head_dim] = torch.clamp(dE_dQ_raw[:, h].mean(dim=(0, 1)), -0.01, 0.01)
+                if update_b_k is not None:
+                    update_b_k[h*head_dim:(h+1)*head_dim] = torch.clamp(dE_dK_raw[:, h].mean(dim=(0, 1)), -0.01, 0.01)
+                if update_b_v is not None:
+                    update_b_v[h*head_dim:(h+1)*head_dim] = torch.clamp(dE_dV[:, h].mean(dim=(0, 1)), -0.01, 0.01)
 
             if optimizer is not None:
                 optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=0.01)
                 optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=0.01)
                 optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=0.01)
+                if update_b_q is not None:
+                    optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=0.01)
+                if update_b_k is not None:
+                    optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=0.01)
+                if update_b_v is not None:
+                    optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=0.01)
             else:
-                q_proj.weight.add_(torch.clamp(local_lr * update_q, -0.01, 0.01))
-                k_proj.weight.add_(torch.clamp(local_lr * update_k, -0.01, 0.01))
-                v_proj.weight.add_(torch.clamp(local_lr * update_v, -0.01, 0.01))
-
+                q_proj.weight.data.add_(torch.clamp(local_lr * update_q, -0.01, 0.01))
+                k_proj.weight.data.add_(torch.clamp(local_lr * update_k, -0.01, 0.01))
+                v_proj.weight.data.add_(torch.clamp(local_lr * update_v, -0.01, 0.01))
+                if update_b_q is not None:
+                    q_proj.bias.data.add_(torch.clamp(local_lr * update_b_q, -0.01, 0.01))
+                if update_b_k is not None:
+                    k_proj.bias.data.add_(torch.clamp(local_lr * update_b_k, -0.01, 0.01))
+                if update_b_v is not None:
+                    v_proj.bias.data.add_(torch.clamp(local_lr * update_b_v, -0.01, 0.01))
     new_kv_cache = (K.detach(), V.detach()) if use_cache else None
     return x, mu, bu_err, new_kv_cache
 
 ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    
-    "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), #/ mu.size(1)
+    "kld": lambda mu, x: torch.clamp(
+        F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), min=0.0, max=100.0
+    ),
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
@@ -374,13 +390,6 @@ def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t
     target = target.to(device)
     error = error.to(device)
     energy = float(energy_fn(mu, target, energy_fn_name).sum().item())
-    
-    # =======================================
-    # LAYER-BY-LAYER ENERGY LOGGING (for debugging and analysis)
-    # logger = logging.getLogger(__name__)
-    # logger.info(f"(pc_utils.py) step {t+1} for {layer_type} using {energy_fn_name}: {energy:.6f}")
-    # =====================================================================
-    
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     
