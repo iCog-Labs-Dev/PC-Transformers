@@ -83,8 +83,8 @@ def train(model, dataloader, config, global_step, device, logger):
                 if hasattr(module, 'layer_type') and module.layer_type == 'linear_output':
                     if getattr(module, 'energy_fn_name', None) == "kld":
                         output_energy = energy
-                    else:
-                        internal_energies.append(energy)
+                    # else:
+                    #     internal_energies.append(energy)
                 else:
                     internal_energies.append(energy)
 
