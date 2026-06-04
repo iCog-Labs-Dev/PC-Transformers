@@ -138,11 +138,8 @@ def step_linear(
     if layer_type=="linear_output":
         probs = F.softmax(mu, dim=-1) 
         bu_err= target - probs
-        dE_dp= bu_err
-        norm_term = (dE_dp * probs).sum(dim=-1, keepdim=True)
-        dE_dmu = probs * (dE_dp - norm_term)
-        error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
-
+        dE_dmu = bu_err
+        error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights            
     else:    
         bu_err = target - mu 
         dE_dmu = bu_err
@@ -375,9 +372,7 @@ def step_attn(
 
 ENERGY_FUNCTIONS = {
     "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    
-    "kld": lambda mu, x: torch.clamp(
-        F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), min=0.0, max=100.0
-    ),
+    "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), 
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
