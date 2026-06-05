@@ -302,13 +302,15 @@ def step_attn(
             dk = dk[:, -S:, :]
             dv = dv[:, -S:, :]
         
-        wq = q_proj.weight[:, h*head_dim:(h+1)*head_dim]
-        wk = k_proj.weight[:, h*head_dim:(h+1)*head_dim]
-        wv = v_proj.weight[:, h*head_dim:(h+1)*head_dim]
+        # Correctly slice along dim 0 (out_features). Shape becomes [head_dim, E]
+        wq = q_proj.weight[h*head_dim:(h+1)*head_dim, :]
+        wk = k_proj.weight[h*head_dim:(h+1)*head_dim, :]
+        wv = v_proj.weight[h*head_dim:(h+1)*head_dim, :]
         
-        delta_q = torch.einsum('bsh,eh->bse', dq, wq)
-        delta_k = torch.einsum('bsh,eh->bse', dk, wk)
-        delta_v = torch.einsum('bsh,eh->bse', dv, wv)
+        # Adjust einsum to match the new shape: 'he' represents [head_dim, E]
+        delta_q = torch.einsum('bsh,he->bse', dq, wq)
+        delta_k = torch.einsum('bsh,he->bse', dk, wk)
+        delta_v = torch.einsum('bsh,he->bse', dv, wv)
         
         delta_x += delta_q + delta_k + delta_v
 
@@ -337,9 +339,11 @@ def step_attn(
             update_b_v = torch.zeros_like(v_proj.bias) if v_proj.bias is not None else None
 
             for h in range(num_heads):
-                update_q[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dQ_raw[:, h]), -0.01, 0.01)
-                update_k[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dK_raw[:, h]), -0.01, 0.01)
-                update_v[:, h*head_dim:(h+1)*head_dim] = torch.clamp(torch.einsum("bte,btd->ed", x_norm, dE_dV[:, h]), -0.01, 0.01)
+                # Swap einsum output to 'de' to get shape [head_dim, E] matching the weight slice
+                # Apply updates to dim 0 (out_features)
+                update_q[h*head_dim:(h+1)*head_dim, :] = torch.clamp(torch.einsum("btd,bte->de", dE_dQ_raw[:, h], x_norm), -0.01, 0.01)
+                update_k[h*head_dim:(h+1)*head_dim, :] = torch.clamp(torch.einsum("btd,bte->de", dE_dK_raw[:, h], x_norm), -0.01, 0.01)
+                update_v[h*head_dim:(h+1)*head_dim, :] = torch.clamp(torch.einsum("btd,bte->de", dE_dV[:, h], x_norm), -0.01, 0.01)
 
                 if update_b_q is not None:
                     update_b_q[h*head_dim:(h+1)*head_dim] = torch.clamp(dE_dQ_raw[:, h].mean(dim=(0, 1)), -0.01, 0.01)
