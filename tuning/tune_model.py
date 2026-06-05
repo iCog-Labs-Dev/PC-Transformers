@@ -87,8 +87,8 @@ def define_search_space(trial):
     base_clip = FIXED_PARAMS.get("clip_value", 0.01)
     
     return {
-        "clamp_value": trial.suggest_float("clamp_value", max(0.001, base_clamp * 0.1), min(10.0, base_clamp * 10.0), log=True),
-        "clip_value": trial.suggest_float("clip_value", max(0.0001, base_clip * 0.1), min(1.0, base_clip * 10.0), log=True),
+        "clamp_value": trial.suggest_float("clamp_value", 0.1, 5, log=True),
+        "clip_value": trial.suggest_float("clip_value", 0.01, 0.1, log=True),
     }
 
 def define_search_space_phase2(trial, best_params):
