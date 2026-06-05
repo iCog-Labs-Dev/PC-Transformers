@@ -286,7 +286,7 @@ class PCTransformer(nn.Module):
                 requires_update=should_update_weights,
                 td_err = None,
                 layer={"word": self.embedding.word_embeddings, "pos": self.embedding.position_embeddings},
-                layer_norm= block.ln2,
+                layer_norm= None,
                 proj_layers=None,
                 input_ids=input_ids,
                 position_ids=position_ids,
