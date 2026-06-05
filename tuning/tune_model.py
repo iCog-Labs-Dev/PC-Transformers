@@ -105,8 +105,8 @@ def define_search_space_phase2(trial, best_params):
         "lr": trial.suggest_float("lr", max(1e-6, lr * 0.3), min(1e-3, lr * 3.0), log=True),
         "inference_lr": trial.suggest_float("inference_lr", max(0.01, inference_lr * 0.5), min(0.5, inference_lr * 2.0), log=True), 
         "dropout": trial.suggest_float("dropout", max(0.0, dropout - 0.1), min(0.6, dropout + 0.1)),
-        "clamp_value": trial.suggest_float("clamp_value", max(0.01, clamp_value * 0.5), min(10.0, clamp_value * 2.0), log=True),
-        "clip_value": trial.suggest_float("clip_value", max(0.0001, clip_value * 0.5), min(1.0, clip_value * 2.0), log=True),
+        "clamp_value": clamp_value,  # Keep clamp_value fixed in Phase 2
+        "clip_value": clip_value,    # Keep clip_value fixed in Phase 2
     }
 
 def create_model(params):
