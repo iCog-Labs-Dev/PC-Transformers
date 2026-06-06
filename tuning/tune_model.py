@@ -154,7 +154,7 @@ def create_model(params, device, use_distributed=False, local_rank=0):
         batch_size=params["batch_size"],
         num_epochs=3, 
         internal_energy_fn_name="pc_e", 
-        output_energy_fn_name="pc_e",    
+        output_energy_fn_name="kld",    
         combined_internal_weight=0.7,
         combined_output_weight=0.3,
         use_flash_attention=False,
