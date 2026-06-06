@@ -23,7 +23,7 @@ def load_best_config():
         "warmup_steps": 369,
         "n_embed": 160,
         "dropout": 0.46876145412214615,
-        "T": 2,
+        "T": 26,
         "num_heads": 10,
         "n_blocks": 3,
         "alpha": 0.5,
