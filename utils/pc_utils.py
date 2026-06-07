@@ -154,7 +154,8 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        update_w = torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach())
+        B, S, _ = dE_dmu.shape
+        update_w = torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach()) / (B * S)
         if optimizer is not None:
             optimizer.step_param(layer.weight, update_w, local_lr, clip_value=clip_value)
         else:
