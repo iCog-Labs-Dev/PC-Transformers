@@ -45,6 +45,8 @@ class GPTConfig:
     combined_output_weight: float
     use_flash_attention: bool
     alpha: float
+    clamp_value: float
+    clip_value: float
     optimizer_name: str = "adam"
     output_optimizer_name: str = "adam"
     optimizer_beta1: float = 0.9

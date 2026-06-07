@@ -169,6 +169,8 @@ def main():
         combined_output_weight=best_config["combined_output_weight"],
         use_flash_attention=best_config["use_flash_attention"],
         alpha = best_config["alpha"],
+        clamp_value= best_config["clamp_value"],
+        clip_value = best_config["clip_value"],
         optimizer_name = best_config["optimizer_name"],
         output_optimizer_name = best_config.get("output_optimizer_name", "adam"),
         optimizer_beta1 = best_config["optimizer_beta1"],

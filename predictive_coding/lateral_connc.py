@@ -34,12 +34,12 @@ class LateralConnections(nn.Module):
         
         return delta_x
     
-    def update_weights(self, x: torch.Tensor, optimizer=None, clamp_value: float = None):
+    def update_weights(self, x: torch.Tensor, optimizer=None, clip_value: float = None):
         """Anti-Hebbian weight update for decorrelation. """
         with torch.no_grad():
             anti_hebbian = -torch.einsum("bsh,bsv->hv", x, x)
             if optimizer is not None:
-                optimizer.step_param(self.W_lateral, anti_hebbian, self.local_lr, clamp_value=clamp_value)
+                optimizer.step_param(self.W_lateral, anti_hebbian, self.local_lr, clip_value=clip_value)
             else:
                 self.W_lateral.data.add_(self.local_lr * anti_hebbian)
             self.W_lateral.data = F.normalize(self.W_lateral.data, p=2, dim=1)
