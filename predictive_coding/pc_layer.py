@@ -201,7 +201,7 @@ class PCLayer(nn.Module):
     ):
         """
         Initialize cached activity `x` for the layer type.
-        - embed: stores (x_word, x_pos) from embedding weights
+        - embed: stores (x_word) from embedding weights
         - attn: creates random initialization shaped (B, S, H_out)
         - linear/others: random init sized to layer input dimension
         """
@@ -209,8 +209,7 @@ class PCLayer(nn.Module):
             assert input_ids is not None and position_ids is not None, "Embedding layer requires input_ids and position_ids"
             
             x_word = layer["word"].weight[input_ids] 
-            x_pos = layer["pos"].weight[position_ids] 
-            self._x_cache["embed"] = (x_word, x_pos)
+            self._x_cache["embed"] = (x_word)
             
         elif layer_type == "attn":
             assert proj_layers is not None, "Attention layer requires proj_layers"
