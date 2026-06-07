@@ -380,8 +380,7 @@ ENERGY_FUNCTIONS = {
         x.argmax(dim=-1).reshape(-1),
         reduction="mean",
     ),   
-    "kld": lambda mu, x:
-        F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean")
+    "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean")
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
