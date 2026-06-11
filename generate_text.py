@@ -26,12 +26,11 @@ def generate_text(model, config, max_new_tokens, temperature, device=None, use_c
     input_tensor = torch.tensor(encoded.ids, device=device).unsqueeze(0)
 
 
-    with torch.no_grad():
-        model(input_tensor, input_tensor, use_kv_cache=True)
-
-    current_input = input_tensor[:, -1:]
+    # TODO: restore KV cache for faster generation -- needs the bottom-up init
+    # made cache-aware plus per-token RoPE position (start_pos) threading.
     for _ in range(max_new_tokens):
-        logits = model(current_input, current_input, use_kv_cache=use_cache)
+        with torch.no_grad():
+            logits = model(input_tensor, input_tensor, generate=True)
         logits = logits[:, -1, :] / temperature
         probs = F.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, num_samples=1)
