@@ -179,10 +179,14 @@ class PCLayer(nn.Module):
         if bu_err is not None: 
          self._error_cache[layer_type] = bu_err.detach().clone()   
         
-        error = target_activity - mu
-        energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
-        self._energy_scalar = energy  # overwrite each step; only the last T-step survives
-        self._errors.extend(step_errors)
+
+        # target_activity is None when the output layer is unclamped during
+        # generation; there is no prediction error / energy to record then.
+        if target_activity is not None:
+            error = target_activity - mu
+            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+            self._energy_scalar = energy  # overwrite each step; only the last T-step survives
+            self._errors.extend(step_errors)
 
         # update x cache
         self._x_cache[layer_type] = x
