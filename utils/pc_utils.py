@@ -174,11 +174,18 @@ def step_linear(
         mu = layer_norm(mu)
             
     if layer_type=="linear_output":
-        probs = F.softmax(mu, dim=-1) 
-        bu_err= target - probs
-        dE_dmu = bu_err
-        error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights            
-    else:    
+        if target is None:
+            # Generation: the output layer is unclamped (no target). It settles
+            # purely from the bottom-up error (td_err) from the block below.
+            dE_dmu = torch.zeros_like(mu)
+            error_proj = torch.zeros_like(x)
+            bu_err = dE_dmu
+        else:
+            probs = F.softmax(mu, dim=-1)
+            bu_err= target - probs
+            dE_dmu = bu_err
+            error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
+    else:
         bu_err = target - mu 
         dE_dmu = bu_err
         error_proj= dE_dmu @ layer.weight
