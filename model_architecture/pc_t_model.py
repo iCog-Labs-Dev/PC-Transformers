@@ -30,6 +30,11 @@ class PCTransformer(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_blocks)])
         self.output = OutputLayer(config)
 
+    def reset_rope_cache(self):
+        head_dim = self.config.n_embed // self.config.num_heads
+        seq_len = self.config.block_size
+        self.rope_cache = precompute_freqs_cis_real(head_dim, seq_len)
+
     def register_all_lateral_weights(self):
         """
         Register lateral weights for all predictive coding layers in the model.
@@ -48,7 +53,7 @@ class PCTransformer(nn.Module):
                     if module.W_latents[key] is not None:
                         module.W_latents[key] = module.W_latents[key].to(next(self.parameters()).device)
 
-    def forward(self, target_ids, input_ids, use_kv_cache=False):
+    def forward(self, target_ids, input_ids, use_kv_cache=False, generate=False):
         """
         Forward pass of the PCTransformer model, using device-specific parallelism (CUDA streams or torch.jit.fork).
 
@@ -135,7 +140,7 @@ class PCTransformer(nn.Module):
 
         for t in range(self.config.T):
             # Only update weights on the final time step to prevent destructive learning
-            should_update_weights = (t == self.config.T - 1)
+            should_update_weights = (t == self.config.T - 1) and not generate
 
             # Execute output layer
             td_mlp2 = self.blocks[-1].mlp.pc_layer2.get_td_err("fc2") if t > 0 else None
@@ -143,7 +148,7 @@ class PCTransformer(nn.Module):
                 use_cuda,
                 streams_or_futures,
                 self.output.pc_layer.forward,
-                target_activity=target_logits,
+                target_activity=(None if generate else target_logits),
                 layer_type="linear_output",
                 t=t,
                 T=self.config.T,
