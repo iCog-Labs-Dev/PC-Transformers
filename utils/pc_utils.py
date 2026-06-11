@@ -29,6 +29,44 @@ def precompute_freqs_cis_real(dim: int, end: int, theta: float = 10000.0):
     return cos, sin
 
 
+def extend_rope_cache(cos: torch.Tensor, sin: torch.Tensor, new_len: int, theta: float = 10000.0) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Extend precomputed RoPE cache beyond original length.
+    
+    Args:
+        cos: Original cos cache [orig_len, head_dim]
+        sin: Original sin cache [orig_len, head_dim]
+        new_len: Required total length
+        theta: RoPE theta parameter (default 10000.0)
+        
+    Returns:
+        Extended (cos, sin) tensors of shape [new_len, head_dim]
+    """
+    orig_len = cos.shape[0]
+    if new_len <= orig_len:
+        return cos, sin
+    
+    device = cos.device
+    dtype = cos.dtype
+    head_dim = cos.shape[1]
+    
+    freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device, dtype=dtype) / head_dim))
+    t = torch.arange(orig_len, new_len, device=device, dtype=dtype)
+    freqs = torch.outer(t, freqs)
+    
+    cos_ext = torch.zeros(new_len - orig_len, head_dim, device=device, dtype=dtype)
+    sin_ext = torch.zeros(new_len - orig_len, head_dim, device=device, dtype=dtype)
+    cos_ext[:, 0::2] = freqs.cos()
+    cos_ext[:, 1::2] = freqs.cos()
+    sin_ext[:, 0::2] = freqs.sin()
+    sin_ext[:, 1::2] = freqs.sin()
+    
+    cos_new = torch.cat([cos, cos_ext], dim=0)
+    sin_new = torch.cat([sin, sin_ext], dim=0)
+    
+    return cos_new, sin_new
+
+
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
     """
     Rotates half the hidden dims of the input.
@@ -132,11 +170,18 @@ def step_linear(
     mu = layer(x_input)
             
     if layer_type=="linear_output":
-        probs  = F.softmax(mu, dim=-1)
-        bu_err = target - probs   # reconstruction error (probability space)
-        dE_dmu = bu_err   # CE gradient w.r.t. logits
-
-    else:    
+        if target is None:
+            # Generation: the output layer is unclamped (no target). It settles
+            # purely from the bottom-up error (td_err) from the block below.
+            dE_dmu = torch.zeros_like(mu)
+            error_proj = torch.zeros_like(x)
+            bu_err = dE_dmu
+        else:
+            probs = F.softmax(mu, dim=-1)
+            bu_err= target - probs
+            dE_dmu = bu_err
+            error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
+    else:
         bu_err = target - mu 
         dE_dmu = bu_err
         
@@ -194,10 +239,12 @@ def step_attn(
     kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     use_cache: bool = False,
     optimizer: Optional[PCOptimizer] = None,
+    current_seq_len: int = None,
     ):
     """
     Predictive coding step for attention using Sine-Cosine RoPE.
     - proj_layers must contain 'q_proj','k_proj','v_proj' modules
+    - current_seq_len: total sequence length (including cached K/V) for extending RoPE cache
     """
     assert proj_layers is not None, "proj_layers dict is required for attention"
 
@@ -235,6 +282,13 @@ def step_attn(
         V = torch.cat([V_cached, V_new], dim=2)
     else:
         K, V = K_new, V_new
+
+    total_seq_len = current_seq_len if current_seq_len is not None else K.size(2)
+    
+    if total_seq_len > cos.shape[0]:
+        cos, sin = extend_rope_cache(cos, sin, total_seq_len)
+        cos = cos.to(device)
+        sin = sin.to(device)
 
     causal_mask = torch.tril(
         torch.ones(S, K.size(2), device=device)

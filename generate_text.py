@@ -5,7 +5,6 @@ from utils.model_utils import load_model, decode_ids, compute_text_metrics
 from utils.config_utils import load_best_config
 from utils.model_utils import set_seed
 import torch.nn.functional as F
-from data_preparation.dataloader import get_loaders
 import torch.distributed as dist
 from utils.device_utils import setup_device
 import argparse
@@ -20,49 +19,51 @@ Usage: torchrun --nproc-per-node=<NUM_GPU> generate_text.py
 """
 local_rank, device, use_distributed = setup_device()
 
-def generate_text(model, config, input_ids, max_new_tokens, temperature, device = None, use_cache=True):
+def generate_text(model, config, max_new_tokens, temperature, device=None, use_cache=True, prompt=None, tokenizer=None):
     model.eval()
-    
-    if input_ids is None:
-        start_token = getattr(config, "start_token_id", 0)  
-        input_tensor = torch.tensor([start_token], device=device).unsqueeze(0)
-    else:
-        input_tensor = input_ids.unsqueeze(0).to(device)
 
-    # Clear KV cache at the start
-    if use_cache:
-        for module in model.modules():
-            if hasattr(module, 'clear_kv_cache'):
-                module.clear_kv_cache()
-    
-    generated_tokens = []
-    
-    # Process prompt once, then only feed last token
-    with torch.no_grad():
-        model(input_tensor, input_tensor, use_kv_cache=True)
+    encoded = tokenizer.encode(prompt)
+    input_tensor = torch.tensor(encoded.ids, device=device).unsqueeze(0)
 
-    current_input = input_tensor[:, -1:]  # S=1 always
-    for step in range(max_new_tokens):
-        logits = model(current_input, current_input, use_kv_cache=use_cache)
+
+    # TODO: restore KV cache for faster generation -- needs the bottom-up init
+    # made cache-aware plus per-token RoPE position (start_pos) threading.
+    for _ in range(max_new_tokens):
+        with torch.no_grad():
+            logits = model(input_tensor, input_tensor, generate=True)
         logits = logits[:, -1, :] / temperature
         probs = F.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, num_samples=1)
-        
-        generated_tokens.append(next_token.item())
         input_tensor = torch.cat((input_tensor, next_token), dim=1)
-        
-        if next_token.item() == getattr(config, 'eos_token_id', None):
-            break
-                      
-    return input_tensor[0] 
 
-def text_generation(model, config, device = None,  max_samples=2, max_new_tokens=200, use_cache = True):
+    return input_tensor[0]
+
+def text_generation(model, config, device=None, max_samples=2, max_new_tokens=200, use_cache=True, prompts=None):
     decoded_preds = []
 
     tokenizer = Tokenizer.from_file("data_preparation/tokenizer.json")
     
+    if prompts is None:
+        prompts = ["ROMEO: ", "JULIET: "]
+    
     for sample_idx in range(max_samples):
-        generated_ids = generate_text(model, config, input_ids=None, max_new_tokens=max_new_tokens, temperature=0.7, device=device, use_cache=use_cache)
+        if hasattr(model, 'reset_rope_cache'):
+            model.reset_rope_cache()
+        if hasattr(model, 'modules'):
+            for module in model.modules():
+                if hasattr(module, 'clear_kv_cache'):
+                    module.clear_kv_cache()
+        
+        prompt = prompts[sample_idx] if sample_idx < len(prompts) else None
+        
+        generated_ids = generate_text(
+            model, config,
+            max_new_tokens=max_new_tokens,
+            temperature=0.7, device=device,
+            use_cache=use_cache,
+            prompt=prompt,
+            tokenizer=tokenizer
+        )
         generated_str = decode_ids(tokenizer, generated_ids.tolist(), stop_at_eos=True)
 
         print(f"\n[Sample {sample_idx + 1}]")
@@ -70,7 +71,7 @@ def text_generation(model, config, device = None,  max_samples=2, max_new_tokens
 
         decoded_preds.append(generated_str)
 
-    return decoded_preds
+    return decoded_preds, None
 
 def main():
     set_seed(42)
@@ -84,10 +85,11 @@ def main():
     print(f"[Rank {local_rank}] Using device: {device}")
     
     best_config = load_best_config()
+    max_new_tokens = 200
 
     config = GPTConfig(
         vocab_size = vocab_size,
-        block_size = best_config["block_size"],
+        block_size = best_config["block_size"] + max_new_tokens,
         lr = best_config["peak_learning_rate"],
         inference_lr = best_config["inference_lr"],
         peak_learning_rate = best_config["peak_learning_rate"],
