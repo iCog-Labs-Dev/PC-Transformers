@@ -68,7 +68,7 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
                 else: 
                     internal_energies.append(energy)
 
-        avg_internal_energy = sum(internal_energies) #/ len(internal_energies)
+        avg_internal_energy = sum(internal_energies) 
                 
         if output_energy is not None:
            batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 

@@ -94,7 +94,7 @@ def train(model, dataloader, config, global_step, device, logger):
                 if hasattr(module, "_head_similarity_max"):
                     _ = module._head_similarity_max
 
-        avg_internal_energy = sum(internal_energies) #/ len(internal_energies) if internal_energies else ce_loss.item()
+        avg_internal_energy = sum(internal_energies) 
                 
         if output_energy is not None:
             batch_energy = config.combined_internal_weight * avg_internal_energy + config.combined_output_weight * output_energy 
