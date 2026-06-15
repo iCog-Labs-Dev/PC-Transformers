@@ -1,14 +1,12 @@
+# data_preparation/dataset.py
 import torch
 from pathlib import Path
 from torch.utils.data import Dataset
 
 class EncodedDataset(Dataset):
-
-    """Dataset that loads a tokenized file and builds overlapping sliding-window sequences
-    for next-token prediction.  The tail of the token stream is padded just enough to
-    form one final complete window so no tokens are discarded."""
-    def __init__(self, file_path, block_size, stride=None, pad_token_id=3):
-
+    """Dataset that loads a tokenized file and builds overlapping sliding-window sequences."""
+    
+    def __init__(self, file_path, block_size, stride=None, pad_token_id=3, vocab_size=None):
         if block_size < 1:
             raise ValueError("block_size must be at least 1.")
 
@@ -16,11 +14,31 @@ class EncodedDataset(Dataset):
         self.stride = 1 if stride is None else stride
         if self.stride < 1:
             raise ValueError("stride must be at least 1.")
+        
+        self.pad_token_id = pad_token_id
+        self.vocab_size = vocab_size
 
         if not Path(file_path).exists():
             raise FileNotFoundError(f"Tokenized file not found: {file_path}")
         
         tokens = torch.load(file_path, weights_only=False)
+        
+        # Validate token IDs without clamping
+        min_id = tokens.min().item()
+        max_id = tokens.max().item()
+        
+        print(f"Loading {file_path.name}:")
+        print(f"  Token range: [{min_id}, {max_id}]")
+        
+        if self.vocab_size:
+            print(f"  Expected vocab size: {self.vocab_size}")
+            if max_id >= self.vocab_size:
+                raise ValueError(
+                    f"Token ID {max_id} exceeds vocabulary size {self.vocab_size}\n"
+                    f"Please ensure the model's vocab_size is set to at least {max_id + 1}\n"
+                    f"Current tokenizer: {getattr(self, 'tokenizer_name', 'unknown')}"
+                )
+        
         window_size = block_size + 1
 
         # Guard: if the file has fewer tokens than one window, return an empty dataset
@@ -44,7 +62,7 @@ class EncodedDataset(Dataset):
             if leftover > 0:
                 next_start = last_start + self.stride
                 pad_len    = next_start + window_size - N
-                padding    = torch.full((pad_len,), pad_token_id, dtype=tokens.dtype)
+                padding    = torch.full((pad_len,), self.pad_token_id, dtype=tokens.dtype)
                 tokens     = torch.cat([tokens, padding])
 
             # Overlapping sliding windows — each token appears in multiple sequences,
@@ -60,3 +78,4 @@ class EncodedDataset(Dataset):
         target_ids = seq[1:].clone().detach()
 
         return {"input_ids": input_ids, "target_ids": target_ids}
+    
