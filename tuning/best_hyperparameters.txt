@@ -7,16 +7,16 @@ PHASE 1 - BEST FOR ENERGY:
 Best Energy: 201.866455
 Corresponding PPL: 8839.553909121643
 ----------------------------------------
-n_blocks = 2
+n_blocks = 4
 num_heads = 8
 embed_mult = 16
 n_embed = 128
-T = 12
+T =26
 block_size = 32
 batch_size = 8
-lr = 8.126708046235937e-05
-inference_lr = 0.004414405751849817
-dropout = 0.09457590470830816
+lr = 0.00021047230732519347
+inference_lr = 0.007205529064893821
+dropout = 0.1
 clamp_value = 4.3089764547374
 clip_value = 0.04055016156984663
 
@@ -28,4 +28,4 @@ Best PPL: 1202.416380
 ----------------------------------------
 lr = 0.00021047230732519347
 inference_lr = 0.007205529064893821
-dropout = 0.08894636579501607
+dropout = 0.1
