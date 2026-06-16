@@ -12,22 +12,20 @@ from data_preparation.config import vocab_size
 
 """
 This script generates text using the trained predictive coding transformer model.
-It takes a prompt, generates new tokens, and prints the prompt, target, and generated text.
+It generates new tokens from scratch without a prompt.
 
 Usage: torchrun --nproc-per-node=<NUM_GPU> generate_text.py
 
 """
 local_rank, device, use_distributed = setup_device()
 
-def generate_text(model, config, max_new_tokens, temperature, device=None, use_cache=True, prompt=None, tokenizer=None):
+def generate_text(model, config, max_new_tokens, temperature, device=None, use_cache=True, tokenizer=None):
     model.eval()
+    
+    # Start with just a BOS token or empty sequence
+    # Using a start token (0) as the initial input
+    input_tensor = torch.tensor([[0]], device=device)  # Start with token 0 (often BOS)
 
-    encoded = tokenizer.encode(prompt)
-    input_tensor = torch.tensor(encoded.ids, device=device).unsqueeze(0)
-
-
-    # TODO: restore KV cache for faster generation -- needs the bottom-up init
-    # made cache-aware plus per-token RoPE position (start_pos) threading.
     for _ in range(max_new_tokens):
         with torch.no_grad():
             logits = model(input_tensor, input_tensor, generate=True)
@@ -38,13 +36,10 @@ def generate_text(model, config, max_new_tokens, temperature, device=None, use_c
 
     return input_tensor[0]
 
-def text_generation(model, config, device=None, max_samples=2, max_new_tokens=200, use_cache=True, prompts=None):
+def text_generation(model, config, device=None, max_samples=2, max_new_tokens=100, use_cache=True):
     decoded_preds = []
 
     tokenizer = Tokenizer.from_file("data_preparation/tokenizer.json")
-    
-    if prompts is None:
-        prompts = ["ROMEO: ", "JULIET: "]
     
     for sample_idx in range(max_samples):
         if hasattr(model, 'reset_rope_cache'):
@@ -54,14 +49,11 @@ def text_generation(model, config, device=None, max_samples=2, max_new_tokens=20
                 if hasattr(module, 'clear_kv_cache'):
                     module.clear_kv_cache()
         
-        prompt = prompts[sample_idx] if sample_idx < len(prompts) else None
-        
         generated_ids = generate_text(
             model, config,
             max_new_tokens=max_new_tokens,
             temperature=0.7, device=device,
             use_cache=use_cache,
-            prompt=prompt,
             tokenizer=tokenizer
         )
         generated_str = decode_ids(tokenizer, generated_ids.tolist(), stop_at_eos=True)
@@ -85,7 +77,7 @@ def main():
     print(f"[Rank {local_rank}] Using device: {device}")
     
     best_config = load_best_config()
-    max_new_tokens = 200
+    max_new_tokens = 100
 
     config = GPTConfig(
         vocab_size = vocab_size,
@@ -128,8 +120,6 @@ def main():
 
     if not dist.is_initialized() or dist.get_rank() == 0:
         decoded_preds, decoded_targets = text_generation(model, config, device, max_samples=2, use_cache=True)
-        # if decoded_preds and decoded_targets and local_rank == 0:
-        #     compute_text_metrics(decoded_preds, decoded_targets)
     
     if use_distributed and dist.is_initialized():
         dist.barrier()

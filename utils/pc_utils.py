@@ -8,7 +8,7 @@ from utils.optim.optim_utils import PCOptimizer
     
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
-    return torch.randn(batch_size, seq_len, embedding_size, device = device)
+    return torch.zeros(batch_size, seq_len, embedding_size, device = device)
 
 def precompute_freqs_cis_real(dim: int, end: int, theta: float = 10000.0):
     """

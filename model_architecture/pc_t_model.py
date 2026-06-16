@@ -89,54 +89,62 @@ class PCTransformer(nn.Module):
             input_ids=input_ids,
             position_ids=position_ids,
         )
-
-        E = self.config.n_embed
-
-        # Sequential Bottom-Up Initialization (replaces random noise)
-        with torch.no_grad():
-            # Start with actual word embeddings
-            current_x = self.embedding.word_embeddings(input_ids)
-            
-            for idx, block in enumerate(self.blocks):
-                # --- ATTN QKV ---
-                block.attn.pc_qkv._x_cache["attn"] = current_x.detach().clone()
-                x_norm1 = block.ln2(current_x) 
-                
-                # Reshaped correctly to match step_attn dimensions [B, num_heads, S, head_dim]
-                Q = block.attn.q(x_norm1).view(B, block.attn.num_heads, S, block.attn.head_dim)
-                K = block.attn.k(x_norm1).view(B, block.attn.num_heads, S, block.attn.head_dim)
-                V = block.attn.v(x_norm1).view(B, block.attn.num_heads, S, block.attn.head_dim)
-                
-                # Apply RoPE and Attention
-                cos, sin = self.rope_cache
-                Q, K = apply_rotary_emb(Q, K, cos[:S].to(device), sin[:S].to(device))
-                causal_mask = torch.tril(torch.ones(S, K.size(2), device=device)).unsqueeze(0).unsqueeze(0)
-                mu_heads, _, _ = apply_standard_attention(Q, K, V, mask=causal_mask)
-                current_x = mu_heads.transpose(1, 2).contiguous().view(B, S, E)
-                
-                # --- ATTN OUTPUT ---
-                block.attn.pc_output._x_cache["linear_attn"] = current_x.detach().clone()
-                current_x = block.attn.output(current_x)
-                current_x = block.ln1(current_x) 
-                
-                # --- FC1 ---
-                block.mlp.pc_layer1._x_cache["fc1"] = current_x.detach().clone()
-                x_input_fc1 = block.ln1(current_x) 
-                current_x = F.gelu(block.mlp.fc1(x_input_fc1))
-                
-                # --- FC2 ---
-                block.mlp.pc_layer2._x_cache["fc2"] = current_x.detach().clone()
-                x_input_fc2 = F.gelu(current_x)
-                current_x = block.mlp.fc2(x_input_fc2)
-                
-                if idx < len(self.blocks) - 1:
-                    current_x = self.blocks[idx + 1].ln2(current_x)
-            
-            # --- LINEAR OUTPUT ---
-            self.output.pc_layer._x_cache["linear_output"] = current_x.detach().clone()
+        for block in self.blocks:
+            block.attn.pc_qkv.init_x(
+                batch_size=B,
+                seq_len=S,
+                layer_type="attn",
+                device = device,
+                layer = None,
+                proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
+                input_ids = None,
+                position_ids = None,
+            )
+            block.attn.pc_output.init_x(
+                batch_size=B,
+                seq_len=S,
+                layer_type="linear_attn",
+                device=device,
+                layer=block.attn.output,
+                proj_layers= None, 
+                input_ids = None,
+                position_ids = None,
+            )
+            block.mlp.pc_layer1.init_x(
+                batch_size=B,
+                seq_len=S,
+                layer_type="fc1",
+                device=device,
+                layer=block.mlp.fc1,
+                proj_layers= None, 
+                input_ids = None,
+                position_ids = None,
+            )
+            block.mlp.pc_layer2.init_x(
+                batch_size=B,
+                seq_len=S,
+                layer_type="fc2",
+                device=device,
+                layer=block.mlp.fc2,
+                proj_layers= None, 
+                input_ids = None,
+                position_ids = None,
+            )
+        self.output.pc_layer.init_x(
+            batch_size=B,
+            seq_len=S,
+            layer_type="linear_output",
+            device=device,
+            layer=self.output.output,
+            proj_layers= None, 
+            input_ids = None,
+            position_ids = None,
+        )
 
         # Initialize streams or futures for parallel execution
         use_cuda, streams_or_futures = create_streams_or_futures(device, len(self.blocks) * 4 + 2)
+
+        E = self.config.n_embed
 
         for t in range(self.config.T):
             # Only update weights on the final time step to prevent destructive learning
@@ -172,9 +180,9 @@ class PCTransformer(nn.Module):
                     else self.output.pc_layer.get_x("linear_output")
                 )
                 
-                layer_norm2 = (block.ln2
-                   if idx < len(self.blocks) - 1
-                    else None)
+                # layer_norm2 = (block.ln2
+                #    if idx < len(self.blocks) - 1
+                #     else None)
                 td_mlp1 = block.mlp.pc_layer1.get_td_err("fc1") if t > 0 else None
 
                 # Execute MLP layer 2
@@ -189,7 +197,7 @@ class PCTransformer(nn.Module):
                     requires_update=should_update_weights,
                     td_err= td_mlp1,
                     layer=block.mlp.fc2,
-                    layer_norm=layer_norm2,
+                    layer_norm=None,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -210,7 +218,7 @@ class PCTransformer(nn.Module):
                     requires_update=should_update_weights,
                     td_err= td_attn_op,
                     layer=block.mlp.fc1,
-                    layer_norm=block.ln1, 
+                    layer_norm=None, 
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -238,7 +246,7 @@ class PCTransformer(nn.Module):
                     requires_update=should_update_weights,
                     td_err= td_attn_qkv,
                     layer=block.attn.output, 
-                    layer_norm=block.ln1,
+                    layer_norm=None,
                     proj_layers=None,
                     input_ids=None,
                     position_ids=None,
@@ -258,7 +266,7 @@ class PCTransformer(nn.Module):
                     requires_update=should_update_weights,
                     td_err= td_embed,
                     layer = None,
-                    layer_norm=block.ln2,
+                    layer_norm=None,
                     proj_layers={"q_proj": block.attn.q, "k_proj": block.attn.k, "v_proj": block.attn.v},
                     input_ids=None,
                     position_ids=None,
