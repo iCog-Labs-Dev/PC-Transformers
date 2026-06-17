@@ -77,7 +77,7 @@ def main():
     print(f"[Rank {local_rank}] Using device: {device}")
     
     best_config = load_best_config()
-    max_new_tokens = 100
+    max_new_tokens = 200
 
     config = GPTConfig(
         vocab_size = vocab_size,
