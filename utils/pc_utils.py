@@ -107,6 +107,7 @@ def step_embed(
     input_ids: torch.Tensor,
     local_lr: float,
     clamp_value: float,
+    clip_value: float,
     energy_fn_name: str,
     requires_update: bool,
     layer_norm: Optional[nn.Module] = None,
@@ -120,9 +121,8 @@ def step_embed(
          
     mu_word = word_layer(input_ids)
     mu = mu_word 
-    mu_norm = layer_norm(mu) if layer_norm is not None else mu
-
-    error = target - mu_norm
+    
+    error = target - mu
         
     if requires_update: 
         with torch.no_grad():
@@ -131,7 +131,7 @@ def step_embed(
             if optimizer is not None:
                 update_word = torch.zeros_like(word_layer.weight)
                 update_word.index_add_(0, flat_input_ids, flat_update)
-                optimizer.step_param(word_layer.weight, update_word, local_lr, clamp_value=0.01)
+                optimizer.step_param(word_layer.weight, update_word, local_lr, clip_value=clip_value)
             else:
                 delta = torch.clamp(local_lr * flat_update, -0.01, 0.01)
                 word_layer.weight.data.index_add_(0, flat_input_ids, delta)
@@ -149,6 +149,7 @@ def step_linear(
     local_lr: float,
     inference_lr: float,
     clamp_value: float,
+    clip_value: float,
     energy_fn_name: str,
     requires_update: bool,
     td_err: Optional[torch.Tensor],
@@ -159,19 +160,14 @@ def step_linear(
     Predictive coding step for linear-like layers.
     Returns: (updated_x, mu, bu_err)
     """
-    if layer_norm is not None and layer_type == "fc1":
-        x_input = layer_norm(x)
-    elif layer_type == "fc2":
+    # if layer_norm is not None and layer_type == "fc1":
+    #     x_input = layer_norm(x)
+    if layer_type == "fc2":
         x_input = F.gelu(x)
     else:
         x_input = x
         
     mu = layer(x_input)
-        
-    if layer_type == "fc1":
-        mu = F.gelu(mu)
-    elif layer_norm is not None and layer_type in ["linear_attn", "fc2"]:
-        mu = layer_norm(mu)
             
     if layer_type=="linear_output":
         if target is None:
@@ -188,14 +184,14 @@ def step_linear(
     else:
         bu_err = target - mu 
         dE_dmu = bu_err
-        error_proj= dE_dmu @ layer.weight
-            
+        
+    error_proj= dE_dmu @ layer.weight       
     error = error_proj- td_err if td_err is not None else error_proj  
    
     if lateral_conn is not None:
         x = x + inference_lr * lateral_conn.forward(x, error)
         if requires_update:
-            lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=0.01)
+            lateral_conn.update_weights(x.detach(), optimizer=optimizer, clip_value=clip_value)
     else:
         x = x + inference_lr * error 
 
@@ -203,17 +199,17 @@ def step_linear(
     
     # parameter updates for the layer
     if requires_update:
-        B, S, _ = dE_dmu.shape  #: Extract batch and sequence length
+        B, S, _ = dE_dmu.shape
         update_w = torch.einsum("bsv, bsh -> vh", dE_dmu, x_input.detach()) / (B * S)
         if optimizer is not None:
-            optimizer.step_param(layer.weight, update_w, local_lr, clamp_value=0.01)
+            optimizer.step_param(layer.weight, update_w, local_lr, clip_value=clip_value)
         else:
             delta_W = torch.clamp(local_lr * update_w, -0.01, 0.01)
             layer.weight.data.add_(delta_W)
         if layer.bias is not None:
             update_b = dE_dmu.mean(dim=(0, 1))
             if optimizer is not None:
-                optimizer.step_param(layer.bias, update_b, local_lr, clamp_value=0.01)
+                optimizer.step_param(layer.bias, update_b, local_lr, clip_value=clip_value)
             else:
                 delta_b = torch.clamp(local_lr * update_b, -0.01, 0.01)
                 layer.bias.data.add_(delta_b)
@@ -231,6 +227,7 @@ def step_attn(
     local_lr: float,
     inference_lr: float,
     clamp_value: float,
+    clip_value: float,
     energy_fn_name: str,
     requires_update: bool,
     num_heads: int,
@@ -252,7 +249,7 @@ def step_attn(
     assert proj_layers is not None, "proj_layers dict is required for attention"
 
     device = x.device
-    x_norm = layer_norm(x) if layer_norm is not None else x
+    x_norm = x #if layer_norm is not None else x
 
     q_proj = proj_layers["q_proj"]
     k_proj = proj_layers["k_proj"]
@@ -376,7 +373,7 @@ def step_attn(
         x = x + inference_lr * delta_x
         
         if requires_update:
-             lateral_conn.update_weights(x.detach(), optimizer=optimizer, clamp_value=clamp_value)
+             lateral_conn.update_weights(x.detach(), optimizer=optimizer, clip_value=clip_value)
     else:
         x = x + inference_lr * delta_x
 
@@ -407,15 +404,15 @@ def step_attn(
                     update_b_v[h*head_dim:(h+1)*head_dim] = torch.clamp(dE_dV[:, h].mean(dim=(0, 1)), -0.01, 0.01)
 
             if optimizer is not None:
-                optimizer.step_param(q_proj.weight, update_q, local_lr, clamp_value=0.01)
-                optimizer.step_param(k_proj.weight, update_k, local_lr, clamp_value=0.01)
-                optimizer.step_param(v_proj.weight, update_v, local_lr, clamp_value=0.01)
+                optimizer.step_param(q_proj.weight, update_q, local_lr, clip_value=clip_value)
+                optimizer.step_param(k_proj.weight, update_k, local_lr, clip_value=clip_value)
+                optimizer.step_param(v_proj.weight, update_v, local_lr, clip_value=clip_value)
                 if update_b_q is not None:
-                    optimizer.step_param(q_proj.bias, update_b_q, local_lr, clamp_value=0.01)
+                    optimizer.step_param(q_proj.bias, update_b_q, local_lr, clip_value=clip_value)
                 if update_b_k is not None:
-                    optimizer.step_param(k_proj.bias, update_b_k, local_lr, clamp_value=0.01)
+                    optimizer.step_param(k_proj.bias, update_b_k, local_lr, clip_value=clip_value)
                 if update_b_v is not None:
-                    optimizer.step_param(v_proj.bias, update_b_v, local_lr, clamp_value=0.01)
+                    optimizer.step_param(v_proj.bias, update_b_v, local_lr, clip_value=clip_value)
             else:
                 q_proj.weight.data.add_(torch.clamp(local_lr * update_q, -0.01, 0.01))
                 k_proj.weight.data.add_(torch.clamp(local_lr * update_k, -0.01, 0.01))
@@ -430,8 +427,14 @@ def step_attn(
     return x, mu, bu_err, new_kv_cache
 
 ENERGY_FUNCTIONS = {
-    "pc_e": lambda mu, x: ((mu - x) ** 2) * 0.5,    
-    "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean"), 
+    "pc_e": lambda mu, x: ((x - mu) ** 2) * 0.5,
+    # Added: CE energy for output layer
+    "ce": lambda mu, x: F.cross_entropy(
+        mu.reshape(-1, mu.size(-1)),
+        x.argmax(dim=-1).reshape(-1),
+        reduction="mean",
+    ),   
+    "kld": lambda mu, x: F.kl_div(mu.log_softmax(dim=-1), x, reduction="batchmean")
 }
 
 def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Tensor:
@@ -439,11 +442,17 @@ def energy_fn(mu: torch.Tensor, x: torch.Tensor,energy_fn_name: str) -> torch.Te
         raise ValueError(f"Unknown energy function: {energy_fn_name}. Choose from {list(ENERGY_FUNCTIONS.keys())}")
     return ENERGY_FUNCTIONS[energy_fn_name](mu, x)
 
-def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t: int, layer_type: str, energy_fn_name: str):
+def finalize_step(mu: torch.Tensor, target: torch.Tensor, error: torch.Tensor, t: int, layer_type: str, energy_fn_name: str, output_energy_fn_name: str = "ce"): # added: CE for output layer
     device = mu.device
     target = target.to(device)
     error = error.to(device)
-    energy = float(energy_fn(mu, target, energy_fn_name).sum().item())
+    # Route output layer to CE, hidden layers to pc_e
+    fn_name = (
+        output_energy_fn_name     # "ce"   — linear_output
+        if layer_type == "linear_output"
+        else energy_fn_name       # "pc_e" — all hidden layers
+    )
+    energy = float(energy_fn(mu, target, fn_name).sum().item())
     errors = [{"step": t, "type": layer_type, "error": error.mean().item()}]
     return energy, errors
     

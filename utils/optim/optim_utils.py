@@ -93,7 +93,7 @@ class PCOptimizer:
         param: torch.Tensor,
         update: torch.Tensor,
         lr: float,
-        clamp_value: Optional[float] = None,
+        clip_value: Optional[float] = None,
     ) -> None:
         """Apply a single optimizer step to a parameter tensor."""
         if update is None:
@@ -137,8 +137,8 @@ class PCOptimizer:
             new_state, new_params = step_fn(state, [param], [update])
             new_param = new_params[0]
             delta = new_param - param
-            if clamp_value is not None:
-                delta = torch.clamp(delta, -abs(clamp_value), abs(clamp_value))
+            if clip_value is not None:
+                delta = torch.clip(delta, -abs(clip_value), abs(clip_value))
                 new_param = param + delta
             param.data.copy_(new_param)
 

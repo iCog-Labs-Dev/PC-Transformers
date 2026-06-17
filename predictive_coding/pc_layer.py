@@ -11,6 +11,8 @@ from utils.pc_utils import (
 )
 from utils.optim.optim_utils import PCOptimizer
 from predictive_coding.lateral_connc import LateralConnections
+from utils.config_utils import load_best_config
+
 
 class PCLayer(nn.Module):
     """
@@ -23,6 +25,8 @@ class PCLayer(nn.Module):
         lr: float,
         inference_lr: float,
         energy_fn_name: str,
+        # Added output_energy_fn_name
+        output_energy_fn_name: str = "ce",
         num_heads: Optional[int] = None,
         n_embed: Optional[int] = None,
         optimizer_name: str = "adam",
@@ -33,12 +37,16 @@ class PCLayer(nn.Module):
         optimizer_weight_decay: float = 0.01,
     ):
         super().__init__()
+        best_config = load_best_config()
         self.rope_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
         self.T = T
         self.local_lr = lr
         self.inference_lr = inference_lr
-        self.clamp_value = 3.0
+        self.clamp_value = best_config["clamp_value"]
+        self.clip_value = best_config["clip_value"]
         self.energy_fn_name = energy_fn_name
+        # Store output energy fn name separately
+        self.output_energy_fn_name = output_energy_fn_name    # "ce"   — output layer
         self.num_heads = num_heads
         self.n_embed = n_embed
         self.optimizer = PCOptimizer(
@@ -107,6 +115,7 @@ class PCLayer(nn.Module):
                 input_ids,
                 self.local_lr,
                 self.clamp_value,
+                self.clip_value,
                 self.energy_fn_name,
                 requires_update,
                 layer_norm=layer_norm,
@@ -120,7 +129,7 @@ class PCLayer(nn.Module):
 
             # compute energy
             error = target_activity - mu
-            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name)
+            energy, step_errors = finalize_step(mu, target_activity, error, t, layer_type, self.energy_fn_name, self.output_energy_fn_name)# output_energy_fn_name passed for consistent signature
             self._energy_scalar = energy  # overwrite each step; only the last T-step survives
             self._errors.extend(step_errors)
             return mu_word
@@ -138,6 +147,7 @@ class PCLayer(nn.Module):
                 self.local_lr,
                 self.inference_lr,
                 self.clamp_value,
+                self.clip_value,
                 self.energy_fn_name,
                 requires_update,
                 self.num_heads,
@@ -167,6 +177,7 @@ class PCLayer(nn.Module):
                 self.local_lr, 
                 self.inference_lr,
                 self.clamp_value, 
+                self.clip_value,
                 self.energy_fn_name, 
                 requires_update,
                 td_err=td_err, 

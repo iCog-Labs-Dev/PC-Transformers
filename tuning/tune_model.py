@@ -88,6 +88,8 @@ def define_search_space(trial):
         "lr": trial.suggest_float("lr", 1e-5, 6e-5, log=True),
         "inference_lr": trial.suggest_float("inference_lr", 0.05, 0.20, log=True),
         "dropout": trial.suggest_float("dropout", 0.0, 0.1),
+        "clamp_value": trial.suggest_float("clamp_value", 0.1, 5, log=True),
+        "clip_value": trial.suggest_float("clip_value", 0.01, 0.1, log=True),
     }
 
 def define_search_space_phase2(trial, best_params):
@@ -159,6 +161,8 @@ def create_model(params, device, use_distributed=False, local_rank=0):
         combined_output_weight=0.3,
         use_flash_attention=False,
         alpha=0.5,
+        clamp_value = params["clamp_value"],
+        clip_value = params["clip_value"],
     )
 
     model = PCTransformer(config)
