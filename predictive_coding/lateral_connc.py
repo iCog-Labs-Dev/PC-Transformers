@@ -14,9 +14,9 @@ class LateralConnections(nn.Module):
         self.inference_lr = inference_lr
         
         # Initialize lateral weight matrix
-        W = torch.empty(size, size)
-        nn.init.xavier_uniform_(W)
-        self.W_lateral = nn.Parameter(W)
+        # W = torch.empty(size, size)
+        # nn.init.xavier_uniform_(W)
+        # self.W_lateral = nn.Parameter(W)
     
     def forward(self, x: torch.Tensor, error: torch.Tensor) -> torch.Tensor:
         """

@@ -135,7 +135,7 @@ class PCLayer(nn.Module):
             return mu_word
         
         elif layer_type == "attn":
-            lateral_conn = self.lateral_connections.get(layer_type, None)
+            lateral_conn = None#self.lateral_connections.get(layer_type, None)
             x, mu, bu_err, new_kv_cache = step_attn(
                 t,
                 T,
@@ -165,7 +165,7 @@ class PCLayer(nn.Module):
                 self._last_kv_cache = new_kv_cache
         
         else:
-            lateral_conn = self.lateral_connections.get(layer_type, None)
+            lateral_conn = None #self.lateral_connections.get(layer_type, None)
             x, mu, bu_err = step_linear(
                 t,
                 T,
