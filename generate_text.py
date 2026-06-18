@@ -52,7 +52,7 @@ def text_generation(model, config, device=None, max_samples=2, max_new_tokens=10
         generated_ids = generate_text(
             model, config,
             max_new_tokens=max_new_tokens,
-            temperature=0.7, device=device,
+            temperature=0.8, device=device,
             use_cache=use_cache,
             tokenizer=tokenizer
         )
