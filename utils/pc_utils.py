@@ -5,7 +5,7 @@ import gc
 from typing import Optional, Tuple, Any
 from utils.attention_utils import apply_flash_attention, apply_standard_attention
 from utils.optim.optim_utils import PCOptimizer
-    
+from utils.actfx_utils import d_gelu    
 def x_init(batch_size: int, seq_len: int, embedding_size: int, device: torch.device = None) -> torch.Tensor:
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     return torch.zeros(batch_size, seq_len, embedding_size, device = device)
@@ -181,11 +181,15 @@ def step_linear(
             bu_err= target - probs
             dE_dmu = bu_err
             error_proj= dE_dmu @ layer.weight     # project bottom-up error through weights
+    elif layer_type=="fc2":
+        bu_err = target - mu 
+        dE_dmu = bu_err
+        error_proj = bu_err @ layer.weight  # [B, S, 128] @ [128, 512] → [B, S, 512] ✓
+        error_proj = error_proj * d_gelu(x)
     else:
         bu_err = target - mu 
         dE_dmu = bu_err
-        
-    error_proj= dE_dmu @ layer.weight       
+        error_proj= dE_dmu @ layer.weight       
     error = error_proj- td_err if td_err is not None else error_proj  
    
     if lateral_conn is not None:
