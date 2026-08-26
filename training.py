@@ -214,7 +214,7 @@ def main():
     val_energies = []
     train_perplexities = [] 
     val_perplexities = []
-    best_val_energy = float("inf")
+    best_val_perplexity = float("inf")
 
     start_time = time.time()
     if rank == 0:
@@ -259,8 +259,8 @@ def main():
                 torch.save(checkpoint, checkpoint_path)
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
 
-            if val_energy < best_val_energy:
-                best_val_energy = val_energy
+            if val_perplexity < best_val_perplexity:
+                best_val_perplexity = val_perplexity
                 os.makedirs("checkpoints", exist_ok=True)
                 torch.save({'model_state_dict': model.state_dict()}, 'checkpoints/best_model.pt')
                 logger.info(f"New best validation energy ({val_energy:.4f}) at epoch {epoch + 1} -- saved checkpoints/best_model.pt")
