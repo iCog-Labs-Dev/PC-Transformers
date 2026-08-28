@@ -1,4 +1,5 @@
 import time
+import os
 import math
 import torch
 import math
@@ -47,7 +48,7 @@ def evaluate(model, config, dataloader, max_batches=None, device = None):
         ce_loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             targets.view(-1),
-            ignore_index=0,
+            ignore_index=3,  # 3 == [PAD] token ID
         )
         total_ce_loss += ce_loss.item()
 
@@ -135,7 +136,7 @@ def main():
         optimizer_weight_decay = best_config.get("optimizer_weight_decay", 0.1),
     )
   
-    model_path = "checkpoints/final_model.pt"
+    model_path = "checkpoints/best_model.pt" if os.path.exists("checkpoints/best_model.pt") else "checkpoints/final_model.pt"
     model = load_model(model_path, config)
     model = model.to(device)
     if use_distributed:
